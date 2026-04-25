@@ -47,6 +47,19 @@ Last updated: 2026-04-25
 - Attachment pipeline beyond text embedding and metadata fallback.
 - Richer thread management for multiple Strategist instances.
 
+## Context Memory
+
+- Added architecture policy on 2026-04-25:
+  - `ADR-016` defines host-owned Context Memory Compaction
+  - raw chat transcripts remain append-only and recoverable
+  - compact state must preserve decisions, preferences, facts, open tasks, artifacts, risks, and recent turns
+  - compaction must be source-linked, auditable, and provider-independent
+  - provider-native compaction and prompt caching are optimizations, not memory authority
+- Replace the current visual-only chat context pill with provider-aware context budget tracking.
+- Persist raw chat transcript separately from structured compact state.
+- Add `Compact now` as a chat action with visible `Compacting...` state.
+- Ensure chat branching copies compact state and source references, not only visible messages.
+
 ## Living Archive
 
 - Completed on 2026-04-23:
@@ -111,6 +124,13 @@ Last updated: 2026-04-25
 
 ## Add-on Platform
 
+- Added architecture policy on 2026-04-25:
+  - `ADR-015` defines Delegation Packets as the source of truth for delegated tasks
+  - `TASK.md` is now an interoperability artifact generated from structured delegation state
+  - Augmentor is defined as the executive interface, not default worker
+  - Engineer is defined as the repair specialist with audited stronger tools
+  - Obsidian, Browser, OpenCode, Hermes, and OpenClaw are the first add-on catalog targets
+  - LangGraph is a candidate orchestration backend for durable delegated workflows, while Mangle/Shield-style checks remain deterministic policy enforcement
 - Build add-on launcher UX from `docs/product/UX-001-resonantos-app-shell.md`.
 - Add center-workspace app opening state for installed add-ons.
 - Add workspace renderers for add-on runtime types:

@@ -34,6 +34,12 @@ This folder is the documentation entrypoint for the current codebase.
   - Human Knowledge, External Knowledge, AI Memory, Mixed Library staging, and canonical import rules
 - [architecture/ADR-014-system-architecture-memory.md](./architecture/ADR-014-system-architecture-memory.md)
   - host-owned ResonantOS architecture memory available before user knowledge intake
+- [architecture/ADR-015-delegation-fabric-addon-catalog-native-tools.md](./architecture/ADR-015-delegation-fabric-addon-catalog-native-tools.md)
+  - Delegation Packets, native tool fabric, initial add-on catalog, and LangGraph/Mangle policy split
+- [architecture/ADR-016-context-memory-compaction.md](./architecture/ADR-016-context-memory-compaction.md)
+  - host-owned context compaction, raw transcript preservation, structured compact state, and provider-aware context budgets
+- [working/SESSION_CONTEXT_2026-04-25.md](./working/SESSION_CONTEXT_2026-04-25.md)
+  - reloadable working-memory note for future sessions and compaction recovery
 - [FEATURE_BACKLOG.md](./FEATURE_BACKLOG.md)
   - active feature backlog and recent extraction progress
 - [product/UX-001-resonantos-app-shell.md](./product/UX-001-resonantos-app-shell.md)
@@ -61,6 +67,12 @@ This folder is the documentation entrypoint for the current codebase.
   - `ADR-013`
 - `How do Augmentor and the Engineer know current ResonantOS architecture before user intake?`
   - `ADR-014`
+- `How does Augmentor delegate work while staying available to the human?`
+  - `ADR-015`
+- `How do long chats avoid amnesia when the context window fills?`
+  - `ADR-016`
+- `What should a future compacted/new session reload first?`
+  - `working/SESSION_CONTEXT_2026-04-25.md`
 - `What is still planned?`
   - `FEATURE_BACKLOG`
 - `What UI/UX experience are we building?`

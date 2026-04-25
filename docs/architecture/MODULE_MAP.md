@@ -56,6 +56,7 @@ This map defines which folder owns which feature area so contributors do not kee
   - message rendering
   - dictation support
   - chat execution controller
+  - planned context budget and compaction UI from `docs/architecture/ADR-016-context-memory-compaction.md`
   - scoped Living Archive context retrieval for Strategist turns
   - chat-to-archive intake capture controller
   - composer attachment and dictation controller
@@ -90,6 +91,7 @@ This map defines which folder owns which feature area so contributors do not kee
   - manifest details
   - capability grant surface
   - add-on install/grant controller
+  - delegation target metadata reference: `docs/architecture/ADR-015-delegation-fabric-addon-catalog-native-tools.md`
   - planned launcher integration for opening installed add-ons in the center workspace
 
 - `src/modules/settings/`
