@@ -194,6 +194,7 @@ export const messageTranscriptPayload = (message: ConversationMessage): Record<s
   content: message.content,
   status: message.status ?? "complete",
   archiveCitations: message.archiveCitations ?? [],
+  providerUsage: message.providerUsage,
 });
 
 export const branchTranscriptPayload = (

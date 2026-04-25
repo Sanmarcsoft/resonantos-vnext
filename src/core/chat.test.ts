@@ -43,4 +43,33 @@ describe("chat transcript ledger", () => {
       }),
     });
   });
+
+  it("keeps provider usage telemetry on assistant messages and transcript events", () => {
+    const base = buildDefaultState([]);
+    const next = appendAssistantMessage(base, "thread-main-desktop", "Usage measured.", {
+      providerUsage: {
+        providerId: "shared-minimax",
+        model: "MiniMax-M2.7",
+        source: "provider",
+        promptTokens: 120,
+        completionTokens: 30,
+        totalTokens: 150,
+      },
+    });
+
+    const message = next.conversationThreads
+      .find((thread) => thread.id === "thread-main-desktop")
+      ?.messages.at(-1);
+    expect(message?.providerUsage).toMatchObject({
+      providerId: "shared-minimax",
+      promptTokens: 120,
+      totalTokens: 150,
+    });
+    expect(next.transcriptLedger.at(-1)?.payload).toMatchObject({
+      providerUsage: expect.objectContaining({
+        model: "MiniMax-M2.7",
+        completionTokens: 30,
+      }),
+    });
+  });
 });

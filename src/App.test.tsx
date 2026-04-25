@@ -56,6 +56,18 @@ const {
   requestProviderServiceChatCompletionStreamMock: vi.fn(async (_input, onEvent) => {
     const reply = await requestProviderServiceChatCompletionMock(_input);
     onEvent({ runId: _input.runId, type: "chunk", content: reply });
+    onEvent({
+      runId: _input.runId,
+      type: "usage",
+      content: JSON.stringify({
+        providerId: _input.providerId,
+        model: _input.model,
+        source: "provider",
+        promptTokens: 120,
+        completionTokens: 30,
+        totalTokens: 150,
+      }),
+    });
     onEvent({ runId: _input.runId, type: "completed", content: "" });
     return reply;
   }),
@@ -550,6 +562,18 @@ describe("App boot flow", () => {
     requestProviderServiceChatCompletionStreamMock.mockImplementation(async (input, onEvent) => {
       const reply = await requestProviderServiceChatCompletionMock(input);
       onEvent({ runId: input.runId, type: "chunk", content: reply });
+      onEvent({
+        runId: input.runId,
+        type: "usage",
+        content: JSON.stringify({
+          providerId: input.providerId,
+          model: input.model,
+          source: "provider",
+          promptTokens: 120,
+          completionTokens: 30,
+          totalTokens: 150,
+        }),
+      });
       onEvent({ runId: input.runId, type: "completed", content: "" });
       return reply;
     });
@@ -1287,7 +1311,7 @@ describe("App boot flow", () => {
     expect(screen.getAllByRole("button", { name: "Attach file" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: "Start dictation" }).length).toBeGreaterThan(0);
     expect(screen.getAllByLabelText(/Context usage/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByTitle(/Heuristic context estimate/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByTitle(/Context ceiling comes from provider\/model metadata/i).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: "Send message" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: "New chat" }).length).toBeGreaterThan(0);
     expect(screen.getAllByDisplayValue("MiniMax-M2.7").length).toBeGreaterThan(0);

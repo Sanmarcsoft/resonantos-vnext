@@ -307,6 +307,21 @@ type ProviderModelContextPolicy = {
   source: "provider-default" | "runtime-node" | "user-config";
 };
 
+type ProviderUsageTelemetry = {
+  providerId: string;
+  model: string;
+  source: "provider" | "local-runtime";
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+};
+
+When a provider/runtime returns usage metadata, ResonantOS attaches it to the
+assistant message and transcript event. This telemetry is authoritative for the
+completed turn. It does not replace pre-flight estimation yet, because
+compaction decisions must happen before the provider call; it gives the system a
+real measurement trail that can be used to calibrate future estimates.
+
 type CompactionRequest = {
   threadId: string;
   agentId: string;
