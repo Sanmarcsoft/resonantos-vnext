@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { AddOnManifest, DelegationPacket } from "./contracts";
-import { delegationTargetsFromManifests, renderDelegationTaskMarkdown, validateDelegationPacket } from "./delegation";
+import { buildDefaultState } from "./defaults";
+import {
+  createEngineerDelegationPacket,
+  delegationTargetsForState,
+  delegationTargetsFromManifests,
+  formatTaskWorkspaceCreatedReply,
+  nativeDelegationTargetsFromState,
+  renderDelegationTaskMarkdown,
+  shouldDelegateToEngineer,
+  validateDelegationPacket,
+} from "./delegation";
 
 const basePacket = (overrides: Partial<DelegationPacket> = {}): DelegationPacket => ({
   id: "delegation-1",
@@ -174,5 +184,91 @@ describe("delegation targets", () => {
     expect(targets[0]?.id).toBe("opencode.runtime");
     expect(targets[0]?.acceptedTaskTypes).toContain("code-change");
   });
+
+  it("exposes the Resonant Engineer Agent as a native delegation target", () => {
+    const state = buildDefaultState([]);
+    const targets = nativeDelegationTargetsFromState(state);
+
+    expect(targets).toHaveLength(1);
+    expect(targets[0]?.id).toBe(state.recoverySession.engineerAgentId);
+    expect(targets[0]?.runtime).toBe("native-agent");
+    expect(targets[0]?.acceptedTaskTypes).toContain("system-diagnosis");
+  });
+
+  it("combines native and add-on delegation targets", () => {
+    const state = buildDefaultState([]);
+    const targets = delegationTargetsForState(state, [
+      manifest({
+        agents: [
+          {
+            id: "opencode.runtime",
+            displayName: "OpenCode",
+            trustTier: "addon",
+            workspaceBehavior: "delegated",
+          },
+        ],
+        delegation: {
+          acceptsTasks: true,
+          taskTypes: ["code-change"],
+          artifactReturnTypes: ["summary", "diff", "verification-report"],
+          defaultTargetRuntime: "embedded-workspace",
+          requiresHumanApprovalBeforeExecution: true,
+        },
+      }),
+    ]);
+
+    expect(targets.map((target) => target.id)).toContain(state.recoverySession.engineerAgentId);
+    expect(targets.map((target) => target.id)).toContain("opencode.runtime");
+  });
 });
 
+describe("Engineer delegation packet factory", () => {
+  it("creates a valid Augmentor to Engineer diagnostic packet", () => {
+    const state = buildDefaultState([]);
+    const packet = createEngineerDelegationPacket(state, {
+      mission: "Check why the provider runtime diagnostics are degraded before any repair work starts.",
+      createdAt: "2026-04-25T12:00:00.000Z",
+    });
+
+    expect(packet.createdByAgentId).toBe("strategist.core");
+    expect(packet.targetAgentId).toBe(state.recoverySession.engineerAgentId);
+    expect(packet.targetRuntime).toBe("native-agent");
+    expect(packet.systemMemoryRefs).toContain("system://resonantos-architecture-contract");
+    expect(validateDelegationPacket(packet).valid).toBe(true);
+  });
+
+  it("requires human approval for Engineer repair packets", () => {
+    const state = buildDefaultState([]);
+    const packet = createEngineerDelegationPacket(state, {
+      mission: "Prepare a bounded repair plan for the provider runtime configuration issue.",
+      taskType: "system-repair",
+      createdAt: "2026-04-25T12:00:00.000Z",
+    });
+
+    expect(packet.humanApprovalRequired).toBe(true);
+    expect(packet.approvalReasons).toContain("broad-filesystem");
+    expect(validateDelegationPacket(packet).valid).toBe(true);
+  });
+
+  it("detects explicit Engineer delegation requests", () => {
+    expect(shouldDelegateToEngineer("Delegate this provider diagnostic to the Engineer")).toBe(true);
+    expect(shouldDelegateToEngineer("What is ResonantOS?")).toBe(false);
+  });
+
+  it("formats task workspace creation replies", () => {
+    const reply = formatTaskWorkspaceCreatedReply({
+      id: "workspace-engineer-test",
+      packetId: "delegation-test",
+      rootPath: "/tmp/workspace-engineer-test",
+      packetPath: "/tmp/workspace-engineer-test/delegation.packet.json",
+      taskMarkdownPath: "/tmp/workspace-engineer-test/TASK.md",
+      artifactsPath: "/tmp/workspace-engineer-test/artifacts",
+      logsPath: "/tmp/workspace-engineer-test/logs",
+      resultPath: "/tmp/workspace-engineer-test/result.md",
+      verificationPath: "/tmp/workspace-engineer-test/verification.json",
+    });
+
+    expect(reply).toContain("No agent execution has started yet");
+    expect(reply).toContain("TASK.md");
+  });
+});

@@ -32,10 +32,11 @@ import {
   appendTranscriptEvent,
   branchTranscriptPayload,
   compactThreadContext,
+  copyCompactStatesForFork,
   messageTranscriptPayload,
 } from "./core/context-memory";
 import { routedProviderLabel } from "./core/provider-service";
-import { persistState } from "./core/runtime";
+import { abortProviderServiceChatCompletion, persistState } from "./core/runtime";
 import {
   executeSideloadManifest,
   toggleAddonCapabilityGrant,
@@ -169,7 +170,7 @@ export function App() {
   const chatScrollAnchorRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const speechRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
-  const activeChatRunTokenRef = useRef<symbol | null>(null);
+  const activeChatRunTokenRef = useRef<string | null>(null);
   const deferredSearch = useDeferredValue(search);
   const activeProviderForSelection = resolveActiveProviderForSelection(
     loadState.phase === "ready" ? loadState.state : null,
@@ -404,6 +405,12 @@ export function App() {
         messages: forkedMessages,
       };
       draft.conversationThreads.push(forkThread);
+      draft.contextMemoryStates = copyCompactStatesForFork(
+        draft.contextMemoryStates ?? [],
+        sourceThread.id,
+        forkThread,
+        message.id,
+      );
       draft.uiPreferences.activeChatThreadId = forkId;
       return appendTranscriptEvent(draft, {
         action: "thread-branched",
@@ -494,6 +501,11 @@ export function App() {
         })),
       };
       draft.conversationThreads.unshift(forkThread);
+      draft.contextMemoryStates = copyCompactStatesForFork(
+        draft.contextMemoryStates ?? [],
+        sourceThread.id,
+        forkThread,
+      );
       draft.uiPreferences.activeChatThreadId = forkId;
       draft.uiPreferences.pinnedChatThreadIds = (draft.uiPreferences.pinnedChatThreadIds ?? []).filter((id) => id !== forkId);
       return appendTranscriptEvent(draft, {
@@ -828,7 +840,7 @@ export function App() {
       setChatNotice("Stop the current response before sending a follow-up correction.");
       return;
     }
-    const runToken = Symbol(`chat-run:${activeThread.id}:${Date.now()}`);
+    const runToken = `chat-run-${activeThread.id.replace(/[^a-zA-Z0-9_-]/g, "-")}-${Date.now()}`;
     activeChatRunTokenRef.current = runToken;
     await executeChatTurn({
       snapshot: { state, bundled, sideloaded },
@@ -861,7 +873,11 @@ export function App() {
     if (!chatBusy || !activeThread) {
       return;
     }
+    const stoppedRunToken = activeChatRunTokenRef.current;
     activeChatRunTokenRef.current = null;
+    if (stoppedRunToken) {
+      void abortProviderServiceChatCompletion(stoppedRunToken);
+    }
     updateRuntimeState((draft) => {
       const targetThread = draft.conversationThreads.find((thread) => thread.id === activeThread.id);
       if (!targetThread) {

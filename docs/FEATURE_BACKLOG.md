@@ -66,6 +66,7 @@ Last updated: 2026-04-25
   - deterministic compact-state generation preserves user intent, rationale, tasks, decisions, preferences, artifacts, risks, and questions
   - context percentage control runs `Compact now` for the active thread
   - provider prompt assembly includes compact memory plus preserved recent/new turns after compaction
+  - automatic compaction runs before provider calls when effective context reaches the 80% threshold
 - Ensure chat branching copies compact state and source references, not only visible messages.
 
 ## Living Archive
@@ -143,6 +144,15 @@ Last updated: 2026-04-25
   - core contracts now define `DelegationPacket`, `DelegationTarget`, `TaskWorkspace`, `ArtifactReturn`, native tool capabilities, verification requirements, and validation results
   - `src/core/delegation.ts` validates delegation packet quality and renders generated `TASK.md`
   - add-on manifests now expose delegation metadata for Obsidian, Browser, OpenCode, Hermes, and OpenClaw
+- Added Task Workspace foundation on 2026-04-25:
+  - Rust host now exposes `delegation_create_task_workspace`
+  - validated packets can create execution-free task workspace folders under app-owned storage
+  - task workspaces write `delegation.packet.json`, generated `TASK.md`, artifacts/log/result/verification placeholders, and an audit log
+  - the Resonant Engineer Agent is exposed as the first native delegation target so Augmentor can delegate before external add-ons are wired
+- Added first Augmentor-to-Engineer delegation path on 2026-04-25:
+  - explicit Strategist chat requests such as "delegate this diagnostic to the Engineer" create a validated Engineer Delegation Packet
+  - the chat creates the task workspace and reports the packet/TASK paths back to the user
+  - execution remains intentionally disabled until a later "Start Engineer task" workflow is built
 - Build add-on launcher UX from `docs/product/UX-001-resonantos-app-shell.md`.
 - Add center-workspace app opening state for installed add-ons.
 - Add workspace renderers for add-on runtime types:

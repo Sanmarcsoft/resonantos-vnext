@@ -1,4 +1,5 @@
 mod archive_service;
+mod delegation_service;
 mod host_state;
 mod provider_service;
 mod recovery_service;
@@ -9,7 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use serde_json::Value;
-use tauri::AppHandle;
+use tauri::{AppHandle, Window};
 
 use crate::archive_service::{
     archive_system_memory_status, build_archive_tol_bundle, decide_archive_review_artifact,
@@ -29,15 +30,20 @@ use crate::archive_service::{
     ArchiveSystemMemoryRefreshResult, ArchiveSystemMemoryStatus, ArchiveTolBundleBuildRequest,
     ArchiveTolBundleBuildResult, ArchiveTolBundleCandidate,
 };
+use crate::delegation_service::{
+    create_task_workspace, CreateTaskWorkspaceRequest, TaskWorkspaceRecord,
+};
 use crate::host_state::{
     addons_dir, read_provider_secrets, read_runtime_state_value, state_file, validate_manifest,
     write_provider_secrets,
 };
 use crate::provider_service::{
-    execute_archive_ingest_probe, execute_provider_service_chat, query_local_runtime_status,
-    query_provider_diagnostics, query_recovery_route_candidates, ArchiveIngestProbeRequest,
-    ArchiveIngestProbeResult, ChatMessageInput, LocalRuntimeStatus, ProviderDiagnosticReport,
-    ProviderServiceChatRequest, RecoveryRouteCandidate,
+    abort_provider_service_chat_stream, execute_archive_ingest_probe,
+    execute_provider_service_chat, execute_provider_service_chat_stream,
+    query_local_runtime_status, query_provider_diagnostics, query_recovery_route_candidates,
+    ArchiveIngestProbeRequest, ArchiveIngestProbeResult, ChatMessageInput, LocalRuntimeStatus,
+    ProviderDiagnosticReport, ProviderServiceChatRequest, ProviderServiceChatStreamRequest,
+    RecoveryRouteCandidate,
 };
 use crate::recovery_service::{
     execute_engineer_recovery_turn, EngineerRecoveryTurnRequest, EngineerRecoveryTurnResult,
@@ -55,6 +61,14 @@ fn save_runtime_state(app: AppHandle, state: Value) -> Result<Value, String> {
         .map_err(|error| format!("Failed to encode runtime state: {error}"))?;
     fs::write(&path, payload).map_err(|error| format!("Failed to write runtime state: {error}"))?;
     Ok(state)
+}
+
+#[tauri::command]
+fn delegation_create_task_workspace(
+    app: AppHandle,
+    request: CreateTaskWorkspaceRequest,
+) -> Result<TaskWorkspaceRecord, String> {
+    create_task_workspace(&app, request)
 }
 
 #[tauri::command]
@@ -337,6 +351,50 @@ async fn provider_service_chat_completion(
 }
 
 #[tauri::command]
+async fn provider_service_chat_completion_stream(
+    app: AppHandle,
+    window: Window,
+    run_id: String,
+    provider_id: String,
+    provider_type: String,
+    api_base_url: Option<String>,
+    runtime_node_id: Option<String>,
+    runtime_node_kind: Option<String>,
+    runtime_node_endpoint: Option<String>,
+    auth_tier: Option<String>,
+    model: String,
+    reasoning_effort: String,
+    system_prompt: String,
+    messages: Vec<ChatMessageInput>,
+) -> Result<String, String> {
+    execute_provider_service_chat_stream(
+        &app,
+        &window,
+        ProviderServiceChatStreamRequest {
+            run_id,
+            provider_id,
+            provider_type,
+            api_base_url,
+            runtime_node_id,
+            runtime_node_kind,
+            runtime_node_endpoint,
+            auth_tier,
+            model,
+            reasoning_effort,
+            system_prompt,
+            messages,
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+fn provider_service_abort_chat_completion(run_id: String) -> Result<(), String> {
+    abort_provider_service_chat_stream(&run_id);
+    Ok(())
+}
+
+#[tauri::command]
 async fn archive_ingest_probe(
     app: AppHandle,
     provider_id: String,
@@ -374,6 +432,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_runtime_state,
             save_runtime_state,
+            delegation_create_task_workspace,
             list_sideloaded_addons,
             sideload_addon_manifest,
             load_provider_secret_statuses,
@@ -400,6 +459,8 @@ pub fn run() {
             recovery_route_candidates,
             provider_diagnostics,
             provider_service_chat_completion,
+            provider_service_chat_completion_stream,
+            provider_service_abort_chat_completion,
             archive_ingest_probe
         ])
         .run(tauri::generate_context!())

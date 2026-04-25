@@ -7,6 +7,7 @@ import type {
   AddOnManifest,
   ArchiveQueuedIngestRequest,
   ArchiveReviewArtifact,
+  ConversationMessage,
   ProviderProfile,
   ResonantShellState,
 } from "./core/contracts";
@@ -22,6 +23,9 @@ const manifests: AddOnManifest[] = [
 const {
   hydrateStateMock,
   requestProviderServiceChatCompletionMock,
+  requestProviderServiceChatCompletionStreamMock,
+  abortProviderServiceChatCompletionMock,
+  requestCreateTaskWorkspaceMock,
   requestArchiveIngestProbeMock,
   requestArchiveRuntimeStatusMock,
   requestArchiveSystemMemoryMock,
@@ -46,7 +50,25 @@ const {
   requestProviderDiagnosticsMock,
 } = vi.hoisted(() => ({
   hydrateStateMock: vi.fn(),
-  requestProviderServiceChatCompletionMock: vi.fn(async () => "This is a live Strategist test reply from MiniMax-M2.7."),
+  requestProviderServiceChatCompletionMock: vi.fn(async (_input?: unknown) => "This is a live Strategist test reply from MiniMax-M2.7."),
+  requestProviderServiceChatCompletionStreamMock: vi.fn(async (_input, onEvent) => {
+    const reply = await requestProviderServiceChatCompletionMock(_input);
+    onEvent({ runId: _input.runId, type: "chunk", content: reply });
+    onEvent({ runId: _input.runId, type: "completed", content: "" });
+    return reply;
+  }),
+  abortProviderServiceChatCompletionMock: vi.fn(async () => undefined),
+  requestCreateTaskWorkspaceMock: vi.fn(async () => ({
+    id: "workspace-engineer-provider-diagnostic",
+    packetId: "delegation-workspace-engineer-provider-diagnostic",
+    rootPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic",
+    packetPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/delegation.packet.json",
+    taskMarkdownPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/TASK.md",
+    artifactsPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/artifacts",
+    logsPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/logs",
+    resultPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/result.md",
+    verificationPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/verification.json",
+  })),
   requestArchiveIngestProbeMock: vi.fn(async () => ({
     sourceLabel: "Synthetic Living Archive Intake Probe",
     summary: "Summary: Probe route healthy. Candidate concepts: modular routing, trusted ingest. Quality note: premium cloud path active.",
@@ -373,6 +395,7 @@ vi.mock("./core/runtime", () => ({
   })),
   persistState: vi.fn(async () => undefined),
   requestEngineerRecoveryTurn: requestEngineerRecoveryTurnMock,
+  requestCreateTaskWorkspace: requestCreateTaskWorkspaceMock,
   requestArchiveIngestProbe: requestArchiveIngestProbeMock,
   requestLocalRuntimeStatus: requestLocalRuntimeStatusMock,
   requestProviderDiagnostics: requestProviderDiagnosticsMock,
@@ -395,6 +418,8 @@ vi.mock("./core/runtime", () => ({
   requestArchiveLibraryFolderSelection: requestArchiveLibraryFolderSelectionMock,
   requestRecoveryRouteCandidates: requestRecoveryRouteCandidatesMock,
   requestProviderServiceChatCompletion: requestProviderServiceChatCompletionMock,
+  requestProviderServiceChatCompletionStream: requestProviderServiceChatCompletionStreamMock,
+  abortProviderServiceChatCompletion: abortProviderServiceChatCompletionMock,
   requestStrategistReply: requestProviderServiceChatCompletionMock,
   saveProviderSecret: vi.fn(async () => undefined),
   sideloadManifest: vi.fn(),
@@ -412,6 +437,12 @@ const deferred = <T,>() => {
   return { promise, resolve, reject };
 };
 
+const providerStreamInputs = (): Array<{ systemPrompt: string; messages: ConversationMessage[] }> =>
+  requestProviderServiceChatCompletionStreamMock.mock.calls.map((call) => call[0]) as Array<{
+    systemPrompt: string;
+    messages: ConversationMessage[];
+  }>;
+
 describe("App boot flow", () => {
   afterEach(() => {
     cleanup();
@@ -422,6 +453,27 @@ describe("App boot flow", () => {
     hydrateStateMock.mockResolvedValue(buildDefaultState(manifests));
     requestProviderServiceChatCompletionMock.mockReset();
     requestProviderServiceChatCompletionMock.mockResolvedValue("This is a live Strategist test reply from MiniMax-M2.7.");
+    requestProviderServiceChatCompletionStreamMock.mockReset();
+    requestProviderServiceChatCompletionStreamMock.mockImplementation(async (input, onEvent) => {
+      const reply = await requestProviderServiceChatCompletionMock(input);
+      onEvent({ runId: input.runId, type: "chunk", content: reply });
+      onEvent({ runId: input.runId, type: "completed", content: "" });
+      return reply;
+    });
+    abortProviderServiceChatCompletionMock.mockReset();
+    abortProviderServiceChatCompletionMock.mockResolvedValue(undefined);
+    requestCreateTaskWorkspaceMock.mockReset();
+    requestCreateTaskWorkspaceMock.mockResolvedValue({
+      id: "workspace-engineer-provider-diagnostic",
+      packetId: "delegation-workspace-engineer-provider-diagnostic",
+      rootPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic",
+      packetPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/delegation.packet.json",
+      taskMarkdownPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/TASK.md",
+      artifactsPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/artifacts",
+      logsPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/logs",
+      resultPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/result.md",
+      verificationPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/verification.json",
+    });
     requestArchiveIngestProbeMock.mockReset();
     requestArchiveIngestProbeMock.mockResolvedValue({
       sourceLabel: "Synthetic Living Archive Intake Probe",
@@ -772,6 +824,22 @@ describe("App boot flow", () => {
     expect(await screen.findByText("This is a live Strategist test reply from MiniMax-M2.7.")).toBeTruthy();
   });
 
+  it("creates an Engineer delegation workspace from explicit Augmentor delegation", async () => {
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getAllByPlaceholderText("Message Augmentor")[0], {
+      target: { value: "Delegate this provider diagnostic to the Engineer" },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Send message" })[0]);
+
+    expect(await screen.findByText(/I created an Engineer delegation workspace/i)).toBeTruthy();
+    expect(await screen.findByText(/TASK.md:/i)).toBeTruthy();
+    expect(requestCreateTaskWorkspaceMock).toHaveBeenCalledTimes(1);
+    expect(requestProviderServiceChatCompletionMock).not.toHaveBeenCalled();
+  });
+
   it("stops an active chat run, keeps an interrupted message, and ignores the late reply", async () => {
     const pendingReply = deferred<string>();
     requestProviderServiceChatCompletionMock.mockReset();
@@ -805,6 +873,34 @@ describe("App boot flow", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Send message" })[0]);
 
     expect(await screen.findByText("Corrected reply after interruption.")).toBeTruthy();
+  });
+
+  it("renders streaming chat chunks before the final response completes", async () => {
+    const continueStream = deferred<void>();
+    requestProviderServiceChatCompletionMock.mockReset();
+    requestProviderServiceChatCompletionStreamMock.mockImplementationOnce(async (input, onEvent) => {
+      onEvent({ runId: input.runId, type: "chunk", content: "Partial " });
+      await continueStream.promise;
+      onEvent({ runId: input.runId, type: "chunk", content: "streamed reply." });
+      onEvent({ runId: input.runId, type: "completed", content: "" });
+      return "Partial streamed reply.";
+    });
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getAllByPlaceholderText("Message Augmentor")[0], {
+      target: { value: "Stream this reply" },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Send message" })[0]);
+
+    expect(await screen.findByText("Partial")).toBeTruthy();
+    expect(requestProviderServiceChatCompletionMock).not.toHaveBeenCalled();
+
+    continueStream.resolve();
+
+    expect(await screen.findByText("Partial streamed reply.")).toBeTruthy();
   });
 
   it("shows string backend errors instead of collapsing them into a generic message", async () => {
@@ -859,15 +955,17 @@ describe("App boot flow", () => {
     expect(await screen.findByText("This is a live Strategist test reply from MiniMax-M2.7.")).toBeTruthy();
     expect(requestArchiveSearchMock).toHaveBeenCalledWith("What does the archive say about provider fabric", 6);
     expect(requestArchiveDocumentMock).toHaveBeenCalledWith("WIKI/concepts/provider-fabric.md");
-    expect(requestProviderServiceChatCompletionMock).toHaveBeenCalledWith(
+    expect(requestProviderServiceChatCompletionStreamMock).toHaveBeenCalledWith(
       expect.objectContaining({
         systemPrompt: expect.stringContaining("Living Archive context retrieved for this turn."),
       }),
+      expect.any(Function),
     );
-    expect(requestProviderServiceChatCompletionMock).toHaveBeenCalledWith(
+    expect(requestProviderServiceChatCompletionStreamMock).toHaveBeenCalledWith(
       expect.objectContaining({
         systemPrompt: expect.stringContaining("Provider routing belongs to ResonantOS"),
       }),
+      expect.any(Function),
     );
     expect(await screen.findByText("Archive memory")).toBeTruthy();
     expect(await screen.findByRole("button", { name: /Provider Fabric/i })).toBeTruthy();
@@ -968,6 +1066,142 @@ describe("App boot flow", () => {
 
     expect(await screen.findByText(/Context compacted\. Preserved/i)).toBeTruthy();
     expect(await screen.findByText(/user intent and rationale/i)).toBeTruthy();
+  });
+
+  it("uses compact memory and trimmed recent turns for the next provider request after compaction", async () => {
+    const state = buildDefaultState(manifests);
+    const longThread = {
+      ...state.conversationThreads[0],
+      messages: Array.from({ length: 12 }, (_, index) => ({
+        id: `thread-main-desktop:m${index + 1}`,
+        threadId: "thread-main-desktop",
+        channelId: "desktop-main",
+        role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+        author: index % 2 === 0 ? "You" : "Augmentor",
+        createdAt: `2026-04-25T10:${String(index).padStart(2, "0")}:00.000Z`,
+        content:
+          index === 0
+            ? "For me the why is avoiding AI amnesia during long ResonantOS work."
+            : `Historical chat turn ${index + 1}.`,
+      })),
+    };
+    hydrateStateMock.mockResolvedValue({
+      ...state,
+      conversationThreads: [longThread, ...state.conversationThreads.slice(1)],
+    });
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Context usage/i })[0]);
+    expect(await screen.findByText(/Context compacted\. Preserved/i)).toBeTruthy();
+
+    fireEvent.change(screen.getAllByPlaceholderText("Message Augmentor")[0], {
+      target: { value: "Continue after compacting the chat." },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Send message" })[0]);
+
+    expect(await screen.findByText("This is a live Strategist test reply from MiniMax-M2.7.")).toBeTruthy();
+    const providerCall = providerStreamInputs().at(-1);
+    expect(providerCall?.systemPrompt).toContain("ResonantOS compacted conversation memory:");
+    expect(providerCall?.systemPrompt).toContain("avoiding AI amnesia");
+    expect(providerCall?.messages.map((message) => message.id)).not.toContain("thread-main-desktop:m1");
+    expect(providerCall?.messages.map((message) => message.id)).toContain("thread-main-desktop:m12");
+    expect(providerCall?.messages.at(-1)?.content).toBe("Continue after compacting the chat.");
+  });
+
+  it("automatically compacts before the provider request when context crosses the threshold", async () => {
+    const state = buildDefaultState(manifests);
+    hydrateStateMock.mockResolvedValue({
+      ...state,
+      agents: state.agents.map((agent) =>
+        agent.id === "strategist.core"
+          ? { ...agent, providerProfileId: "shared-local", fallbackProviderProfileId: undefined }
+          : agent,
+      ),
+      conversationThreads: [
+        {
+          ...state.conversationThreads[0],
+          messages: Array.from({ length: 12 }, (_, index) => ({
+            id: `thread-main-desktop:m${index + 1}`,
+            threadId: "thread-main-desktop",
+            channelId: "desktop-main",
+            role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+            author: index % 2 === 0 ? "You" : "Augmentor",
+            createdAt: `2026-04-25T12:${String(index).padStart(2, "0")}:00.000Z`,
+            content:
+              index === 0
+                ? `The why is to prove automatic compaction protects long chat continuity. ${"x".repeat(27_000)}`
+                : `Auto compaction historical turn ${index + 1}.`,
+          })),
+        },
+        ...state.conversationThreads.slice(1),
+      ],
+    });
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getAllByPlaceholderText("Message Augmentor")[0], {
+      target: { value: "Send after auto compaction threshold." },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Send message" })[0]);
+
+    expect(await screen.findByText(/automatic compaction threshold/i)).toBeTruthy();
+    expect(await screen.findByText("This is a live Strategist test reply from MiniMax-M2.7.")).toBeTruthy();
+    const providerCall = providerStreamInputs().at(-1);
+    expect(providerCall?.systemPrompt).toContain("ResonantOS compacted conversation memory:");
+    expect(providerCall?.systemPrompt).toContain("automatic compaction protects long chat continuity");
+    expect(providerCall?.messages.map((message) => message.id)).not.toContain("thread-main-desktop:m1");
+    expect(providerCall?.messages.at(-1)?.content).toBe("Send after auto compaction threshold.");
+  });
+
+  it("carries compact memory into a branched chat before the next provider request", async () => {
+    const state = buildDefaultState(manifests);
+    const compactedThread = {
+      ...state.conversationThreads[0],
+      messages: Array.from({ length: 10 }, (_, index) => ({
+        id: `thread-main-desktop:m${index + 1}`,
+        threadId: "thread-main-desktop",
+        channelId: "desktop-main",
+        role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+        author: index % 2 === 0 ? "You" : "Augmentor",
+        createdAt: `2026-04-25T11:${String(index).padStart(2, "0")}:00.000Z`,
+        content:
+          index === 0
+            ? "The branch must keep the why: avoid amnesia when exploring alternatives."
+            : `Branchable historical turn ${index + 1}.`,
+      })),
+    };
+    hydrateStateMock.mockResolvedValue({
+      ...state,
+      conversationThreads: [compactedThread, ...state.conversationThreads.slice(1)],
+    });
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Context usage/i })[0]);
+    expect(await screen.findByText(/Context compacted\. Preserved/i)).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Chat options" })[0]);
+    fireEvent.click(screen.getByRole("menuitem", { name: /Branch/i }));
+    expect(await screen.findByText("Desktop Main Thread fork")).toBeTruthy();
+
+    fireEvent.change(screen.getAllByPlaceholderText("Message Augmentor")[0], {
+      target: { value: "Continue from this branched compacted thread." },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Send message" })[0]);
+
+    expect(await screen.findByText("This is a live Strategist test reply from MiniMax-M2.7.")).toBeTruthy();
+    const providerCall = providerStreamInputs().at(-1);
+    expect(providerCall?.systemPrompt).toContain("ResonantOS compacted conversation memory:");
+    expect(providerCall?.systemPrompt).toContain("avoid amnesia when exploring alternatives");
+    expect(providerCall?.messages.at(-1)?.threadId).toMatch(/^thread-fork-/);
+    expect(providerCall?.messages.at(-1)?.content).toBe("Continue from this branched compacted thread.");
   });
 
   it("creates a new Strategist chat instance from the sidebar", async () => {

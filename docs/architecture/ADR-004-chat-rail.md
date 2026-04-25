@@ -30,7 +30,9 @@ The Strategist chat is a persistent right-side rail in the ResonantOS shell.
 - Chat runtime state must distinguish idle, thinking, retrieving, tool-running, interrupted, failed, and completed phases.
 - A user follow-up during an active response must not be silently accepted into an ambiguous state.
 - Until provider streaming and true IPC abort are implemented, Stop must invalidate the active run token, preserve an interrupted message, and suppress any late provider response from being appended.
-- Future streaming support should upgrade Stop from stale-response suppression to real provider/runtime cancellation where the provider supports it.
+- Provider streaming should use host-mediated Tauri events, not direct renderer-owned provider calls.
+- Stop must request host-side cancellation for the active run where the provider/runtime supports it, while retaining stale-response suppression as the fallback guard.
+- Providers that cannot stream must fall back to the existing request/response path without breaking the chat rail.
 
 ## Trust Rules
 

@@ -14,6 +14,8 @@ import {
   buildContextBudget,
   contextBudgetTitle,
   contextUsageRatio as ratioFromContextBudget,
+  latestCompactStateForThread,
+  promptMessagesForThread,
 } from "../../core/context-memory";
 import { resolveProviderPath, strategistDisplayName } from "../../core/policies";
 import {
@@ -140,8 +142,13 @@ export const buildShellViewModel = ({
       : activeRoute.model || activeProvider?.primaryModel || "";
   const strategistRecoveryActive =
     recoveryModeActive || strategist?.providerProfileId === "shared-local" || activeRuntimeNode?.kind === "local";
+  const latestCompactState = activeThread ? latestCompactStateForThread(state, activeThread.id) : null;
+  const effectiveBudgetThread =
+    activeThread && latestCompactState
+      ? { ...activeThread, messages: promptMessagesForThread(activeThread, latestCompactState) }
+      : activeThread;
   const contextBudget = buildContextBudget({
-    thread: activeThread,
+    thread: effectiveBudgetThread,
     composer,
     attachments,
     provider: activeProvider,

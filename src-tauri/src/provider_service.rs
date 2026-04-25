@@ -1,12 +1,18 @@
+use std::collections::HashSet;
 use std::process::{Command, Stdio};
+use std::sync::{LazyLock, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter, Window};
 
 use crate::host_state::{read_runtime_state_value, resolve_provider_secret};
+
+static ABORTED_CHAT_RUNS: LazyLock<Mutex<HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
 
 fn strip_think_blocks(content: &str) -> String {
     let mut output = String::new();
@@ -91,6 +97,66 @@ fn extract_local_assistant_content(payload: &Value) -> Result<String, String> {
         .ok_or_else(|| "Local runtime response did not include assistant content.".to_string())
 }
 
+fn chat_stream_event_name(run_id: &str) -> String {
+    format!("provider-chat-stream-{run_id}")
+}
+
+fn mark_chat_run_aborted(run_id: &str) {
+    if let Ok(mut runs) = ABORTED_CHAT_RUNS.lock() {
+        runs.insert(run_id.to_string());
+    }
+}
+
+fn clear_chat_run_abort(run_id: &str) {
+    if let Ok(mut runs) = ABORTED_CHAT_RUNS.lock() {
+        runs.remove(run_id);
+    }
+}
+
+fn chat_run_aborted(run_id: &str) -> bool {
+    ABORTED_CHAT_RUNS
+        .lock()
+        .map(|runs| runs.contains(run_id))
+        .unwrap_or(false)
+}
+
+fn emit_chat_stream_event(
+    window: &Window,
+    run_id: &str,
+    event_type: &str,
+    content: &str,
+) -> Result<(), String> {
+    window
+        .emit(
+            &chat_stream_event_name(run_id),
+            ChatStreamEvent {
+                run_id: run_id.to_string(),
+                event_type: event_type.to_string(),
+                content: content.to_string(),
+            },
+        )
+        .map_err(|error| format!("Failed to emit chat stream event: {error}"))
+}
+
+fn extract_cloud_stream_delta(payload: &Value) -> Option<String> {
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("delta").or_else(|| choice.get("message")))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+}
+
+fn extract_local_stream_delta(payload: &Value) -> Option<String> {
+    payload
+        .get("message")
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+}
+
 #[derive(Clone, Deserialize)]
 pub(crate) struct ChatMessageInput {
     pub(crate) role: String,
@@ -110,6 +176,49 @@ pub(crate) struct ProviderServiceChatRequest {
     pub(crate) reasoning_effort: String,
     pub(crate) system_prompt: String,
     pub(crate) messages: Vec<ChatMessageInput>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ProviderServiceChatStreamRequest {
+    pub(crate) run_id: String,
+    pub(crate) provider_id: String,
+    pub(crate) provider_type: String,
+    pub(crate) api_base_url: Option<String>,
+    pub(crate) runtime_node_id: Option<String>,
+    pub(crate) runtime_node_kind: Option<String>,
+    pub(crate) runtime_node_endpoint: Option<String>,
+    pub(crate) auth_tier: Option<String>,
+    pub(crate) model: String,
+    pub(crate) reasoning_effort: String,
+    pub(crate) system_prompt: String,
+    pub(crate) messages: Vec<ChatMessageInput>,
+}
+
+impl ProviderServiceChatStreamRequest {
+    fn as_chat_request(&self) -> ProviderServiceChatRequest {
+        ProviderServiceChatRequest {
+            provider_id: self.provider_id.clone(),
+            provider_type: self.provider_type.clone(),
+            api_base_url: self.api_base_url.clone(),
+            runtime_node_id: self.runtime_node_id.clone(),
+            runtime_node_kind: self.runtime_node_kind.clone(),
+            runtime_node_endpoint: self.runtime_node_endpoint.clone(),
+            auth_tier: self.auth_tier.clone(),
+            model: self.model.clone(),
+            reasoning_effort: self.reasoning_effort.clone(),
+            system_prompt: self.system_prompt.clone(),
+            messages: self.messages.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatStreamEvent {
+    pub(crate) run_id: String,
+    #[serde(rename = "type")]
+    pub(crate) event_type: String,
+    pub(crate) content: String,
 }
 
 #[derive(Deserialize)]
@@ -899,6 +1008,203 @@ async fn execute_local_provider_service_chat(
 
     let content = extract_local_assistant_content(&payload)?;
     Ok(sanitize_assistant_content("local", &content))
+}
+
+async fn execute_cloud_provider_service_chat_stream(
+    app: &AppHandle,
+    window: &Window,
+    request: &ProviderServiceChatStreamRequest,
+) -> Result<String, String> {
+    let api_key = resolve_provider_secret(app, &request.provider_id)?.ok_or_else(|| {
+        "No provider secret is configured for this Strategist profile.".to_string()
+    })?;
+    let base_url = resolve_provider_base_url(
+        &request.provider_type,
+        request.api_base_url.clone(),
+        request.runtime_node_endpoint.clone(),
+    )?;
+    let request_messages =
+        request_messages_with_system_prompt(&request.system_prompt, request.messages.clone());
+    let body = match request.provider_type.as_str() {
+        "minimax" => json!({
+            "model": request.model,
+            "messages": request_messages,
+            "stream": true
+        }),
+        _ => json!({
+            "model": request.model,
+            "messages": request_messages,
+            "reasoning_effort": request.reasoning_effort,
+            "stream": true
+        }),
+    };
+
+    let response = reqwest::Client::new()
+        .post(format!(
+            "{}/chat/completions",
+            base_url.trim_end_matches('/')
+        ))
+        .bearer_auth(api_key)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|error| format!("Failed to reach model provider: {error}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let payload = response
+            .json::<Value>()
+            .await
+            .map_err(|error| format!("Failed to decode model response: {error}"))?;
+        let api_error = payload
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(Value::as_str)
+            .unwrap_or("Model provider request failed.");
+        return Err(api_error.to_string());
+    }
+
+    let mut full = String::new();
+    let mut pending = String::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        if chat_run_aborted(&request.run_id) {
+            emit_chat_stream_event(window, &request.run_id, "interrupted", "")?;
+            return Ok(full);
+        }
+        let chunk = chunk.map_err(|error| format!("Provider stream failed: {error}"))?;
+        pending.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(newline_index) = pending.find('\n') {
+            let line = pending[..newline_index].trim().to_string();
+            pending = pending[newline_index + 1..].to_string();
+            if !line.starts_with("data:") {
+                continue;
+            }
+            let data = line.trim_start_matches("data:").trim();
+            if data == "[DONE]" {
+                emit_chat_stream_event(window, &request.run_id, "completed", "")?;
+                return Ok(sanitize_assistant_content(&request.provider_type, &full));
+            }
+            if let Ok(payload) = serde_json::from_str::<Value>(data) {
+                if let Some(delta) = extract_cloud_stream_delta(&payload) {
+                    let sanitized_delta =
+                        sanitize_assistant_content(&request.provider_type, &delta);
+                    if !sanitized_delta.is_empty() {
+                        full.push_str(&sanitized_delta);
+                        emit_chat_stream_event(window, &request.run_id, "chunk", &sanitized_delta)?;
+                    }
+                }
+            }
+        }
+    }
+
+    emit_chat_stream_event(window, &request.run_id, "completed", "")?;
+    Ok(sanitize_assistant_content(&request.provider_type, &full))
+}
+
+async fn execute_local_provider_service_chat_stream(
+    window: &Window,
+    request: &ProviderServiceChatStreamRequest,
+) -> Result<String, String> {
+    let base_url = local_runtime_base_url(request.runtime_node_endpoint.clone());
+    ensure_local_runtime_ready(&base_url).await?;
+    let request_messages =
+        request_messages_with_system_prompt(&request.system_prompt, request.messages.clone());
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/api/chat", base_url.trim_end_matches('/')))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "model": resolve_local_runtime_model(&request.model),
+            "messages": request_messages,
+            "stream": true
+        }))
+        .send()
+        .await
+        .map_err(|error| format!("Failed to reach local runtime: {error}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let payload = response
+            .json::<Value>()
+            .await
+            .map_err(|error| format!("Failed to decode local runtime response: {error}"))?;
+        let api_error = payload
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("Local runtime request failed.");
+        return Err(api_error.to_string());
+    }
+
+    let mut full = String::new();
+    let mut pending = String::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        if chat_run_aborted(&request.run_id) {
+            emit_chat_stream_event(window, &request.run_id, "interrupted", "")?;
+            return Ok(full);
+        }
+        let chunk = chunk.map_err(|error| format!("Local runtime stream failed: {error}"))?;
+        pending.push_str(&String::from_utf8_lossy(&chunk));
+        while let Some(newline_index) = pending.find('\n') {
+            let line = pending[..newline_index].trim().to_string();
+            pending = pending[newline_index + 1..].to_string();
+            if line.is_empty() {
+                continue;
+            }
+            if let Ok(payload) = serde_json::from_str::<Value>(&line) {
+                if let Some(delta) = extract_local_stream_delta(&payload) {
+                    if !delta.is_empty() {
+                        full.push_str(&delta);
+                        emit_chat_stream_event(window, &request.run_id, "chunk", &delta)?;
+                    }
+                }
+                if payload.get("done").and_then(Value::as_bool) == Some(true) {
+                    emit_chat_stream_event(window, &request.run_id, "completed", "")?;
+                    return Ok(sanitize_assistant_content("local", &full));
+                }
+            }
+        }
+    }
+
+    emit_chat_stream_event(window, &request.run_id, "completed", "")?;
+    Ok(sanitize_assistant_content("local", &full))
+}
+
+pub(crate) fn abort_provider_service_chat_stream(run_id: &str) {
+    mark_chat_run_aborted(run_id);
+}
+
+pub(crate) async fn execute_provider_service_chat_stream(
+    app: &AppHandle,
+    window: &Window,
+    request: ProviderServiceChatStreamRequest,
+) -> Result<String, String> {
+    clear_chat_run_abort(&request.run_id);
+    let chat_request = request.as_chat_request();
+    ensure_runtime_kind_supported(
+        chat_request.runtime_node_id.as_deref(),
+        chat_request.runtime_node_kind.as_deref(),
+        chat_request.auth_tier.as_deref(),
+    )?;
+    let adapter = resolve_provider_execution_adapter(
+        &chat_request.provider_type,
+        chat_request.runtime_node_kind.as_deref(),
+    )?;
+
+    let result = match adapter {
+        ProviderExecutionAdapter::LocalOllama => {
+            execute_local_provider_service_chat_stream(window, &request).await
+        }
+        ProviderExecutionAdapter::CloudOpenAiCompatible
+        | ProviderExecutionAdapter::CloudMiniMaxCompatible => {
+            execute_cloud_provider_service_chat_stream(app, window, &request).await
+        }
+    };
+
+    clear_chat_run_abort(&request.run_id);
+    result
 }
 
 pub(crate) async fn execute_provider_service_chat(

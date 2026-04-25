@@ -16,19 +16,30 @@ import {
   engineerSystemPrompt,
   strategistSystemPrompt,
   threadById,
+  updateConversationMessage,
 } from "../../core/chat";
 import { applyProviderDiagnostics } from "../../core/policies";
 import { resolveAgentChatRoute } from "../../core/provider-service";
 import {
+  requestCreateTaskWorkspace,
   requestEngineerRecoveryTurn,
   requestLocalRuntimeStatus,
   requestProviderDiagnostics,
   requestProviderServiceChatCompletion,
+  requestProviderServiceChatCompletionStream,
 } from "../../core/runtime";
 import {
+  createEngineerDelegationPacket,
+  formatTaskWorkspaceCreatedReply,
+  shouldDelegateToEngineer,
+} from "../../core/delegation";
+import {
+  buildContextBudget,
+  compactThreadContext,
   formatCompactStateForPrompt,
   latestCompactStateForThread,
   promptMessagesForThread,
+  shouldAutoCompactContext,
 } from "../../core/context-memory";
 import {
   archiveCitationsFromBundle,
@@ -63,8 +74,8 @@ type ChatTurnControllerInput = {
   setAgentActivityLabel: Dispatch<SetStateAction<string>>;
   setProviderDiagnostics: Dispatch<SetStateAction<ProviderDiagnosticReport[]>>;
   setRecoveryRuntimeStatus: Dispatch<SetStateAction<LocalRuntimeStatus | null>>;
-  runToken: symbol;
-  isRunCurrent: (runToken: symbol) => boolean;
+  runToken: string;
+  isRunCurrent: (runToken: string) => boolean;
   errorMessageOf: (error: unknown, fallback: string) => string;
 };
 
@@ -120,6 +131,27 @@ export const executeChatTurn = async ({
   commitReadyState(nextState);
 
   try {
+    if (activeThread.owningAgentId === "strategist.core" && shouldDelegateToEngineer(trimmed)) {
+      setChatRunPhase("tool-running");
+      setAgentActivityLabel("Creating an Engineer delegation workspace.");
+      const packet = createEngineerDelegationPacket(nextState, {
+        mission: trimmed,
+        context:
+          "The human asked Augmentor to delegate this system-level task to the Resonant Engineer Agent. Create the workspace only; do not start execution yet.",
+      });
+      const workspace = await requestCreateTaskWorkspace(packet);
+      if (!isRunCurrent(runToken)) {
+        return;
+      }
+      const reply = formatTaskWorkspaceCreatedReply(workspace);
+      const withAssistant = appendAssistantMessage(cloneState(nextState), activeThread.id, reply);
+      commitReadyState(withAssistant);
+      setChatNotice("Engineer delegation workspace created. Execution has not started.");
+      setAgentActivityLabel("Engineer delegation workspace ready.");
+      setChatRunPhase("completed");
+      return;
+    }
+
     let routedState = nextState;
     try {
       setChatRunPhase("tool-running");
@@ -147,13 +179,35 @@ export const executeChatTurn = async ({
     if (provider.credentialStatus !== "configured") {
       throw new Error(`${provider.label} credential missing. Add it in Settings > Provider Profiles.`);
     }
+    const routedModel = route.model;
 
-    const thread = threadById(routedState, activeThread.id);
+    let thread = threadById(routedState, activeThread.id);
     if (!thread) {
       throw new Error("Active Strategist thread was not found.");
     }
-    const compactState = latestCompactStateForThread(routedState, thread.id);
-    const providerMessages = promptMessagesForThread(thread, compactState);
+    let compactState = latestCompactStateForThread(routedState, thread.id);
+    let providerMessages = promptMessagesForThread(thread, compactState);
+    const contextBudget = buildContextBudget({
+      thread: { ...thread, messages: providerMessages },
+      composer: "",
+      attachments: [],
+      provider,
+      runtimeNode,
+      modelId: route.model,
+    });
+    if (shouldAutoCompactContext(contextBudget)) {
+      setChatRunPhase("tool-running");
+      setAgentActivityLabel("Auto-compacting conversation memory before the next provider call.");
+      routedState = compactThreadContext(routedState, activeThread.id);
+      commitReadyState(routedState);
+      setChatNotice("Context reached the automatic compaction threshold. Conversation memory was compacted before sending.");
+      thread = threadById(routedState, activeThread.id);
+      if (!thread) {
+        throw new Error("Active Strategist thread was not found after compaction.");
+      }
+      compactState = latestCompactStateForThread(routedState, thread.id);
+      providerMessages = promptMessagesForThread(thread, compactState);
+    }
 
     const engineerTargetModel =
       routedState.providers.find((profile) => profile.id === "shared-local")?.primaryModel ?? "batiai/gemma4-e2b:q4";
@@ -240,9 +294,30 @@ export const executeChatTurn = async ({
       return;
     }
 
-    const reply =
-      recoveryTurn?.reply ??
-      (await requestProviderServiceChatCompletion({
+    let streamedAssistantMessageId: string | null = null;
+    let streamedReply = "";
+    let streamedState = routedState;
+    const streamAssistantChunk = (chunk: string) => {
+      if (!chunk || !isRunCurrent(runToken)) {
+        return;
+      }
+      streamedReply += chunk;
+      if (!streamedAssistantMessageId) {
+        streamedState = appendAssistantMessage(cloneState(streamedState), activeThread.id, streamedReply, {
+          archiveCitations: archiveCitationsFromBundle(archiveContext),
+        });
+        streamedAssistantMessageId = threadById(streamedState, activeThread.id)?.messages.at(-1)?.id ?? null;
+      } else {
+        streamedState = updateConversationMessage(cloneState(streamedState), activeThread.id, streamedAssistantMessageId, (message) => ({
+          ...message,
+          content: streamedReply,
+          status: undefined,
+        }));
+      }
+      commitReadyState(streamedState);
+    };
+    const nonStreamingRequest = () =>
+      requestProviderServiceChatCompletion({
         providerId: provider.id,
         providerType: provider.providerType,
         apiBaseUrl: runtimeNode.endpoint ?? provider.apiBaseUrl,
@@ -250,18 +325,53 @@ export const executeChatTurn = async ({
         runtimeNodeKind: runtimeNode.kind,
         runtimeNodeEndpoint: runtimeNode.endpoint,
         authTier: route.decision.authTier,
-        model: route.model,
+        model: routedModel,
         reasoningEffort: thinkingDepth,
         systemPrompt: effectiveSystemPrompt,
         messages: providerMessages,
+      });
+    const reply =
+      recoveryTurn?.reply ??
+      (await requestProviderServiceChatCompletionStream(
+        {
+          runId: runToken,
+          providerId: provider.id,
+          providerType: provider.providerType,
+          apiBaseUrl: runtimeNode.endpoint ?? provider.apiBaseUrl,
+          runtimeNodeId: runtimeNode.id,
+          runtimeNodeKind: runtimeNode.kind,
+          runtimeNodeEndpoint: runtimeNode.endpoint,
+          authTier: route.decision.authTier,
+          model: routedModel,
+          reasoningEffort: thinkingDepth,
+          systemPrompt: effectiveSystemPrompt,
+          messages: providerMessages,
+        },
+        (event) => {
+          if (event.type === "chunk") {
+            streamAssistantChunk(event.content);
+          }
+        },
+      ).catch((streamError) => {
+        if (streamedReply || !isRunCurrent(runToken)) {
+          throw streamError;
+        }
+        return nonStreamingRequest();
       }));
     if (!isRunCurrent(runToken)) {
       return;
     }
 
-    const withAssistant = appendAssistantMessage(cloneState(routedState), activeThread.id, reply, {
-      archiveCitations: archiveCitationsFromBundle(archiveContext),
-    });
+    const withAssistant = streamedAssistantMessageId
+      ? updateConversationMessage(cloneState(streamedState), activeThread.id, streamedAssistantMessageId, (message) => ({
+          ...message,
+          content: reply,
+          status: undefined,
+          archiveCitations: archiveCitationsFromBundle(archiveContext),
+        }))
+      : appendAssistantMessage(cloneState(routedState), activeThread.id, reply, {
+          archiveCitations: archiveCitationsFromBundle(archiveContext),
+        });
     if (recoveryTurn?.toolEvents.length) {
       withAssistant.recoverySession.changeLog = [
         ...withAssistant.recoverySession.changeLog,

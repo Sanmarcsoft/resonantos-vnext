@@ -121,6 +121,8 @@ TaskWorkspace/
 
 `delegation.packet.json` is the source of truth. `TASK.md` is generated and should not contain information that is absent from the packet unless explicitly marked as worker-local notes.
 
+The v1 host implementation creates this workspace through `delegation_create_task_workspace`. This command is execution-free: it creates the files and audit scaffolding but does not dispatch an external agent.
+
 ## Delegation Quality Rules
 
 ResonantOS must reject or require revision for delegation packets that are too vague.
@@ -427,4 +429,3 @@ References:
 - Engineer gains structured repair delegation without bypassing audit controls.
 - OpenClaw compatibility is maintained through generated `TASK.md`, but ResonantOS owns the stronger structured packet.
 - LangGraph can be evaluated without making it foundational too early.
-

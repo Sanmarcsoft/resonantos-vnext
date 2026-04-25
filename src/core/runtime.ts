@@ -2,6 +2,7 @@
 // Intent citation: docs/architecture/ADR-006-addon-runtime-sdk.md
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   AddOnManifest,
@@ -26,14 +27,17 @@ import type {
   ArchiveSystemMemoryRefreshResult,
   ArchiveSystemMemoryStatus,
   ConversationMessage,
+  DelegationPacket,
   EngineerRecoveryTurnResult,
   LocalRuntimeStatus,
   ProviderDiagnosticReport,
   ProviderProfile,
   RecoveryRouteCandidate,
   ResonantShellState,
+  TaskWorkspace,
 } from "./contracts";
 import { buildDefaultState } from "./defaults";
+import { renderDelegationTaskMarkdown, validateDelegationPacket } from "./delegation";
 import { createInstallationSnapshot } from "./policies";
 
 const STORAGE_KEY = "resonantos-vnext.runtime-state";
@@ -109,6 +113,49 @@ export const requestProviderServiceChatCompletion = async (input: {
 };
 
 export const requestStrategistReply = requestProviderServiceChatCompletion;
+
+export type ProviderChatStreamEvent = {
+  runId: string;
+  type: "chunk" | "completed" | "interrupted" | "error";
+  content: string;
+};
+
+export const requestProviderServiceChatCompletionStream = async (
+  input: {
+    runId: string;
+    providerId: string;
+    providerType: ProviderProfile["providerType"];
+    apiBaseUrl?: string;
+    runtimeNodeId?: string;
+    runtimeNodeKind?: string;
+    runtimeNodeEndpoint?: string;
+    authTier?: string;
+    model: string;
+    reasoningEffort: "minimal" | "medium" | "high";
+    systemPrompt: string;
+    messages: ConversationMessage[];
+  },
+  onEvent: (event: ProviderChatStreamEvent) => void,
+): Promise<string> => {
+  if (!hasTauri()) {
+    throw new Error("Streaming Strategist chat is available only in the desktop shell.");
+  }
+
+  const unlisten = await listen<ProviderChatStreamEvent>(`provider-chat-stream-${input.runId}`, (event) => {
+    onEvent(event.payload);
+  });
+  try {
+    return (await invoke("provider_service_chat_completion_stream", input)) as string;
+  } finally {
+    unlisten();
+  }
+};
+
+export const abortProviderServiceChatCompletion = async (runId: string): Promise<void> => {
+  if (hasTauri()) {
+    await invoke("provider_service_abort_chat_completion", { runId });
+  }
+};
 
 export const requestLocalRuntimeStatus = async (targetModel?: string): Promise<LocalRuntimeStatus> => {
   if (hasTauri()) {
@@ -355,6 +402,27 @@ export const persistState = async (state: ResonantShellState): Promise<void> => 
     return;
   }
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+};
+
+export const requestCreateTaskWorkspace = async (packet: DelegationPacket): Promise<TaskWorkspace> => {
+  const validation = validateDelegationPacket(packet);
+  if (!validation.valid) {
+    const errors = validation.issues
+      .filter((issue) => issue.severity === "error")
+      .map((issue) => `${issue.code}: ${issue.message}`)
+      .join("; ");
+    throw new Error(`Delegation packet is invalid: ${errors}`);
+  }
+  const taskMarkdown = renderDelegationTaskMarkdown(packet);
+  if (hasTauri()) {
+    return (await invoke("delegation_create_task_workspace", {
+      request: {
+        packet,
+        taskMarkdown,
+      },
+    })) as TaskWorkspace;
+  }
+  throw new Error("Task workspace creation is available only in the desktop shell.");
 };
 
 export const hydrateState = async (bundled: AddOnManifest[], sideloaded: AddOnManifest[]): Promise<ResonantShellState> => {

@@ -26,6 +26,11 @@ This map defines which folder owns which feature area so contributors do not kee
   - provider secret storage
   - add-on manifest validation/install persistence
 
+- `src-tauri/src/delegation_service.rs`
+  - execution-free task workspace creation
+  - `delegation.packet.json` and generated `TASK.md` persistence
+  - initial result, verification, artifact, and audit-log scaffolding
+
 - `src-tauri/src/provider_service.rs`
   - provider execution adapters
   - provider diagnostics

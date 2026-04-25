@@ -93,6 +93,14 @@ export const buildContextBudget = ({
   const reservedReasoningTokens = provider?.providerType === "openai" ? Math.round(maxContextTokens * 0.05) : 0;
   const reservedSystemTokens = Math.max(1_024, Math.round(maxContextTokens * 0.04));
   const reservedRetrievalTokens = Math.max(1_024, Math.round(maxContextTokens * 0.08));
+  const usableInputTokens = Math.max(
+    1,
+    maxContextTokens -
+      reservedOutputTokens -
+      reservedReasoningTokens -
+      reservedSystemTokens -
+      reservedRetrievalTokens,
+  );
   const usedInputTokens =
     estimateThreadTokens(thread) + estimateTextTokens(composer) + estimateAttachmentTokens(attachments);
 
@@ -105,8 +113,8 @@ export const buildContextBudget = ({
     reservedReasoningTokens,
     reservedSystemTokens,
     reservedRetrievalTokens,
-    compactionThreshold: Math.round(maxContextTokens * 0.8),
-    hardStopThreshold: Math.round(maxContextTokens * 0.95),
+    compactionThreshold: Math.round(usableInputTokens * 0.8),
+    hardStopThreshold: Math.round(usableInputTokens * 0.95),
     estimateQuality: "heuristic",
   };
 };
@@ -123,6 +131,9 @@ export const usableContextTokens = (budget: ContextBudget): number =>
 
 export const contextUsageRatio = (budget: ContextBudget): number =>
   Math.min(budget.usedInputTokens / usableContextTokens(budget), 1);
+
+export const shouldAutoCompactContext = (budget: ContextBudget): boolean =>
+  budget.usedInputTokens >= budget.compactionThreshold;
 
 export const formatTokenCount = (value: number): string => {
   if (value >= 1000) {
@@ -363,6 +374,44 @@ export const compactThreadContext = (
       preservedRecentMessageIds: compactState.preservedRecentMessageIds,
     },
   });
+};
+
+export const copyCompactStatesForFork = (
+  contextMemoryStates: ContextMemoryState[],
+  sourceThreadId: string,
+  forkThread: ConversationThread,
+  sourceMessageId?: string,
+): ContextMemoryState[] => {
+  const sourceStates = contextMemoryStates.filter((compactState) => compactState.threadId === sourceThreadId);
+  if (!sourceStates.length) {
+    return contextMemoryStates;
+  }
+
+  const forkMessageIds = new Set(forkThread.messages.map((message) => message.id));
+  const copiedStates = sourceStates.map((compactState) => {
+    const preservedRecentMessageIds = compactState.preservedRecentMessageIds
+      .map((messageId) => messageId.replace(`${sourceThreadId}:`, `${forkThread.id}:`))
+      .filter((messageId) => forkMessageIds.has(messageId));
+    return {
+      ...compactState,
+      threadId: forkThread.id,
+      compactedAt: new Date().toISOString(),
+      sourceRange: {
+        fromMessageId: compactState.sourceRange.fromMessageId.replace(`${sourceThreadId}:`, `${forkThread.id}:`),
+        toMessageId: (sourceMessageId ?? compactState.sourceRange.toMessageId).replace(`${sourceThreadId}:`, `${forkThread.id}:`),
+      },
+      userIntent: {
+        ...compactState.userIntent,
+        sourceMessageIds: compactState.userIntent.sourceMessageIds
+          .map((messageId) => messageId.replace(`${sourceThreadId}:`, `${forkThread.id}:`))
+          .filter((messageId) => forkMessageIds.has(messageId)),
+      },
+      preservedRecentMessageIds,
+      checksum: `${compactState.checksum}:fork:${forkThread.id}`,
+    };
+  });
+
+  return [...contextMemoryStates, ...copiedStates];
 };
 
 export const latestCompactStateForThread = (

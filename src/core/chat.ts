@@ -90,6 +90,17 @@ export const appendAssistantMessage = (
   return appendMessage(state, threadId, "assistant", author, content.trim(), metadata);
 };
 
+export const updateConversationMessage = (
+  state: ResonantShellState,
+  threadId: string,
+  messageId: string,
+  updater: (message: ConversationMessage) => ConversationMessage,
+): ResonantShellState =>
+  updateThread(state, threadId, (thread) => ({
+    ...thread,
+    messages: thread.messages.map((message) => (message.id === messageId ? updater(message) : message)),
+  }));
+
 export const createStrategistThread = (
   state: ResonantShellState,
   input: { channelId: string; workspaceId: string; title?: string },

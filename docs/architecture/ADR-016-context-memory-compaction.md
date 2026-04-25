@@ -157,9 +157,14 @@ Each provider profile must declare or derive:
 Default thresholds:
 
 - `70%`: soft warning in UI
-- `80%`: prepare compact state in background when possible
-- `90%`: require compaction before another long response
-- `95%`: hard stop unless provider-native compaction is available and policy allows it
+- `80%` of usable input budget: prepare compact state in background when possible
+- `90%` of usable input budget: require compaction before another long response
+- `95%` of usable input budget: hard stop unless provider-native compaction is available and policy allows it
+
+The usable input budget is the model context ceiling minus reserved output,
+reasoning, system, and retrieval tokens. UI percentages and automatic triggers
+must use the same usable-input denominator so the user sees compaction near the
+same percentage the system uses internally.
 
 The user may also trigger `Compact now`.
 

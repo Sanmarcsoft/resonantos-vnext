@@ -6,6 +6,8 @@ import type {
   DelegationTarget,
   DelegationValidationIssue,
   DelegationValidationResult,
+  ResonantShellState,
+  TaskWorkspace,
 } from "./contracts";
 
 const VAGUE_MISSION_PATTERNS = [
@@ -185,3 +187,168 @@ export const delegationTargetsFromManifests = (manifests: AddOnManifest[]): Dele
     .map((manifest) => delegationTargetFromManifest(manifest))
     .filter((target): target is DelegationTarget => target !== null);
 
+export const nativeDelegationTargetsFromState = (state: ResonantShellState): DelegationTarget[] => {
+  const engineer = state.agents.find((agent) => agent.id === state.recoverySession.engineerAgentId);
+  if (!engineer) {
+    return [];
+  }
+
+  return [
+    {
+      id: engineer.id,
+      label: engineer.displayName,
+      runtime: "native-agent",
+      agentId: engineer.id,
+      acceptedTaskTypes: ["system-diagnosis", "system-repair", "bug-fix", "code-change"],
+      supportedArtifactTypes: ["summary", "diagnostic-report", "verification-report", "log", "diff", "file-list"],
+      requiredCapabilities: [
+        "filesystem.read",
+        "filesystem.search",
+        "filesystem.patch",
+        "process.safe_command",
+        "provider.probe",
+        "delegation.collect_artifacts",
+        "delegation.verify_result",
+      ],
+      defaultRequiresHumanApproval: true,
+    },
+  ];
+};
+
+export const delegationTargetsForState = (state: ResonantShellState, manifests: AddOnManifest[]): DelegationTarget[] => [
+  ...nativeDelegationTargetsFromState(state),
+  ...delegationTargetsFromManifests(manifests),
+];
+
+export const shouldDelegateToEngineer = (message: string): boolean => {
+  const normalized = message.toLowerCase();
+  return (
+    /\bdelegate\b.*\b(engineer|diagnos|repair|system|runtime|provider|recovery)\b/.test(normalized) ||
+    /\bask\b.*\b(engineer)\b/.test(normalized) ||
+    /\b(engineer)\b.*\b(check|diagnos|repair|investigate)\b/.test(normalized)
+  );
+};
+
+const compactIdFragment = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 32) || "engineer-task";
+
+export const createEngineerDelegationPacket = (
+  state: ResonantShellState,
+  input: {
+    mission: string;
+    context?: string;
+    taskType?: "system-diagnosis" | "system-repair";
+    createdAt?: string;
+  },
+): DelegationPacket => {
+  const createdAt = input.createdAt ?? new Date().toISOString();
+  const engineerId = state.recoverySession.engineerAgentId;
+  const mission = input.mission.trim();
+  const workspaceId = `workspace-engineer-${compactIdFragment(mission)}-${createdAt.replace(/[^0-9]/g, "").slice(0, 14)}`;
+  const taskType = input.taskType ?? "system-diagnosis";
+
+  return {
+    id: `delegation-${workspaceId}`,
+    createdAt,
+    createdByAgentId: "strategist.core",
+    targetAgentId: engineerId,
+    targetRuntime: "native-agent",
+    taskType,
+    mission,
+    context:
+      input.context?.trim() ||
+      "Augmentor is delegating a system-level diagnostic task. Create the task workspace only; do not execute repair actions until explicitly started.",
+    sourceMemoryRefs: [],
+    systemMemoryRefs: [
+      "system://resonantos-system-index",
+      "system://resonantos-architecture-contract",
+      "system://resonantos-archive-recovery-contract",
+    ],
+    workspaceId,
+    filesInScope: taskType === "system-repair" ? ["ResonantOS runtime/config/code files selected during diagnosis"] : [],
+    allowedTools: [
+      "filesystem.read",
+      "filesystem.search",
+      "provider.probe",
+      "archive.search",
+      "archive.read",
+      "delegation.collect_artifacts",
+      "delegation.verify_result",
+    ],
+    forbiddenActions: [
+      "Do not execute repair commands in this workspace creation step.",
+      "Do not modify files until the human explicitly starts the Engineer task.",
+      "Do not access raw secrets.",
+      "Do not write trusted Living Archive knowledge pages.",
+    ],
+    capabilityGrants: [
+      {
+        capability: "filesystem",
+        granted: true,
+        scope: "workspace",
+        revocationBehavior: "hard-stop",
+      },
+      {
+        capability: "archive-read",
+        granted: true,
+        scope: "shared",
+        revocationBehavior: "degrade",
+      },
+      {
+        capability: "providers",
+        granted: true,
+        scope: "shared",
+        revocationBehavior: "degrade",
+      },
+    ],
+    providerPolicy: {
+      preferredProviderProfileIds: ["shared-local", "shared-minimax", "shared-openai"],
+      preferredRuntimeNodeIds: ["node-local-resurrect", "node-minimax-cloud", "node-openai-cloud"],
+      preferredModels: ["batiai/gemma4-e2b:q4", "MiniMax-M2.7", "gpt-5.4"],
+      allowedRuntimeKinds: ["local", "cloud", "remote-user-owned"],
+      fallbackPolicyId: "recovery-default",
+    },
+    costPolicy: {
+      sensitivity: "high",
+      preferredCostTier: "free-local",
+      allowPaidEscalation: true,
+      rationale: "System diagnosis should start local where possible, then escalate only when a stronger model is needed.",
+    },
+    humanApprovalRequired: taskType === "system-repair",
+    approvalReasons: taskType === "system-repair" ? ["broad-filesystem"] : [],
+    verificationRequirements: [
+      {
+        id: "diagnostic-report",
+        label: "Return a diagnostic report with facts, suspected cause, and proposed next step.",
+        method: "manual-review",
+        required: true,
+      },
+    ],
+    expectedArtifacts: ["summary", "diagnostic-report", "verification-report", "log"],
+    returnProtocol: {
+      summaryRequired: true,
+      artifactTypes: ["summary", "diagnostic-report", "verification-report", "log"],
+      mustReportFilesChanged: true,
+      mustReportCommandsRun: true,
+      mustReportResidualRisks: true,
+      mustReportVerification: true,
+    },
+    auditLogPath: `${workspaceId}/logs/audit.jsonl`,
+  };
+};
+
+export const formatTaskWorkspaceCreatedReply = (workspace: TaskWorkspace): string =>
+  [
+    "I created an Engineer delegation workspace. No agent execution has started yet.",
+    "",
+    `- Workspace: \`${workspace.rootPath}\``,
+    `- Delegation packet: \`${workspace.packetPath}\``,
+    `- TASK.md: \`${workspace.taskMarkdownPath}\``,
+    `- Verification: \`${workspace.verificationPath}\``,
+    "",
+    "Next step, when approved: start the Engineer task from this workspace and collect its diagnostic artifacts.",
+  ].join("\n");

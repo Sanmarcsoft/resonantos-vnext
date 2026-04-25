@@ -4,12 +4,14 @@ import {
   buildDeterministicCompactState,
   buildContextBudget,
   compactThreadContext,
+  copyCompactStatesForFork,
   contextBudgetTitle,
   contextUsageRatio,
   estimateTextTokens,
   formatCompactStateForPrompt,
   latestCompactStateForThread,
   promptMessagesForThread,
+  shouldAutoCompactContext,
   usableContextTokens,
 } from "./context-memory";
 
@@ -61,6 +63,24 @@ describe("context memory budget estimation", () => {
 
     expect(budget.maxContextTokens).toBe(8_192);
     expect(budget.providerId).toBe("shared-local");
+  });
+
+  it("triggers automatic compaction at the configured threshold", () => {
+    const state = buildDefaultState([]);
+    const provider = state.providers.find((item) => item.id === "shared-local")!;
+    const runtimeNode = state.runtimeNodes.find((item) => item.id === "node-local-resurrect")!;
+
+    const budget = buildContextBudget({
+      thread: null,
+      composer: "x".repeat(27_000),
+      attachments: [],
+      provider,
+      runtimeNode,
+      modelId: "batiai/gemma4-e2b:q4",
+    });
+
+    expect(budget.compactionThreshold).toBe(Math.round(usableContextTokens(budget) * 0.8));
+    expect(shouldAutoCompactContext(budget)).toBe(true);
   });
 
   it("persists compact state separately and records a compaction transcript event", () => {
@@ -136,6 +156,33 @@ describe("context memory budget estimation", () => {
     ]);
     expect(formatCompactStateForPrompt(compactState)).toContain("User why:");
     expect(latestCompactStateForThread({ contextMemoryStates: [compactState] }, thread.id)?.checksum).toBe(compactState.checksum);
+  });
+
+  it("copies compact states when a compacted thread is forked", () => {
+    const state = buildDefaultState([]);
+    const compacted = compactThreadContext(state, "thread-main-desktop", 1);
+    const sourceThread = compacted.conversationThreads.find((thread) => thread.id === "thread-main-desktop")!;
+    const forkThread = {
+      ...sourceThread,
+      id: "thread-fork-test",
+      messages: sourceThread.messages.map((message) => ({
+        ...message,
+        id: message.id.replace("thread-main-desktop:", "thread-fork-test:"),
+        threadId: "thread-fork-test",
+      })),
+    };
+
+    const copiedStates = copyCompactStatesForFork(
+      compacted.contextMemoryStates,
+      sourceThread.id,
+      forkThread,
+    );
+    const forkCompactState = latestCompactStateForThread({ contextMemoryStates: copiedStates }, forkThread.id);
+
+    expect(forkCompactState).toBeTruthy();
+    expect(forkCompactState?.threadId).toBe("thread-fork-test");
+    expect(forkCompactState?.preservedRecentMessageIds.every((messageId) => messageId.startsWith("thread-fork-test:"))).toBe(true);
+    expect(forkCompactState?.checksum).toContain(":fork:thread-fork-test");
   });
 });
 
