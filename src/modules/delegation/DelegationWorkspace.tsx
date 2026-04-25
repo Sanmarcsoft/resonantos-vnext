@@ -2,21 +2,25 @@
 // Intent citation: docs/architecture/ADR-015-delegation-fabric-addon-catalog-native-tools.md
 
 import { useEffect, useState } from "react";
-import type { TaskWorkspace } from "../../core/contracts";
-import { requestListTaskWorkspaces } from "../../core/runtime";
+import type { TaskWorkspace, TaskWorkspacePayload } from "../../core/contracts";
+import { requestListTaskWorkspaces, requestReadTaskWorkspace } from "../../core/runtime";
+import { MessageContent } from "../chat/MessageContent";
 
 type DelegationWorkspaceProps = {
   chatBusy: boolean;
   onStartWorkspace: (workspaceId: string) => Promise<void>;
+  onAskAugmentor: (message: string) => Promise<void>;
 };
 
 const errorMessageOf = (error: unknown): string =>
   typeof error === "string" ? error : error instanceof Error ? error.message : "Unable to load delegation workspaces.";
 
-export function DelegationWorkspace({ chatBusy, onStartWorkspace }: DelegationWorkspaceProps) {
+export function DelegationWorkspace({ chatBusy, onStartWorkspace, onAskAugmentor }: DelegationWorkspaceProps) {
   const [workspaces, setWorkspaces] = useState<TaskWorkspace[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
+  const [selectedPayload, setSelectedPayload] = useState<TaskWorkspacePayload | null>(null);
   const [busy, setBusy] = useState(false);
+  const [payloadBusy, setPayloadBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? workspaces[0] ?? null;
 
@@ -40,10 +44,44 @@ export function DelegationWorkspace({ chatBusy, onStartWorkspace }: DelegationWo
     void refresh();
   }, []);
 
+  useEffect(() => {
+    if (!selectedWorkspace) {
+      setSelectedPayload(null);
+      return;
+    }
+    let cancelled = false;
+    setPayloadBusy(true);
+    void requestReadTaskWorkspace(selectedWorkspace.id)
+      .then((payload) => {
+        if (!cancelled) {
+          setSelectedPayload(payload);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setSelectedPayload(null);
+          setNotice(errorMessageOf(error));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPayloadBusy(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedWorkspace?.id]);
+
   const startWorkspace = async (workspaceId: string) => {
     setNotice("Starting the Engineer task through Augmentor.");
     await onStartWorkspace(workspaceId);
     await refresh();
+    try {
+      setSelectedPayload(await requestReadTaskWorkspace(workspaceId));
+    } catch (error) {
+      setNotice(errorMessageOf(error));
+    }
   };
 
   return (
@@ -103,7 +141,14 @@ export function DelegationWorkspace({ chatBusy, onStartWorkspace }: DelegationWo
 
         <section className="delegation-detail-panel" aria-label="Selected delegation workspace">
           {selectedWorkspace ? (
-            <DelegationWorkspaceDetail workspace={selectedWorkspace} chatBusy={chatBusy} onStartWorkspace={startWorkspace} />
+            <DelegationWorkspaceDetail
+              workspace={selectedWorkspace}
+              payload={selectedPayload}
+              payloadBusy={payloadBusy}
+              chatBusy={chatBusy}
+              onStartWorkspace={startWorkspace}
+              onAskAugmentor={onAskAugmentor}
+            />
           ) : (
             <div className="delegation-empty-state large">
               <span className="eyebrow">Waiting for work</span>
@@ -122,13 +167,22 @@ export function DelegationWorkspace({ chatBusy, onStartWorkspace }: DelegationWo
 
 function DelegationWorkspaceDetail({
   workspace,
+  payload,
+  payloadBusy,
   chatBusy,
   onStartWorkspace,
+  onAskAugmentor,
 }: {
   workspace: TaskWorkspace;
+  payload: TaskWorkspacePayload | null;
+  payloadBusy: boolean;
   chatBusy: boolean;
   onStartWorkspace: (workspaceId: string) => Promise<void>;
+  onAskAugmentor: (message: string) => Promise<void>;
 }) {
+  const verificationStatus = verificationStatusOf(payload);
+  const resultReady = Boolean(payload?.resultMarkdown && !payload.resultMarkdown.includes("No result has been returned yet."));
+
   return (
     <>
       <div className="delegation-detail-head">
@@ -137,7 +191,7 @@ function DelegationWorkspaceDetail({
           <h3>{workspaceTitle(workspace)}</h3>
           <p>{workspace.id}</p>
         </div>
-        <span className="app-status app-status-warning">ready</span>
+        <span className={`app-status app-status-${verificationTone(verificationStatus)}`}>{verificationStatus}</span>
       </div>
 
       <div className="delegation-action-row">
@@ -149,10 +203,47 @@ function DelegationWorkspaceDetail({
         >
           {chatBusy ? "Agent Busy" : "Start Engineer Task"}
         </button>
-        <button type="button" className="button-secondary touch-action" disabled>
-          Review Result Soon
+        <button
+          type="button"
+          className="button-secondary touch-action"
+          onClick={() => void onAskAugmentor(`Review the delegation result for ${workspace.id} and tell me whether it should be promoted, followed up, or archived.`)}
+          disabled={chatBusy || !resultReady}
+        >
+          Ask Augmentor to Review
+        </button>
+        <button
+          type="button"
+          className="button-secondary touch-action"
+          onClick={() => void onAskAugmentor(`Create a follow-up Engineer task from the result of ${workspace.id}. Preserve scope, verification, and audit requirements.`)}
+          disabled={chatBusy || !resultReady}
+        >
+          Create Follow-up Task
         </button>
       </div>
+
+      <section className="delegation-review-panel" aria-label="Delegation result review">
+        <div className="workspace-section-head">
+          <div>
+            <span className="eyebrow">Review</span>
+            <h3>{payloadBusy ? "Loading result..." : resultReady ? "Engineer result returned" : "Result pending"}</h3>
+          </div>
+          <span className={`app-status app-status-${verificationTone(verificationStatus)}`}>{verificationStatus}</span>
+        </div>
+        <div className="delegation-review-grid">
+          <article className="delegation-review-card result">
+            <span className="eyebrow">result.md</span>
+            {payload?.resultMarkdown ? (
+              <MessageContent content={payload.resultMarkdown} />
+            ) : (
+              <p>No result has been loaded for this workspace yet.</p>
+            )}
+          </article>
+          <article className="delegation-review-card">
+            <span className="eyebrow">verification.json</span>
+            <pre>{payload ? JSON.stringify(payload.verification, null, 2) : "Not loaded."}</pre>
+          </article>
+        </div>
+      </section>
 
       <div className="delegation-path-grid">
         <PathCard label="TASK.md" path={workspace.taskMarkdownPath} />
@@ -164,6 +255,21 @@ function DelegationWorkspaceDetail({
       </div>
     </>
   );
+}
+
+function verificationStatusOf(payload: TaskWorkspacePayload | null): string {
+  const status = payload?.verification?.status;
+  return typeof status === "string" && status.trim() ? status : "pending";
+}
+
+function verificationTone(status: string): "active" | "warning" | "idle" {
+  if (status === "completed" || status === "passed") {
+    return "active";
+  }
+  if (status === "needs-review" || status === "failed" || status === "pending") {
+    return "warning";
+  }
+  return "idle";
 }
 
 function PathCard({ label, path }: { label: string; path: string }) {

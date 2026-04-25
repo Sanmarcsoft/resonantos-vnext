@@ -1105,6 +1105,9 @@ export function App() {
               onStartWorkspace={async (workspaceId) => {
                 await sendStrategistMessage(`start engineer task ${workspaceId}`);
               }}
+              onAskAugmentor={async (message) => {
+                await sendStrategistMessage(message);
+              }}
             />
           )}
 
