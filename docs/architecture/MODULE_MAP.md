@@ -74,6 +74,7 @@ This map defines which folder owns which feature area so contributors do not kee
 - `src/modules/delegation/`
   - Delegation Monitor center workspace
   - host-owned task workspace listing
+  - selected task result and verification review
   - touch-friendly task selection and explicit start controls
   - supervision surface only; Augmentor remains the delegation manager
 

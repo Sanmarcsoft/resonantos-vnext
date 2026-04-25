@@ -133,7 +133,7 @@ Start semantics:
 - failed tool events must mark verification as `needs-review`
 - no worker result is promoted into code, config, or Living Archive memory without a later review/approval action
 
-The Delegation Monitor is the supervision surface for these workspaces. It does not replace Augmentor and must not invent tasks by itself. Its job is to list host-owned task workspaces, expose paths and status in a touch-friendly way, and let the human explicitly start or review work that Augmentor already prepared.
+The Delegation Monitor is the supervision surface for these workspaces. It does not replace Augmentor and must not invent tasks by itself. Its job is to list host-owned task workspaces, expose paths and status in a touch-friendly way, and let the human explicitly start or review work that Augmentor already prepared. Review controls may ask Augmentor to interpret a result or create a follow-up task, but they must not silently promote worker output into code, config, or Living Archive memory.
 
 ## Delegation Quality Rules
 

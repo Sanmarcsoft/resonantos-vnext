@@ -167,8 +167,12 @@ Last updated: 2026-04-25
   - users can start an Engineer task from the center workspace without typing the command phrase
   - the monitor exposes packet, task, result, verification, artifacts, and audit paths
   - Augmentor remains the delegation manager; the monitor is only the supervision/control surface
+- Added Delegation Monitor review mode on 2026-04-25:
+  - selected workspaces load `result.md` and `verification.json`
+  - verification state is shown directly in the monitor
+  - follow-up controls route back through Augmentor instead of silently promoting worker output
 - Build add-on launcher UX from `docs/product/UX-001-resonantos-app-shell.md`.
-- Continue Delegation Monitor with result preview, verification status parsing, and Promote/Archive controls.
+- Continue Delegation Monitor with artifact previews and explicit archive-intake review requests for approved results.
 - Add center-workspace app opening state for installed add-ons.
 - Add workspace renderers for add-on runtime types:
   - embedded app

@@ -169,8 +169,8 @@ const {
       auditLogPath: "workspace-engineer-provider-diagnostic/logs/audit.jsonl",
     },
     taskMarkdown: "# TASK.md\n\nRun provider diagnostics.",
-    resultMarkdown: "# Delegation Result\n\nNo result has been returned yet.",
-    verification: { status: "pending" },
+    resultMarkdown: "# Delegation Result\n\nEngineer recovery handled this turn through the local tool loop.",
+    verification: { status: "completed", checks: [{ id: "engineer-task-run", status: "passed" }] },
   })),
   requestFinishTaskWorkspaceMock: vi.fn(async () => ({
     workspace: {
@@ -695,8 +695,8 @@ describe("App boot flow", () => {
         auditLogPath: "workspace-engineer-provider-diagnostic/logs/audit.jsonl",
       },
       taskMarkdown: "# TASK.md\n\nRun provider diagnostics.",
-      resultMarkdown: "# Delegation Result\n\nNo result has been returned yet.",
-      verification: { status: "pending" },
+      resultMarkdown: "# Delegation Result\n\nEngineer recovery handled this turn through the local tool loop.",
+      verification: { status: "completed", checks: [{ id: "engineer-task-run", status: "passed" }] },
     } as never);
     requestFinishTaskWorkspaceMock.mockReset();
     requestFinishTaskWorkspaceMock.mockResolvedValue({
@@ -1116,6 +1116,10 @@ describe("App boot flow", () => {
 
     expect(await screen.findByText("Supervise work Augmentor delegates to agents and add-ons.")).toBeTruthy();
     expect((await screen.findAllByText(/Engineer Provider Diagnostic/i)).length).toBeGreaterThan(0);
+    expect(await screen.findByText("Engineer result returned")).toBeTruthy();
+    expect(await screen.findByText(/Engineer recovery handled this turn through the local tool loop/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ask Augmentor to Review" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create Follow-up Task" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Start Engineer Task" }));
 

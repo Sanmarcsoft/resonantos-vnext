@@ -1202,6 +1202,52 @@ select {
   gap: 0.65rem;
 }
 
+.delegation-review-panel {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid rgba(138, 128, 112, 0.16);
+  border-radius: 20px;
+  background: rgba(9, 11, 12, 0.18);
+}
+
+.delegation-review-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(240px, 0.85fr);
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.delegation-review-card {
+  min-width: 0;
+  max-height: 420px;
+  overflow: auto;
+  padding: 0.85rem;
+  border: 1px solid rgba(138, 128, 112, 0.14);
+  border-radius: 18px;
+  background: rgba(7, 9, 10, 0.28);
+}
+
+.delegation-review-card.result {
+  background:
+    radial-gradient(circle at top left, rgba(16, 185, 129, 0.08), transparent 11rem),
+    rgba(7, 9, 10, 0.28);
+}
+
+.delegation-review-card p {
+  color: var(--text-secondary);
+}
+
+.delegation-review-card pre {
+  margin: 0.5rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .delegation-path-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
@@ -3781,6 +3827,7 @@ select {
 	  .home-hero-panel,
 	  .app-workbench-grid,
   .delegation-grid,
+  .delegation-review-grid,
 	  .classification-review-head,
 	  .classification-review-grid,
 	  .channel-grid,
