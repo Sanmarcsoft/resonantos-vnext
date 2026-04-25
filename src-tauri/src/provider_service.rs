@@ -138,6 +138,16 @@ fn emit_chat_stream_event(
         .map_err(|error| format!("Failed to emit chat stream event: {error}"))
 }
 
+fn emit_chat_usage_event(
+    window: &Window,
+    run_id: &str,
+    usage: &ProviderUsageTelemetry,
+) -> Result<(), String> {
+    let content = serde_json::to_string(usage)
+        .map_err(|error| format!("Failed to serialize provider usage telemetry: {error}"))?;
+    emit_chat_stream_event(window, run_id, "usage", &content)
+}
+
 fn extract_cloud_stream_delta(payload: &Value) -> Option<String> {
     payload
         .get("choices")
@@ -155,6 +165,51 @@ fn extract_local_stream_delta(payload: &Value) -> Option<String> {
         .and_then(|message| message.get("content"))
         .and_then(Value::as_str)
         .map(ToString::to_string)
+}
+
+fn number_field(payload: &Value, key: &str) -> Option<u32> {
+    payload
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+}
+
+fn extract_cloud_usage(
+    provider_id: &str,
+    model: &str,
+    payload: &Value,
+) -> Option<ProviderUsageTelemetry> {
+    let usage = payload.get("usage")?;
+    Some(ProviderUsageTelemetry {
+        provider_id: provider_id.to_string(),
+        model: model.to_string(),
+        source: "provider".to_string(),
+        prompt_tokens: number_field(usage, "prompt_tokens"),
+        completion_tokens: number_field(usage, "completion_tokens"),
+        total_tokens: number_field(usage, "total_tokens"),
+    })
+}
+
+fn extract_local_usage(
+    provider_id: &str,
+    model: &str,
+    payload: &Value,
+) -> Option<ProviderUsageTelemetry> {
+    let prompt_tokens = number_field(payload, "prompt_eval_count");
+    let completion_tokens = number_field(payload, "eval_count");
+    if prompt_tokens.is_none() && completion_tokens.is_none() {
+        return None;
+    }
+    Some(ProviderUsageTelemetry {
+        provider_id: provider_id.to_string(),
+        model: model.to_string(),
+        source: "local-runtime".to_string(),
+        prompt_tokens,
+        completion_tokens,
+        total_tokens: prompt_tokens
+            .zip(completion_tokens)
+            .map(|(prompt, completion)| prompt + completion),
+    })
 }
 
 #[derive(Clone, Deserialize)]
@@ -219,6 +274,20 @@ pub(crate) struct ChatStreamEvent {
     #[serde(rename = "type")]
     pub(crate) event_type: String,
     pub(crate) content: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderUsageTelemetry {
+    pub(crate) provider_id: String,
+    pub(crate) model: String,
+    pub(crate) source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) prompt_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) completion_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) total_tokens: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -1029,13 +1098,19 @@ async fn execute_cloud_provider_service_chat_stream(
         "minimax" => json!({
             "model": request.model,
             "messages": request_messages,
-            "stream": true
+            "stream": true,
+            "stream_options": {
+                "include_usage": true
+            }
         }),
         _ => json!({
             "model": request.model,
             "messages": request_messages,
             "reasoning_effort": request.reasoning_effort,
-            "stream": true
+            "stream": true,
+            "stream_options": {
+                "include_usage": true
+            }
         }),
     };
 
@@ -1067,6 +1142,7 @@ async fn execute_cloud_provider_service_chat_stream(
 
     let mut full = String::new();
     let mut pending = String::new();
+    let mut usage: Option<ProviderUsageTelemetry> = None;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         if chat_run_aborted(&request.run_id) {
@@ -1083,10 +1159,18 @@ async fn execute_cloud_provider_service_chat_stream(
             }
             let data = line.trim_start_matches("data:").trim();
             if data == "[DONE]" {
+                if let Some(usage) = usage.as_ref() {
+                    emit_chat_usage_event(window, &request.run_id, usage)?;
+                }
                 emit_chat_stream_event(window, &request.run_id, "completed", "")?;
                 return Ok(sanitize_assistant_content(&request.provider_type, &full));
             }
             if let Ok(payload) = serde_json::from_str::<Value>(data) {
+                if let Some(next_usage) =
+                    extract_cloud_usage(&request.provider_id, &request.model, &payload)
+                {
+                    usage = Some(next_usage);
+                }
                 if let Some(delta) = extract_cloud_stream_delta(&payload) {
                     let sanitized_delta =
                         sanitize_assistant_content(&request.provider_type, &delta);
@@ -1099,6 +1183,9 @@ async fn execute_cloud_provider_service_chat_stream(
         }
     }
 
+    if let Some(usage) = usage.as_ref() {
+        emit_chat_usage_event(window, &request.run_id, usage)?;
+    }
     emit_chat_stream_event(window, &request.run_id, "completed", "")?;
     Ok(sanitize_assistant_content(&request.provider_type, &full))
 }
@@ -1139,6 +1226,7 @@ async fn execute_local_provider_service_chat_stream(
 
     let mut full = String::new();
     let mut pending = String::new();
+    let mut usage: Option<ProviderUsageTelemetry> = None;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         if chat_run_aborted(&request.run_id) {
@@ -1154,6 +1242,11 @@ async fn execute_local_provider_service_chat_stream(
                 continue;
             }
             if let Ok(payload) = serde_json::from_str::<Value>(&line) {
+                if let Some(next_usage) =
+                    extract_local_usage(&request.provider_id, &request.model, &payload)
+                {
+                    usage = Some(next_usage);
+                }
                 if let Some(delta) = extract_local_stream_delta(&payload) {
                     if !delta.is_empty() {
                         full.push_str(&delta);
@@ -1161,6 +1254,9 @@ async fn execute_local_provider_service_chat_stream(
                     }
                 }
                 if payload.get("done").and_then(Value::as_bool) == Some(true) {
+                    if let Some(usage) = usage.as_ref() {
+                        emit_chat_usage_event(window, &request.run_id, usage)?;
+                    }
                     emit_chat_stream_event(window, &request.run_id, "completed", "")?;
                     return Ok(sanitize_assistant_content("local", &full));
                 }
@@ -1168,6 +1264,9 @@ async fn execute_local_provider_service_chat_stream(
         }
     }
 
+    if let Some(usage) = usage.as_ref() {
+        emit_chat_usage_event(window, &request.run_id, usage)?;
+    }
     emit_chat_stream_event(window, &request.run_id, "completed", "")?;
     Ok(sanitize_assistant_content("local", &full))
 }
@@ -1280,10 +1379,10 @@ pub(crate) async fn execute_archive_ingest_probe(
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_runtime_kind_supported, extract_assistant_content, extract_local_assistant_content,
-        parse_ollama_model_names, resolve_local_runtime_model, resolve_provider_base_url,
-        resolve_provider_execution_adapter, sanitize_assistant_content, strip_think_blocks,
-        ProviderExecutionAdapter,
+        ensure_runtime_kind_supported, extract_assistant_content, extract_cloud_usage,
+        extract_local_assistant_content, extract_local_usage, parse_ollama_model_names,
+        resolve_local_runtime_model, resolve_provider_base_url, resolve_provider_execution_adapter,
+        sanitize_assistant_content, strip_think_blocks, ProviderExecutionAdapter,
     };
     use serde_json::json;
 
@@ -1399,5 +1498,39 @@ mod tests {
         let content =
             extract_local_assistant_content(&payload).expect("local content should parse");
         assert_eq!(content, "Local answer");
+    }
+
+    #[test]
+    fn extracts_cloud_provider_usage() {
+        let payload = json!({
+            "usage": {
+                "prompt_tokens": 120,
+                "completion_tokens": 30,
+                "total_tokens": 150
+            }
+        });
+        let usage = extract_cloud_usage("shared-minimax", "MiniMax-M2.7", &payload)
+            .expect("cloud usage should parse");
+        assert_eq!(usage.provider_id, "shared-minimax");
+        assert_eq!(usage.model, "MiniMax-M2.7");
+        assert_eq!(usage.source, "provider");
+        assert_eq!(usage.prompt_tokens, Some(120));
+        assert_eq!(usage.completion_tokens, Some(30));
+        assert_eq!(usage.total_tokens, Some(150));
+    }
+
+    #[test]
+    fn extracts_local_runtime_usage() {
+        let payload = json!({
+            "done": true,
+            "prompt_eval_count": 42,
+            "eval_count": 11
+        });
+        let usage = extract_local_usage("shared-local", "batiai/gemma4-e2b:q4", &payload)
+            .expect("local usage should parse");
+        assert_eq!(usage.source, "local-runtime");
+        assert_eq!(usage.prompt_tokens, Some(42));
+        assert_eq!(usage.completion_tokens, Some(11));
+        assert_eq!(usage.total_tokens, Some(53));
     }
 }
