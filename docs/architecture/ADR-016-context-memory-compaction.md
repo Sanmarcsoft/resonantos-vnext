@@ -11,6 +11,7 @@ ResonantOS must implement context compaction as a host-owned **Context Memory Pi
 The chat context meter may show a simple percentage in the UI, but the underlying system must preserve continuity through structured, source-linked memory layers:
 
 - immutable raw transcript
+- user intent and why
 - rolling working summary
 - decision ledger
 - facts, entities, and user preferences
@@ -25,7 +26,7 @@ Older chat turns may be compacted out of the active provider prompt only after t
 
 Long-running AI relationships fail when the system silently drops old context, summarizes too aggressively, or relies on a single opaque provider conversation object. ResonantOS cannot assume one provider will preserve state forever because the provider fabric can route across OpenAI, MiniMax, Anthropic, Gemini, local models, and user-owned runtime nodes.
 
-The goal is not to keep every token in every prompt. The goal is to preserve meaning, decisions, obligations, architecture constraints, user preferences, and work state in a way that survives provider switches, context limits, app restarts, and recovery mode.
+The goal is not to keep every token in every prompt. The goal is to preserve meaning, user intent, the why behind the work, decisions, obligations, architecture constraints, user preferences, and work state in a way that survives provider switches, context limits, app restarts, and recovery mode.
 
 ## External Evidence
 
@@ -44,6 +45,8 @@ These mechanisms are useful references, but ResonantOS must not depend on any on
 - Compaction must be explicit, auditable, and reversible from raw transcript where possible.
 - The active prompt must include a compact state block plus recent turns, not only an LLM-written prose summary.
 - Every compact state block must record source message ids, artifact ids, or document paths for important claims.
+- User intent and rationale must be first-class fields, not inferred from task lists or summaries.
+- If the user explains why something matters, compaction must preserve that reason even when the associated implementation detail changes.
 - User preferences must be separated from project decisions.
 - Open tasks must be separated from completed tasks.
 - Architecture decisions must be written to ADRs or System Architecture Memory, not buried only in chat summary.
@@ -164,17 +167,21 @@ The user may also trigger `Compact now`.
 
 1. Capture raw messages since the previous compaction.
 2. Classify content into decisions, facts, preferences, tasks, artifacts, risks, and unresolved questions.
-3. Generate a structured compact state object.
-4. Verify the compact state against a loss checklist.
-5. Persist the compact state beside the transcript and, where appropriate, write archive intake artifacts.
-6. Build the next provider prompt from stable system instructions, relevant System Architecture Memory, relevant Living Archive context, the compact state, and recent uncompressed turns.
-7. Keep the raw transcript available for audit, replay, branch, and regeneration.
+3. Extract user intent and rationale before compressing implementation detail.
+4. Generate a structured compact state object.
+5. Verify the compact state against a loss checklist.
+6. Persist the compact state beside the transcript and, where appropriate, write archive intake artifacts.
+7. Build the next provider prompt from stable system instructions, relevant System Architecture Memory, relevant Living Archive context, the compact state, and recent uncompressed turns.
+8. Keep the raw transcript available for audit, replay, branch, and regeneration.
 
 ## Loss Checklist
 
 A compaction is invalid if it loses:
 
 - current user intent
+- the why behind the user's request
+- success criteria from the user's perspective
+- user frustration, caution, or priority signals that affect how work should proceed
 - binding decisions
 - explicit user preferences
 - unresolved blockers
@@ -244,6 +251,13 @@ type ContextMemoryState = {
   sourceRange: {
     fromMessageId: string;
     toMessageId: string;
+  };
+  userIntent: {
+    goal: string;
+    why: string;
+    successCriteria: string[];
+    prioritySignals: string[];
+    sourceMessageIds: string[];
   };
   workingSummary: string;
   decisions: ContextDecision[];

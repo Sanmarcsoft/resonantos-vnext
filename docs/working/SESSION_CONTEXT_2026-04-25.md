@@ -21,6 +21,14 @@ This is not a dump of hidden model context. It is the explicit working state tha
 
 ResonantOS vNext is a desktop-first modular operating system for human-AI collaboration.
 
+User intent behind this version:
+
+- Build a sovereign control layer where the human has one trusted AI front door instead of many disconnected tools.
+- Preserve the user's knowledge, identity, and philosophy without letting lower-trust agents rewrite trusted memory.
+- Make AI work feel like an operating system workspace, not a pile of settings pages or separate apps.
+- Prioritize long-term quality, portability, security, and modularity over short-term speed.
+- Keep the system adaptable as AI providers, local models, subscriptions, and add-ons change.
+
 Core parts:
 
 - ResonantOS shell
@@ -121,7 +129,7 @@ Current state:
 New binding design:
 
 - `ADR-016` defines Context Memory Compaction.
-- The implementation must preserve raw transcript, compact state, decision ledger, facts/preferences, open tasks, artifact pointers, and recent turns.
+- The implementation must preserve user intent, the why behind requests, raw transcript, compact state, decision ledger, facts/preferences, open tasks, artifact pointers, and recent turns.
 - Compaction must be source-linked, auditable, and provider-independent.
 
 ## Provider Strategy
