@@ -106,11 +106,11 @@ export const buildShellViewModel = ({
     manifestMap.get(selectedAddonId) ?? filteredManifests[0] ?? bundled[0] ?? sideloaded[0] ?? null;
   const selectedInstallation = selectedManifest ? state.installations[selectedManifest.id] ?? null : null;
   const recoveryModeActive = state.recoverySession.active;
-  const strategistThreads = state.conversationThreads.filter((thread) => thread.owningAgentId === "strategist.core");
-  const engineerThreads = state.conversationThreads.filter(
-    (thread) => thread.owningAgentId === state.recoverySession.engineerAgentId,
-  );
-  const visibleThreads = recoveryModeActive ? engineerThreads : strategistThreads;
+  const selectedChatThread = state.conversationThreads.find((thread) => thread.id === state.uiPreferences.activeChatThreadId);
+  const visibleAgentId = recoveryModeActive
+    ? state.recoverySession.engineerAgentId
+    : selectedChatThread?.owningAgentId ?? "strategist.core";
+  const visibleThreads = state.conversationThreads.filter((thread) => thread.owningAgentId === visibleAgentId);
   const activeThread =
     visibleThreads.find((thread) => thread.id === state.uiPreferences.activeChatThreadId) ??
     visibleThreads[0] ??
@@ -124,7 +124,7 @@ export const buildShellViewModel = ({
     state.providers.find((profile) => profile.id === strategist?.providerProfileId),
     state.providers.find((profile) => profile.id === strategist?.fallbackProviderProfileId),
   );
-  const activeAgentId = recoveryModeActive ? state.recoverySession.engineerAgentId : "strategist.core";
+  const activeAgentId = activeThread?.owningAgentId ?? (recoveryModeActive ? state.recoverySession.engineerAgentId : "strategist.core");
   const activeRoute = resolveAgentChatRoute(state, activeAgentId, selectedChatModel);
   const strategistRoute = resolveStrategistChatRoute(state, selectedChatModel);
   const activeProvider = activeRoute.provider ?? providerResolution.active;

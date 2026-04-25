@@ -924,6 +924,32 @@ describe("App boot flow", () => {
     expect(screen.getByText("New chat 3")).toBeTruthy();
   });
 
+  it("opens chat history actions for pinning, branching, and deleting chats", async () => {
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Chat options" })[0]);
+    expect(screen.getByRole("menuitem", { name: /Unpin/i })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /Branch/i })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: /Delete/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /Branch/i }));
+    expect(screen.getByText("Desktop Main Thread fork")).toBeTruthy();
+  });
+
+  it("switches the chat rail between available core agents", async () => {
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Talk with Resonant Engineer Agent" }));
+
+    expect(screen.getByPlaceholderText("Message Resonant Engineer Agent")).toBeTruthy();
+    expect(screen.getByText("Emergency Recovery")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Talk with Hermes/i })).toBeNull();
+  });
+
   it("shows provider diagnostics in settings", async () => {
     render(<App />);
 

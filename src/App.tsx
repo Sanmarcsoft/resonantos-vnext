@@ -796,6 +796,9 @@ export function App() {
   const shellStyle = {
     "--chat-rail-width": `${clampChatWidth(state.uiPreferences.chatSidebarWidth)}px`,
   } as CSSProperties;
+  const activeChatAgent = activeThread ? state.agents.find((agent) => agent.id === activeThread.owningAgentId) : null;
+  const activeChatAgentName =
+    activeChatAgent?.id === "strategist.core" ? displayedStrategistName : activeChatAgent?.displayName ?? displayedStrategistName;
 
   return (
     <div className={`shell ${state.uiPreferences.chatSidebarOpen ? "chat-open" : "chat-closed"}`} style={shellStyle}>
@@ -998,7 +1001,7 @@ export function App() {
       <StrategistChatRail
         isOpen={state.uiPreferences.chatSidebarOpen}
         mode={recoveryModeActive ? "emergency" : "strategist"}
-        title={recoveryModeActive ? engineerAgent?.displayName ?? "Resonant Engineer Agent" : displayedStrategistName}
+        title={activeChatAgentName}
         eyebrow={recoveryModeActive ? "Emergency recovery console" : "Persistent Strategist Chat"}
         description={
           recoveryModeActive
