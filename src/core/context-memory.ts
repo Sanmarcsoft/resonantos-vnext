@@ -1,0 +1,411 @@
+// Intent citation: docs/architecture/ADR-016-context-memory-compaction.md
+
+import type {
+  ContextBudget,
+  ContextMemoryState,
+  ConversationMessage,
+  ConversationThread,
+  ConversationTranscriptEvent,
+  ProviderProfile,
+  ProviderRuntimeNode,
+  ResonantShellState,
+} from "./contracts";
+
+export type ContextBudgetAttachment = {
+  name: string;
+  content?: string;
+};
+
+export type TranscriptEventInput = Omit<ConversationTranscriptEvent, "id" | "createdAt"> & {
+  createdAt?: string;
+};
+
+export type ContextBudgetInput = {
+  thread: ConversationThread | null;
+  composer: string;
+  attachments: ContextBudgetAttachment[];
+  provider?: ProviderProfile;
+  runtimeNode?: ProviderRuntimeNode;
+  modelId: string;
+};
+
+export const DEFAULT_CLOUD_CONTEXT_TOKENS = 64_000;
+export const DEFAULT_LOCAL_CONTEXT_TOKENS = 8_192;
+export const TOKEN_ESTIMATE_CHARS_PER_TOKEN = 4;
+
+const MESSAGE_OVERHEAD_TOKENS = 6;
+const ATTACHMENT_OVERHEAD_TOKENS = 12;
+
+const knownModelBudgets: Record<string, number> = {
+  "batiai/gemma4-e2b:q4": 8_192,
+  "llama3.2:1b": 8_192,
+  "qwen3:4b": 32_000,
+};
+
+export const estimateTextTokens = (text: string): number => {
+  const normalized = text.trim();
+  if (!normalized) {
+    return 0;
+  }
+  return Math.max(1, Math.ceil(normalized.length / TOKEN_ESTIMATE_CHARS_PER_TOKEN));
+};
+
+const estimateThreadTokens = (thread: ConversationThread | null): number =>
+  thread?.messages.reduce(
+    (total, message) => total + MESSAGE_OVERHEAD_TOKENS + estimateTextTokens(`${message.role}: ${message.content}`),
+    0,
+  ) ?? 0;
+
+const estimateAttachmentTokens = (attachments: ContextBudgetAttachment[]): number =>
+  attachments.reduce(
+    (total, attachment) =>
+      total + ATTACHMENT_OVERHEAD_TOKENS + estimateTextTokens(attachment.content ?? attachment.name),
+    0,
+  );
+
+const maxContextFor = (
+  provider: ProviderProfile | undefined,
+  runtimeNode: ProviderRuntimeNode | undefined,
+  modelId: string,
+): number => {
+  const knownBudget = knownModelBudgets[modelId];
+  if (knownBudget) {
+    return knownBudget;
+  }
+
+  if (runtimeNode?.kind === "local" || provider?.providerType === "local") {
+    return DEFAULT_LOCAL_CONTEXT_TOKENS;
+  }
+
+  return DEFAULT_CLOUD_CONTEXT_TOKENS;
+};
+
+export const buildContextBudget = ({
+  thread,
+  composer,
+  attachments,
+  provider,
+  runtimeNode,
+  modelId,
+}: ContextBudgetInput): ContextBudget => {
+  const maxContextTokens = maxContextFor(provider, runtimeNode, modelId);
+  const reservedOutputTokens = Math.max(1_024, Math.round(maxContextTokens * 0.08));
+  const reservedReasoningTokens = provider?.providerType === "openai" ? Math.round(maxContextTokens * 0.05) : 0;
+  const reservedSystemTokens = Math.max(1_024, Math.round(maxContextTokens * 0.04));
+  const reservedRetrievalTokens = Math.max(1_024, Math.round(maxContextTokens * 0.08));
+  const usedInputTokens =
+    estimateThreadTokens(thread) + estimateTextTokens(composer) + estimateAttachmentTokens(attachments);
+
+  return {
+    providerId: provider?.id ?? "unknown-provider",
+    modelId: modelId || provider?.primaryModel || "unknown-model",
+    maxContextTokens,
+    usedInputTokens,
+    reservedOutputTokens,
+    reservedReasoningTokens,
+    reservedSystemTokens,
+    reservedRetrievalTokens,
+    compactionThreshold: Math.round(maxContextTokens * 0.8),
+    hardStopThreshold: Math.round(maxContextTokens * 0.95),
+    estimateQuality: "heuristic",
+  };
+};
+
+export const usableContextTokens = (budget: ContextBudget): number =>
+  Math.max(
+    1,
+    budget.maxContextTokens -
+      budget.reservedOutputTokens -
+      budget.reservedReasoningTokens -
+      budget.reservedSystemTokens -
+      budget.reservedRetrievalTokens,
+  );
+
+export const contextUsageRatio = (budget: ContextBudget): number =>
+  Math.min(budget.usedInputTokens / usableContextTokens(budget), 1);
+
+export const formatTokenCount = (value: number): string => {
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(1)}k`;
+  }
+  return String(value);
+};
+
+export const contextBudgetTitle = (budget: ContextBudget): string => {
+  const usable = usableContextTokens(budget);
+  return [
+    `Heuristic context estimate for ${budget.modelId}.`,
+    `${formatTokenCount(budget.usedInputTokens)} tokens used out of ~${formatTokenCount(usable)} usable input tokens.`,
+    `Model ceiling: ~${formatTokenCount(budget.maxContextTokens)} tokens.`,
+    `Compaction threshold: ~${formatTokenCount(budget.compactionThreshold)} tokens.`,
+    `Hard-stop threshold: ~${formatTokenCount(budget.hardStopThreshold)} tokens.`,
+    "This is not provider-tokenizer exact yet.",
+  ].join(" ");
+};
+
+const transcriptEventId = (threadId: string, index: number): string => `${threadId}:e${index + 1}`;
+
+export const appendTranscriptEvent = (
+  state: ResonantShellState,
+  input: TranscriptEventInput,
+): ResonantShellState => {
+  const ledger = state.transcriptLedger ?? [];
+  const createdAt = input.createdAt ?? new Date().toISOString();
+  const event: ConversationTranscriptEvent = {
+    ...input,
+    id: transcriptEventId(input.threadId, ledger.length),
+    createdAt,
+  };
+
+  return {
+    ...state,
+    transcriptLedger: [...ledger, event],
+  };
+};
+
+export const messageTranscriptPayload = (message: ConversationMessage): Record<string, unknown> => ({
+  author: message.author,
+  content: message.content,
+  status: message.status ?? "complete",
+  archiveCitations: message.archiveCitations ?? [],
+});
+
+export const branchTranscriptPayload = (
+  sourceThread: ConversationThread,
+  forkThread: ConversationThread,
+  sourceMessageId?: string,
+): Record<string, unknown> => ({
+  sourceTitle: sourceThread.title,
+  forkTitle: forkThread.title,
+  sourceMessageId,
+  copiedMessageIds: forkThread.messages.map((message) => message.id),
+});
+
+const sentenceFrom = (content: string): string =>
+  content
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/(?<=[.!?])\s+/)[0]
+    ?.slice(0, 240) ?? "";
+
+const sourceRangeFor = (messages: ConversationMessage[]): ContextMemoryState["sourceRange"] => ({
+  fromMessageId: messages[0]?.id ?? "",
+  toMessageId: messages.at(-1)?.id ?? "",
+});
+
+const checksumOf = (content: string): string => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < content.length; index += 1) {
+    hash ^= content.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `fnv32:${(hash >>> 0).toString(16)}`;
+};
+
+const userMessagesOf = (thread: ConversationThread): ConversationMessage[] =>
+  thread.messages.filter((message) => message.role === "user");
+
+const prioritySignalsFrom = (messages: ConversationMessage[]): string[] =>
+  messages
+    .filter((message) => /\b(important|critical|careful|quality|risk|dangerous|must|don't|do not|before)\b/i.test(message.content))
+    .slice(-5)
+    .map((message) => sentenceFrom(message.content))
+    .filter(Boolean);
+
+const successCriteriaFrom = (messages: ConversationMessage[]): string[] =>
+  messages
+    .filter((message) => /\b(done|working|test|validate|deterministic|pass|success|must be able|needs to)\b/i.test(message.content))
+    .slice(-5)
+    .map((message) => sentenceFrom(message.content))
+    .filter(Boolean);
+
+const artifactRefsFrom = (messages: ConversationMessage[]): ContextMemoryState["artifacts"] => {
+  const refs: ContextMemoryState["artifacts"] = [];
+  const pathPattern = /(?:\.{0,2}\/|\/Users\/|docs\/|src\/|src-tauri\/|public\/)[^\s),`]+/g;
+
+  for (const message of messages) {
+    const matches = message.content.match(pathPattern) ?? [];
+    for (const ref of matches) {
+      refs.push({
+        artifactId: `artifact-${refs.length + 1}`,
+        kind: ref.match(/\.(png|jpg|jpeg|gif|webp)$/i) ? "screenshot" : "file",
+        label: ref.split("/").at(-1) ?? ref,
+        ref,
+        sourceMessageIds: [message.id],
+      });
+    }
+  }
+
+  return refs;
+};
+
+const decisionsFrom = (messages: ConversationMessage[]): ContextMemoryState["decisions"] =>
+  messages
+    .filter((message) => /\b(agreed|decision|decide|we need|must|should)\b/i.test(message.content))
+    .slice(-10)
+    .map((message, index) => ({
+      decisionId: `decision-${index + 1}`,
+      title: sentenceFrom(message.content).slice(0, 72) || `Decision ${index + 1}`,
+      decision: sentenceFrom(message.content),
+      reason: "Extracted from explicit user/assistant planning language during deterministic compaction.",
+      scope: "conversation",
+      status: "accepted" as const,
+      sourceMessageIds: [message.id],
+      relatedDocPaths: [],
+    }));
+
+const preferencesFrom = (messages: ConversationMessage[]): ContextMemoryState["preferences"] =>
+  messages
+    .filter((message) => /\b(i want|i need|my preference|prefer|priority|for me|in my case)\b/i.test(message.content))
+    .slice(-10)
+    .map((message, index) => ({
+      preferenceId: `preference-${index + 1}`,
+      statement: sentenceFrom(message.content),
+      appliesTo: "current ResonantOS workstream",
+      sourceMessageIds: [message.id],
+    }));
+
+const tasksFrom = (messages: ConversationMessage[]): ContextMemoryState["openTasks"] =>
+  messages
+    .filter((message) => /\b(next|implement|fix|add|create|test|validate|need to|go ahead)\b/i.test(message.content))
+    .slice(-10)
+    .map((message, index) => ({
+      taskId: `task-${index + 1}`,
+      owner: message.role === "user" ? "agent" : "unknown",
+      status: "open" as const,
+      description: sentenceFrom(message.content),
+      verificationRequired: ["deterministic checks before completion"],
+      sourceMessageIds: [message.id],
+    }));
+
+export const buildDeterministicCompactState = (
+  thread: ConversationThread,
+  preservedRecentCount = 8,
+): ContextMemoryState => {
+  const messages = thread.messages;
+  const userMessages = userMessagesOf(thread);
+  const latestUserMessage = userMessages.at(-1);
+  const firstUserMessage = userMessages[0];
+  const preservedRecentMessageIds = messages.slice(-preservedRecentCount).map((message) => message.id);
+  const transcriptDigest = messages.map((message) => `${message.id}:${message.role}:${message.content}`).join("\n");
+
+  return {
+    threadId: thread.id,
+    compactedAt: new Date().toISOString(),
+    sourceRange: sourceRangeFor(messages),
+    userIntent: {
+      goal: latestUserMessage ? sentenceFrom(latestUserMessage.content) : thread.summary,
+      why: firstUserMessage ? sentenceFrom(firstUserMessage.content) : "No explicit user rationale captured yet.",
+      successCriteria: successCriteriaFrom(userMessages),
+      prioritySignals: prioritySignalsFrom(userMessages),
+      sourceMessageIds: userMessages.map((message) => message.id),
+    },
+    workingSummary: [
+      `Thread: ${thread.title}.`,
+      `Summary: ${thread.summary}.`,
+      latestUserMessage ? `Latest user direction: ${sentenceFrom(latestUserMessage.content)}` : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+    decisions: decisionsFrom(messages),
+    facts: [],
+    preferences: preferencesFrom(userMessages),
+    openTasks: tasksFrom(messages),
+    artifacts: artifactRefsFrom(messages),
+    risks: messages
+      .filter((message) => /\b(risk|danger|unsafe|security|broken|failed|problem)\b/i.test(message.content))
+      .slice(-8)
+      .map((message, index) => ({
+        riskId: `risk-${index + 1}`,
+        description: sentenceFrom(message.content),
+        severity: "medium" as const,
+        sourceMessageIds: [message.id],
+      })),
+    unresolvedQuestions: messages
+      .filter((message) => message.content.includes("?"))
+      .slice(-8)
+      .map((message, index) => ({
+        questionId: `question-${index + 1}`,
+        question: sentenceFrom(message.content),
+        owner: message.role === "user" ? "agent" : "user",
+        sourceMessageIds: [message.id],
+      })),
+    preservedRecentMessageIds,
+    checksum: checksumOf(transcriptDigest),
+  };
+};
+
+export const compactThreadContext = (
+  state: ResonantShellState,
+  threadId: string,
+  preservedRecentCount = 8,
+): ResonantShellState => {
+  const thread = state.conversationThreads.find((item) => item.id === threadId);
+  if (!thread) {
+    return state;
+  }
+
+  const compactState = buildDeterministicCompactState(thread, preservedRecentCount);
+  const withCompactState = {
+    ...state,
+    contextMemoryStates: [...(state.contextMemoryStates ?? []), compactState],
+  };
+
+  return appendTranscriptEvent(withCompactState, {
+    action: "context-compacted",
+    threadId,
+    channelId: thread.channelId,
+    agentId: thread.owningAgentId,
+    payload: {
+      compactedAt: compactState.compactedAt,
+      checksum: compactState.checksum,
+      sourceRange: compactState.sourceRange,
+      preservedRecentMessageIds: compactState.preservedRecentMessageIds,
+    },
+  });
+};
+
+export const latestCompactStateForThread = (
+  state: Pick<ResonantShellState, "contextMemoryStates">,
+  threadId: string,
+): ContextMemoryState | null =>
+  [...(state.contextMemoryStates ?? [])].reverse().find((compactState) => compactState.threadId === threadId) ?? null;
+
+export const promptMessagesForThread = (
+  thread: ConversationThread,
+  compactState: ContextMemoryState | null,
+): ConversationMessage[] => {
+  if (!compactState) {
+    return thread.messages;
+  }
+
+  const preserved = new Set(compactState.preservedRecentMessageIds);
+  const compactEndIndex = thread.messages.findIndex((message) => message.id === compactState.sourceRange.toMessageId);
+  return thread.messages.filter((message, index) => preserved.has(message.id) || (compactEndIndex >= 0 && index > compactEndIndex));
+};
+
+export const formatCompactStateForPrompt = (compactState: ContextMemoryState | null): string => {
+  if (!compactState) {
+    return "";
+  }
+
+  const lines = [
+    "ResonantOS compacted conversation memory:",
+    `- User goal: ${compactState.userIntent.goal}`,
+    `- User why: ${compactState.userIntent.why}`,
+    `- Success criteria: ${compactState.userIntent.successCriteria.join("; ") || "none captured"}`,
+    `- Priority signals: ${compactState.userIntent.prioritySignals.join("; ") || "none captured"}`,
+    `- Working summary: ${compactState.workingSummary}`,
+    `- Decisions: ${compactState.decisions.map((decision) => decision.decision).join("; ") || "none captured"}`,
+    `- Preferences: ${compactState.preferences.map((preference) => preference.statement).join("; ") || "none captured"}`,
+    `- Open tasks: ${compactState.openTasks.map((task) => task.description).join("; ") || "none captured"}`,
+    `- Artifacts: ${compactState.artifacts.map((artifact) => artifact.ref).join("; ") || "none captured"}`,
+    `- Risks: ${compactState.risks.map((risk) => risk.description).join("; ") || "none captured"}`,
+    `- Unresolved questions: ${compactState.unresolvedQuestions.map((question) => question.question).join("; ") || "none captured"}`,
+    `- Preserved recent message ids: ${compactState.preservedRecentMessageIds.join(", ") || "none"}`,
+    `- Compact checksum: ${compactState.checksum}`,
+    "Use this compact memory as continuity context. Do not treat it as permission to invent facts absent from the raw transcript or cited artifacts.",
+  ];
+
+  return lines.join("\n");
+};

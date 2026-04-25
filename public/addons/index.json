@@ -1,6 +1,9 @@
 [
   "telegram-channel.json",
   "obsidian.json",
+  "browser.json",
+  "opencode.json",
+  "hermes.json",
   "audio2tol.json",
   "openclaw.json",
   "shield.json",

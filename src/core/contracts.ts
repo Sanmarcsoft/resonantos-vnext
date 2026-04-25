@@ -58,6 +58,16 @@ export type CoreServiceStatus = "ready" | "attention" | "planned";
 export type ArchiveActorType = "core-agent" | "addon" | "service";
 export type ArchiveAction = "archive-read" | "archive-intake-write" | "archive-knowledge-write" | "archive-ingest-request";
 export type ConversationRole = "user" | "assistant";
+export type ConversationMessageStatus = "complete" | "interrupted" | "failed";
+export type ChatRunPhase = "idle" | "thinking" | "retrieving" | "tool-running" | "interrupted" | "failed" | "completed";
+export type ConversationTranscriptEventAction =
+  | "thread-created"
+  | "thread-branched"
+  | "message-appended"
+  | "message-edit-requested"
+  | "message-deleted"
+  | "generation-interrupted"
+  | "context-compacted";
 export type AddOnProvenanceTier = "bundled-core" | "curated-signed" | "enterprise-signed" | "sideloaded-unverified";
 export type ManifestVerificationState = "verified" | "unverified" | "not-applicable" | "failed";
 export type GrantRecommendationSource = "manifest-request" | "preset-bundle" | "manual";
@@ -67,6 +77,57 @@ export type RuntimeIsolationBoundary =
   | "host-mediated-service"
   | "host-mediated-agent"
   | "host-mediated-channel";
+export type DelegationTaskType =
+  | "code-change"
+  | "bug-fix"
+  | "research"
+  | "browser-inspection"
+  | "knowledge-organization"
+  | "archive-prep"
+  | "communication"
+  | "system-diagnosis"
+  | "system-repair"
+  | "design"
+  | "routine-work";
+export type DelegationTargetRuntime =
+  | "native-agent"
+  | "addon-agent"
+  | "embedded-workspace"
+  | "local-service"
+  | "terminal-service"
+  | "external-agent";
+export type DelegationArtifactType =
+  | "summary"
+  | "markdown"
+  | "diff"
+  | "file-list"
+  | "log"
+  | "citation-bundle"
+  | "diagnostic-report"
+  | "verification-report"
+  | "archive-intake-bundle";
+export type DelegationApprovalReason = "destructive" | "public-action" | "financial" | "identity-sensitive" | "broad-filesystem";
+export type NativeToolCapability =
+  | "research.search_api"
+  | "research.fetch_url"
+  | "browser.session"
+  | "filesystem.read"
+  | "filesystem.search"
+  | "filesystem.patch"
+  | "process.safe_command"
+  | "provider.probe"
+  | "provider.route_select"
+  | "archive.search"
+  | "archive.read"
+  | "archive.intake_write"
+  | "delegation.create_packet"
+  | "delegation.render_task_markdown"
+  | "delegation.dispatch"
+  | "delegation.monitor"
+  | "delegation.collect_artifacts"
+  | "delegation.verify_result"
+  | "addon.health_check"
+  | "addon.enable_disable";
 
 export interface CapabilityGrant {
   capability: Capability;
@@ -103,6 +164,15 @@ export interface AddOnRuntimeIsolation {
   requiresReviewedGrant: boolean;
 }
 
+export interface AddOnDelegationContract {
+  acceptsTasks: boolean;
+  taskTypes: DelegationTaskType[];
+  artifactReturnTypes: DelegationArtifactType[];
+  defaultTargetRuntime: DelegationTargetRuntime;
+  requiresHumanApprovalBeforeExecution: boolean;
+  notes?: string[];
+}
+
 export interface AddOnManifest {
   id: string;
   name: string;
@@ -135,6 +205,7 @@ export interface AddOnManifest {
     strategy: string;
     endpoint?: string;
   };
+  delegation?: AddOnDelegationContract;
   installHooks: {
     onInstall?: string;
     onEnable?: string;
@@ -764,6 +835,118 @@ export interface WorkspaceDefinition {
   channelIds: string[];
 }
 
+export interface DelegationTarget {
+  id: string;
+  label: string;
+  runtime: DelegationTargetRuntime;
+  addonId?: string;
+  agentId?: string;
+  acceptedTaskTypes: DelegationTaskType[];
+  supportedArtifactTypes: DelegationArtifactType[];
+  requiredCapabilities: Array<Capability | NativeToolCapability>;
+  defaultRequiresHumanApproval: boolean;
+}
+
+export interface DelegationReturnProtocol {
+  summaryRequired: boolean;
+  artifactTypes: DelegationArtifactType[];
+  mustReportFilesChanged: boolean;
+  mustReportCommandsRun: boolean;
+  mustReportResidualRisks: boolean;
+  mustReportVerification: boolean;
+}
+
+export interface DelegationVerificationRequirement {
+  id: string;
+  label: string;
+  method: "unit-test" | "build" | "lint" | "manual-review" | "source-citation" | "runtime-check" | "none";
+  required: boolean;
+}
+
+export interface DelegationCostPolicy {
+  sensitivity: "low" | "medium" | "high";
+  preferredCostTier: "free-local" | "subscription" | "paid-api" | "best-available";
+  allowPaidEscalation: boolean;
+  rationale: string;
+}
+
+export interface DelegationProviderPolicy {
+  preferredProviderProfileIds: string[];
+  preferredRuntimeNodeIds: string[];
+  preferredModels: string[];
+  allowedRuntimeKinds: RuntimeNodeKind[];
+  fallbackPolicyId?: string;
+}
+
+export interface DelegationPacket {
+  id: string;
+  createdAt: string;
+  createdByAgentId: string;
+  targetAgentId: string;
+  targetRuntime: DelegationTargetRuntime;
+  taskType: DelegationTaskType;
+  mission: string;
+  context: string;
+  sourceMemoryRefs: string[];
+  systemMemoryRefs: string[];
+  workspaceId: string;
+  filesInScope: string[];
+  allowedTools: NativeToolCapability[];
+  forbiddenActions: string[];
+  capabilityGrants: CapabilityGrant[];
+  providerPolicy: DelegationProviderPolicy;
+  costPolicy: DelegationCostPolicy;
+  humanApprovalRequired: boolean;
+  approvalReasons: DelegationApprovalReason[];
+  verificationRequirements: DelegationVerificationRequirement[];
+  expectedArtifacts: DelegationArtifactType[];
+  returnProtocol: DelegationReturnProtocol;
+  auditLogPath: string;
+}
+
+export interface TaskWorkspace {
+  id: string;
+  packetId: string;
+  rootPath: string;
+  packetPath: string;
+  taskMarkdownPath: string;
+  artifactsPath: string;
+  logsPath: string;
+  resultPath: string;
+  verificationPath: string;
+}
+
+export interface ArtifactReturn {
+  packetId: string;
+  targetAgentId: string;
+  returnedAt: string;
+  summary: string;
+  artifacts: Array<{
+    type: DelegationArtifactType;
+    path?: string;
+    content?: string;
+  }>;
+  filesChanged: string[];
+  commandsRun: string[];
+  verification: Array<{
+    requirementId: string;
+    status: "passed" | "failed" | "not-run";
+    evidence: string;
+  }>;
+  residualRisks: string[];
+}
+
+export interface DelegationValidationIssue {
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+}
+
+export interface DelegationValidationResult {
+  valid: boolean;
+  issues: DelegationValidationIssue[];
+}
+
 export interface CoreService {
   id: string;
   label: string;
@@ -828,12 +1011,136 @@ export interface ConversationMessage {
   author: string;
   content: string;
   createdAt: string;
+  status?: ConversationMessageStatus;
   archiveCitations?: Array<{
     title: string;
     path: string;
     pageType: string;
     snippet?: string;
   }>;
+}
+
+export interface ContextDecision {
+  decisionId: string;
+  title: string;
+  decision: string;
+  reason: string;
+  scope: string;
+  status: "proposed" | "accepted" | "superseded";
+  sourceMessageIds: string[];
+  relatedDocPaths: string[];
+}
+
+export interface ContextFact {
+  factId: string;
+  statement: string;
+  scope: "user" | "project" | "system" | "external";
+  confidence: "verified" | "unverified";
+  observedAt: string;
+  sourceMessageIds: string[];
+}
+
+export interface ContextPreference {
+  preferenceId: string;
+  statement: string;
+  appliesTo: string;
+  sourceMessageIds: string[];
+}
+
+export interface ContextTask {
+  taskId: string;
+  owner: string;
+  status: "open" | "blocked" | "done";
+  description: string;
+  blockingReason?: string;
+  verificationRequired: string[];
+  sourceMessageIds: string[];
+}
+
+export interface ContextArtifactRef {
+  artifactId: string;
+  kind: "file" | "commit" | "archive-document" | "screenshot" | "addon-manifest" | "external-url" | "other";
+  label: string;
+  ref: string;
+  sourceMessageIds: string[];
+}
+
+export interface ContextRisk {
+  riskId: string;
+  description: string;
+  severity: "low" | "medium" | "high";
+  mitigation?: string;
+  sourceMessageIds: string[];
+}
+
+export interface ContextQuestion {
+  questionId: string;
+  question: string;
+  owner: "user" | "agent" | "unknown";
+  sourceMessageIds: string[];
+}
+
+export interface ContextMemoryState {
+  threadId: string;
+  compactedAt: string;
+  sourceRange: {
+    fromMessageId: string;
+    toMessageId: string;
+  };
+  userIntent: {
+    goal: string;
+    why: string;
+    successCriteria: string[];
+    prioritySignals: string[];
+    sourceMessageIds: string[];
+  };
+  workingSummary: string;
+  decisions: ContextDecision[];
+  facts: ContextFact[];
+  preferences: ContextPreference[];
+  openTasks: ContextTask[];
+  artifacts: ContextArtifactRef[];
+  risks: ContextRisk[];
+  unresolvedQuestions: ContextQuestion[];
+  preservedRecentMessageIds: string[];
+  checksum: string;
+}
+
+export interface ContextBudget {
+  providerId: string;
+  modelId: string;
+  maxContextTokens: number;
+  usedInputTokens: number;
+  reservedOutputTokens: number;
+  reservedReasoningTokens: number;
+  reservedSystemTokens: number;
+  reservedRetrievalTokens: number;
+  compactionThreshold: number;
+  hardStopThreshold: number;
+  estimateQuality: "provider" | "tokenizer" | "heuristic";
+}
+
+export interface CompactionRequest {
+  threadId: string;
+  agentId: string;
+  providerRouteId: string;
+  reason: "manual" | "threshold" | "provider_limit" | "branch" | "session_close";
+  sourceMessageIds: string[];
+  instructions?: string;
+}
+
+export interface ConversationTranscriptEvent {
+  id: string;
+  createdAt: string;
+  action: ConversationTranscriptEventAction;
+  threadId: string;
+  channelId?: string;
+  messageId?: string;
+  role?: ConversationRole;
+  agentId?: string;
+  sourceThreadId?: string;
+  sourceMessageId?: string;
+  payload: Record<string, unknown>;
 }
 
 export interface ConversationThread {
@@ -886,6 +1193,8 @@ export interface ResonantShellState {
   workspaces: WorkspaceDefinition[];
   archivePolicy: ArchivePolicy;
   conversationThreads: ConversationThread[];
+  transcriptLedger: ConversationTranscriptEvent[];
+  contextMemoryStates: ContextMemoryState[];
   recoverySession: RecoverySession;
   installations: Record<string, AddOnInstallation>;
   uiPreferences: UiPreferences;

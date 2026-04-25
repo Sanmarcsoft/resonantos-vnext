@@ -1,0 +1,68 @@
+{
+  "id": "addon.browser",
+  "name": "Browser",
+  "version": "0.1.0",
+  "author": "Resonant Alpha",
+  "category": "tool",
+  "description": "Embedded browser surface and browser-session tool target for visual research, web app inspection, and authenticated workflows.",
+  "runtimeType": "embedded-module",
+  "surfaces": [
+    {
+      "id": "browser-pane",
+      "type": "embedded-pane",
+      "label": "Browser",
+      "description": "Open controlled browser sessions inside the ResonantOS workspace."
+    }
+  ],
+  "requestedCapabilities": [
+    {
+      "capability": "network",
+      "granted": false,
+      "scope": "shared",
+      "revocationBehavior": "hard-stop"
+    },
+    {
+      "capability": "ui-embedding",
+      "granted": false,
+      "scope": "system",
+      "revocationBehavior": "hide-surface"
+    },
+    {
+      "capability": "archive-intake-write",
+      "granted": false,
+      "scope": "intake-only",
+      "revocationBehavior": "degrade"
+    }
+  ],
+  "providerRequirements": {
+    "sharedProfiles": [],
+    "supportsPrivateCredentials": false
+  },
+  "archiveIntegration": {
+    "readScopes": [],
+    "intakeWriteScopes": ["LivingArchive/INTAKE/browser"],
+    "canRequestIngest": true,
+    "canWriteKnowledgePages": false
+  },
+  "health": {
+    "strategy": "browser-session-ready"
+  },
+  "delegation": {
+    "acceptsTasks": true,
+    "taskTypes": ["research", "browser-inspection"],
+    "artifactReturnTypes": ["summary", "markdown", "log", "citation-bundle", "diagnostic-report"],
+    "defaultTargetRuntime": "embedded-workspace",
+    "requiresHumanApprovalBeforeExecution": false,
+    "notes": [
+      "Prefer API research for normal web lookup.",
+      "Use browser delegation when visual inspection, login, forms, screenshots, or web app testing are required."
+    ]
+  },
+  "installHooks": {
+    "onInstall": "register-browser-surface"
+  },
+  "compatibility": {
+    "shellVersion": "^0.1.0",
+    "platforms": ["macOS", "linux", "windows"]
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "id": "addon.hermes",
+  "name": "Hermes",
+  "version": "0.1.0",
+  "author": "Resonant Alpha",
+  "category": "agent",
+  "description": "Communication and coordination agent add-on for delegated messaging, follow-up, and channel workflows.",
+  "runtimeType": "agent-addon",
+  "surfaces": [
+    {
+      "id": "hermes-panel",
+      "type": "panel",
+      "label": "Hermes Console",
+      "description": "Manage communication workflows, approvals, and delivery status."
+    }
+  ],
+  "requestedCapabilities": [
+    {
+      "capability": "network",
+      "granted": false,
+      "scope": "shared",
+      "revocationBehavior": "hard-stop"
+    },
+    {
+      "capability": "notifications",
+      "granted": false,
+      "scope": "shared",
+      "revocationBehavior": "degrade"
+    },
+    {
+      "capability": "providers",
+      "granted": false,
+      "scope": "shared",
+      "revocationBehavior": "degrade"
+    },
+    {
+      "capability": "archive-intake-write",
+      "granted": false,
+      "scope": "intake-only",
+      "revocationBehavior": "degrade"
+    }
+  ],
+  "providerRequirements": {
+    "sharedProfiles": ["shared-local", "shared-minimax"],
+    "supportsPrivateCredentials": true,
+    "preferredRuntimeKinds": ["local", "cloud"],
+    "fallbackPolicyId": "routine-default"
+  },
+  "archiveIntegration": {
+    "readScopes": ["living-archive/context"],
+    "intakeWriteScopes": ["LivingArchive/INTAKE/hermes"],
+    "canRequestIngest": true,
+    "canWriteKnowledgePages": false
+  },
+  "health": {
+    "strategy": "agent-heartbeat"
+  },
+  "delegation": {
+    "acceptsTasks": true,
+    "taskTypes": ["communication", "routine-work", "research"],
+    "artifactReturnTypes": ["summary", "markdown", "log", "citation-bundle"],
+    "defaultTargetRuntime": "addon-agent",
+    "requiresHumanApprovalBeforeExecution": true,
+    "notes": [
+      "Hermes must request approval before public, external, or identity-sensitive sends.",
+      "Routine drafts and coordination plans may be prepared without sending."
+    ]
+  },
+  "installHooks": {
+    "onInstall": "register-communication-agent"
+  },
+  "compatibility": {
+    "shellVersion": "^0.1.0",
+    "platforms": ["macOS", "linux", "windows"]
+  },
+  "agents": [
+    {
+      "id": "hermes.agent",
+      "displayName": "Hermes",
+      "trustTier": "addon",
+      "workspaceBehavior": "delegated"
+    }
+  ]
+}

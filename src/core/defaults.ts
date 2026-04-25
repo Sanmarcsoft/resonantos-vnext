@@ -720,6 +720,8 @@ export const buildDefaultState = (manifests: AddOnManifest[]): ResonantShellStat
     workspaces,
     archivePolicy,
     conversationThreads,
+    transcriptLedger: [],
+    contextMemoryStates: [],
     recoverySession,
     installations,
     uiPreferences: {

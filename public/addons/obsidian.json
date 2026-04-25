@@ -47,6 +47,17 @@
   "health": {
     "strategy": "embedded-pane-ready"
   },
+  "delegation": {
+    "acceptsTasks": true,
+    "taskTypes": ["knowledge-organization", "archive-prep"],
+    "artifactReturnTypes": ["summary", "markdown", "file-list", "archive-intake-bundle"],
+    "defaultTargetRuntime": "embedded-workspace",
+    "requiresHumanApprovalBeforeExecution": true,
+    "notes": [
+      "Obsidian is primarily a user workspace in v1.",
+      "Delegated organization proposals must not move or rewrite vault content without user approval."
+    ]
+  },
   "installHooks": {
     "onInstall": "bind-vault"
   },

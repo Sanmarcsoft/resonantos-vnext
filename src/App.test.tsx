@@ -402,6 +402,16 @@ vi.mock("./core/runtime", () => ({
 
 import { App } from "./App";
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+};
+
 describe("App boot flow", () => {
   afterEach(() => {
     cleanup();
@@ -762,6 +772,41 @@ describe("App boot flow", () => {
     expect(await screen.findByText("This is a live Strategist test reply from MiniMax-M2.7.")).toBeTruthy();
   });
 
+  it("stops an active chat run, keeps an interrupted message, and ignores the late reply", async () => {
+    const pendingReply = deferred<string>();
+    requestProviderServiceChatCompletionMock.mockReset();
+    requestProviderServiceChatCompletionMock
+      .mockImplementationOnce(() => pendingReply.promise)
+      .mockResolvedValueOnce("Corrected reply after interruption.");
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getAllByPlaceholderText("Message Augmentor")[0], {
+      target: { value: "Start a long reply" },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Send message" })[0]);
+
+    await waitFor(() => expect(requestProviderServiceChatCompletionMock).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
+
+    expect(await screen.findByText("Response stopped by the user before a complete reply was returned.")).toBeTruthy();
+    expect((await screen.findAllByText(/Interrupted/i)).length).toBeGreaterThan(0);
+
+    pendingReply.resolve("Late reply that should not be appended.");
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    expect(screen.queryByText("Late reply that should not be appended.")).toBeNull();
+
+    fireEvent.change(screen.getAllByPlaceholderText("Message Augmentor")[0], {
+      target: { value: "Correction after stop" },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Send message" })[0]);
+
+    expect(await screen.findByText("Corrected reply after interruption.")).toBeTruthy();
+  });
+
   it("shows string backend errors instead of collapsing them into a generic message", async () => {
     requestProviderServiceChatCompletionMock.mockRejectedValue("You exceeded your current quota.");
 
@@ -908,10 +953,21 @@ describe("App boot flow", () => {
     expect(screen.getAllByRole("button", { name: "Attach file" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: "Start dictation" }).length).toBeGreaterThan(0);
     expect(screen.getAllByLabelText(/Context usage/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByTitle(/Estimated session context:/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByTitle(/Heuristic context estimate/i).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: "Send message" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: "New chat" }).length).toBeGreaterThan(0);
     expect(screen.getAllByDisplayValue("MiniMax-M2.7").length).toBeGreaterThan(0);
+  });
+
+  it("compacts the active chat context from the context usage control", async () => {
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Context usage/i })[0]);
+
+    expect(await screen.findByText(/Context compacted\. Preserved/i)).toBeTruthy();
+    expect(await screen.findByText(/user intent and rationale/i)).toBeTruthy();
   });
 
   it("creates a new Strategist chat instance from the sidebar", async () => {

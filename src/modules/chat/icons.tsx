@@ -38,6 +38,14 @@ export function SendIcon() {
   );
 }
 
+export function StopIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="7" y="7" width="10" height="10" rx="1.8" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function CopyIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">

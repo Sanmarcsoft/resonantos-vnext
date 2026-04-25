@@ -1545,6 +1545,15 @@ select {
   padding-right: 0.15rem;
 }
 
+.message-bubble.interrupted {
+  opacity: 0.82;
+}
+
+.message-bubble.interrupted .message-renderer,
+.message-bubble.failed .message-renderer {
+  color: var(--text-secondary);
+}
+
 .message-bubble.user {
   justify-self: end;
   padding-left: 0.86rem;
@@ -3506,6 +3515,19 @@ select {
   color: #08110e;
 }
 
+.chat-stop-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(248, 113, 113, 0.36);
+  background: rgba(248, 113, 113, 0.86);
+  color: #160707;
+}
+
 @media (max-width: 1480px) {
   .hero-panel,
   .recovery-hero-panel,
@@ -3751,12 +3773,27 @@ select {
   height: 18px;
 }
 
+.chat-stop-button svg {
+  width: 16px;
+  height: 16px;
+}
+
 .chat-send-button:hover {
   border-color: rgba(52, 211, 153, 0.62);
   background: #34d399;
 }
 
 .chat-send-button:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
+.chat-stop-button:hover {
+  border-color: rgba(252, 165, 165, 0.62);
+  background: #f87171;
+}
+
+.chat-stop-button:disabled {
   opacity: 0.48;
   cursor: default;
 }

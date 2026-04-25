@@ -43,6 +43,10 @@ Last updated: 2026-04-25
 
 ## Chat Rail
 
+- Added first safe interruption behavior:
+  - Stop keeps a visible interrupted assistant message
+  - stale provider replies are suppressed after interruption
+  - true provider-side cancellation remains future work after streaming/abort-capable IPC exists
 - Desktop-safe audio dictate implementation.
 - Attachment pipeline beyond text embedding and metadata fallback.
 - Richer thread management for multiple Strategist instances.
@@ -55,9 +59,13 @@ Last updated: 2026-04-25
   - compact state must preserve decisions, preferences, facts, open tasks, artifacts, risks, and recent turns
   - compaction must be source-linked, auditable, and provider-independent
   - provider-native compaction and prompt caching are optimizations, not memory authority
-- Replace the current visual-only chat context pill with provider-aware context budget tracking.
-- Persist raw chat transcript separately from structured compact state.
-- Add `Compact now` as a chat action with visible `Compacting...` state.
+- Implemented first compaction foundation on 2026-04-25:
+  - provider-aware heuristic context budget replaces the visual-only character estimate
+  - custom/forked threads survive runtime normalization
+  - append-only transcript ledger records visible chat mutations and compaction events
+  - deterministic compact-state generation preserves user intent, rationale, tasks, decisions, preferences, artifacts, risks, and questions
+  - context percentage control runs `Compact now` for the active thread
+  - provider prompt assembly includes compact memory plus preserved recent/new turns after compaction
 - Ensure chat branching copies compact state and source references, not only visible messages.
 
 ## Living Archive
@@ -131,6 +139,10 @@ Last updated: 2026-04-25
   - Engineer is defined as the repair specialist with audited stronger tools
   - Obsidian, Browser, OpenCode, Hermes, and OpenClaw are the first add-on catalog targets
   - LangGraph is a candidate orchestration backend for durable delegated workflows, while Mangle/Shield-style checks remain deterministic policy enforcement
+- Added Delegation Packet foundation on 2026-04-25:
+  - core contracts now define `DelegationPacket`, `DelegationTarget`, `TaskWorkspace`, `ArtifactReturn`, native tool capabilities, verification requirements, and validation results
+  - `src/core/delegation.ts` validates delegation packet quality and renders generated `TASK.md`
+  - add-on manifests now expose delegation metadata for Obsidian, Browser, OpenCode, Hermes, and OpenClaw
 - Build add-on launcher UX from `docs/product/UX-001-resonantos-app-shell.md`.
 - Add center-workspace app opening state for installed add-ons.
 - Add workspace renderers for add-on runtime types:

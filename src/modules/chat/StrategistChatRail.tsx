@@ -18,6 +18,7 @@ import {
   RegenerateIcon,
   SendIcon,
   StatsIcon,
+  StopIcon,
   TrashIcon,
 } from "./icons";
 import type { ComposerAttachment, ThinkingDepth } from "./types";
@@ -40,6 +41,7 @@ type StrategistChatRailProps = {
   activeAgentId: string;
   channels: ChannelDefinition[];
   chatBusy: boolean;
+  chatCanStop: boolean;
   chatNotice: string | null;
   composer: string;
   attachments: ComposerAttachment[];
@@ -73,6 +75,8 @@ type StrategistChatRailProps = {
   onSelectAgent: (agentId: string) => void;
   onComposerChange: (value: string) => void;
   onSend: () => void;
+  onStopGeneration: () => void;
+  onCompactThread: () => void;
   onSaveMessageToArchive: (message: ConversationMessage) => void;
   onBranchFromMessage: (message: ConversationMessage) => void;
   onEditUserMessage: (message: ConversationMessage) => void;
@@ -253,10 +257,19 @@ export function StrategistChatRail(props: StrategistChatRailProps) {
         <div className="chat-conversation">
           <div className="message-stack">
             {props.activeThread?.messages.map((message) => (
-              <article key={message.id} className={`message-bubble ${message.role === "assistant" ? "assistant" : "user"}`}>
+              <article
+                key={message.id}
+                className={`message-bubble ${message.role === "assistant" ? "assistant" : "user"} ${message.status === "interrupted" ? "interrupted" : ""} ${
+                  message.status === "failed" ? "failed" : ""
+                }`}
+              >
             <div className="message-meta">
               <strong>{message.author}</strong>
-              <span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+              <span>
+                {message.status === "interrupted" ? "Interrupted · " : ""}
+                {message.status === "failed" ? "Failed · " : ""}
+                {new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
             </div>
             <MessageContent content={message.content} />
             {message.archiveCitations?.length ? (
@@ -324,7 +337,6 @@ export function StrategistChatRail(props: StrategistChatRailProps) {
           onChange={(event) => props.onComposerChange(event.target.value)}
           placeholder={`Message ${props.title}`}
           rows={4}
-          disabled={props.chatBusy}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
@@ -343,13 +355,15 @@ export function StrategistChatRail(props: StrategistChatRailProps) {
             >
               <PlusIcon />
             </button>
-            <div
+            <button
+              type="button"
               className={`context-pill ${props.contextUsageRatio > 0.72 ? "warning" : ""}`}
               title={props.contextUsageTitle}
-              aria-label={`Context usage ${props.contextUsageLabel}`}
+              aria-label={`Context usage ${props.contextUsageLabel}. Compact now.`}
+              onClick={props.onCompactThread}
             >
               <strong>{props.contextUsageLabel}</strong>
-            </div>
+            </button>
             <input
               ref={props.fileInputRef}
               type="file"
@@ -390,16 +404,22 @@ export function StrategistChatRail(props: StrategistChatRailProps) {
           >
             <MicIcon />
           </button>
-          <button
-            type="button"
-            className="chat-send-button"
-            aria-label="Send message"
-            title="Send message"
-            onClick={props.onSend}
-            disabled={props.chatBusy}
-          >
-            <SendIcon />
-          </button>
+          {props.chatBusy ? (
+            <button
+              type="button"
+              className="chat-stop-button"
+              aria-label="Stop response"
+              title="Stop response and keep the interrupted partial message"
+              onClick={props.onStopGeneration}
+              disabled={!props.chatCanStop}
+            >
+              <StopIcon />
+            </button>
+          ) : (
+            <button type="button" className="chat-send-button" aria-label="Send message" title="Send message" onClick={props.onSend}>
+              <SendIcon />
+            </button>
+          )}
         </div>
         {props.attachments.length > 0 && (
           <div className="attachment-strip">

@@ -53,6 +53,17 @@
   "health": {
     "strategy": "runtime-gateway"
   },
+  "delegation": {
+    "acceptsTasks": true,
+    "taskTypes": ["code-change", "bug-fix", "research", "archive-prep", "routine-work", "system-diagnosis"],
+    "artifactReturnTypes": ["summary", "markdown", "diff", "file-list", "log", "citation-bundle", "diagnostic-report", "verification-report"],
+    "defaultTargetRuntime": "external-agent",
+    "requiresHumanApprovalBeforeExecution": true,
+    "notes": [
+      "OpenClaw receives generated TASK.md plus delegation.packet.json.",
+      "OpenClaw is high-power and should start degraded unless runtime health and grants are valid."
+    ]
+  },
   "installHooks": {
     "onInstall": "register-external-agent"
   },

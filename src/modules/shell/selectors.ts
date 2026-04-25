@@ -4,22 +4,23 @@ import type {
   AddOnInstallation,
   AddOnManifest,
   ChannelDefinition,
+  ContextBudget,
   ConversationThread,
   ProviderProfile,
   ProviderRuntimeNode,
   ResonantShellState,
 } from "../../core/contracts";
+import {
+  buildContextBudget,
+  contextBudgetTitle,
+  contextUsageRatio as ratioFromContextBudget,
+} from "../../core/context-memory";
 import { resolveProviderPath, strategistDisplayName } from "../../core/policies";
 import {
   resolveAgentChatRoute,
   resolveStrategistChatRoute,
   type ProviderRouteResolution,
 } from "../../core/provider-service";
-import {
-  CONTEXT_WARNING_CHARS,
-  estimateContextCharacters,
-  formatCompactCount,
-} from "../chat/utils";
 import type { ComposerAttachment } from "../chat/types";
 
 type ViewModelInput = {
@@ -52,6 +53,7 @@ export type ShellViewModel = {
   activeRuntimeNode: ProviderRuntimeNode | undefined;
   activeChatModel: string;
   strategistRecoveryActive: boolean;
+  contextBudget: ContextBudget;
   contextUsageRatio: number;
   contextUsageLabel: string;
   contextUsageTitle: string;
@@ -138,14 +140,17 @@ export const buildShellViewModel = ({
       : activeRoute.model || activeProvider?.primaryModel || "";
   const strategistRecoveryActive =
     recoveryModeActive || strategist?.providerProfileId === "shared-local" || activeRuntimeNode?.kind === "local";
-  const contextChars = estimateContextCharacters(activeThread, composer, attachments);
-  const contextUsageRatio = Math.min(contextChars / CONTEXT_WARNING_CHARS, 1);
+  const contextBudget = buildContextBudget({
+    thread: activeThread,
+    composer,
+    attachments,
+    provider: activeProvider,
+    runtimeNode: activeRuntimeNode,
+    modelId: activeChatModel,
+  });
+  const contextUsageRatio = ratioFromContextBudget(contextBudget);
   const contextUsageLabel = `${Math.round(contextUsageRatio * 100)}%`;
-  const contextUsageTitle =
-    `Estimated session context: ${formatCompactCount(contextChars)} chars of ~${formatCompactCount(
-      CONTEXT_WARNING_CHARS,
-    )} before compaction pressure should start to matter. ` +
-    "This is currently a shell-side estimate, not a tokenizer-accurate counter or a live compaction system yet.";
+  const contextUsageTitle = contextBudgetTitle(contextBudget);
 
   return {
     allManifests,
@@ -166,6 +171,7 @@ export const buildShellViewModel = ({
     activeRuntimeNode,
     activeChatModel,
     strategistRecoveryActive,
+    contextBudget,
     contextUsageRatio,
     contextUsageLabel,
     contextUsageTitle,

@@ -4,6 +4,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import type {
   AddOnManifest,
+  ChatRunPhase,
   ConversationThread,
   LocalRuntimeStatus,
   ProviderDiagnosticReport,
@@ -24,6 +25,11 @@ import {
   requestProviderDiagnostics,
   requestProviderServiceChatCompletion,
 } from "../../core/runtime";
+import {
+  formatCompactStateForPrompt,
+  latestCompactStateForThread,
+  promptMessagesForThread,
+} from "../../core/context-memory";
 import {
   archiveCitationsFromBundle,
   buildArchiveContextBundle,
@@ -53,9 +59,12 @@ type ChatTurnControllerInput = {
   setAttachments: Dispatch<SetStateAction<ComposerAttachment[]>>;
   setChatNotice: Dispatch<SetStateAction<string | null>>;
   setChatBusy: Dispatch<SetStateAction<boolean>>;
+  setChatRunPhase: Dispatch<SetStateAction<ChatRunPhase>>;
   setAgentActivityLabel: Dispatch<SetStateAction<string>>;
   setProviderDiagnostics: Dispatch<SetStateAction<ProviderDiagnosticReport[]>>;
   setRecoveryRuntimeStatus: Dispatch<SetStateAction<LocalRuntimeStatus | null>>;
+  runToken: symbol;
+  isRunCurrent: (runToken: symbol) => boolean;
   errorMessageOf: (error: unknown, fallback: string) => string;
 };
 
@@ -75,9 +84,12 @@ export const executeChatTurn = async ({
   setAttachments,
   setChatNotice,
   setChatBusy,
+  setChatRunPhase,
   setAgentActivityLabel,
   setProviderDiagnostics,
   setRecoveryRuntimeStatus,
+  runToken,
+  isRunCurrent,
   errorMessageOf,
 }: ChatTurnControllerInput): Promise<void> => {
   const outgoing = (overrideMessage ?? composer).trim();
@@ -99,6 +111,7 @@ export const executeChatTurn = async ({
   setAttachments([]);
   setChatNotice(null);
   setChatBusy(true);
+  setChatRunPhase("thinking");
   setAgentActivityLabel(
     activeThread.owningAgentId === state.recoverySession.engineerAgentId
       ? "Establishing facts and checking the recovery floor."
@@ -109,7 +122,11 @@ export const executeChatTurn = async ({
   try {
     let routedState = nextState;
     try {
+      setChatRunPhase("tool-running");
       const reports = await requestProviderDiagnostics();
+      if (!isRunCurrent(runToken)) {
+        return;
+      }
       setProviderDiagnostics(reports);
       routedState = applyProviderDiagnostics(nextState, reports);
       commitReadyState(routedState);
@@ -135,6 +152,8 @@ export const executeChatTurn = async ({
     if (!thread) {
       throw new Error("Active Strategist thread was not found.");
     }
+    const compactState = latestCompactStateForThread(routedState, thread.id);
+    const providerMessages = promptMessagesForThread(thread, compactState);
 
     const engineerTargetModel =
       routedState.providers.find((profile) => profile.id === "shared-local")?.primaryModel ?? "batiai/gemma4-e2b:q4";
@@ -144,6 +163,9 @@ export const executeChatTurn = async ({
         : null;
 
     if (runtimeStatusForPrompt) {
+      if (!isRunCurrent(runToken)) {
+        return;
+      }
       setRecoveryRuntimeStatus(runtimeStatusForPrompt);
       setAgentActivityLabel("Inspecting the local recovery floor and validating runtime health.");
     }
@@ -160,9 +182,14 @@ export const executeChatTurn = async ({
 
     const recoveryAgentActive = activeThread.owningAgentId === routedState.recoverySession.engineerAgentId;
     if (recoveryAgentActive) {
+      setChatRunPhase("tool-running");
       setAgentActivityLabel("Probing stronger routes, reading state, and preparing the next recovery step.");
     }
+    setChatRunPhase("retrieving");
     const systemMemoryContext = await buildSystemMemoryContextBundle().catch(() => null);
+    if (!isRunCurrent(runToken)) {
+      return;
+    }
     if (systemMemoryContext?.status === "ready") {
       setAgentActivityLabel(
         recoveryAgentActive
@@ -174,6 +201,9 @@ export const executeChatTurn = async ({
       !recoveryAgentActive && activeThread.owningAgentId === "strategist.core"
         ? await buildArchiveContextBundle(trimmed).catch(() => null)
         : null;
+    if (!isRunCurrent(runToken)) {
+      return;
+    }
     if (archiveContext) {
       setAgentActivityLabel(
         archiveContext.pages.length
@@ -182,14 +212,16 @@ export const executeChatTurn = async ({
       );
     }
     const effectiveSystemPrompt = recoveryAgentActive
-      ? [systemPrompt, formatSystemMemoryForPrompt(systemMemoryContext)].join("\n\n")
+      ? [systemPrompt, formatSystemMemoryForPrompt(systemMemoryContext), formatCompactStateForPrompt(compactState)].join("\n\n")
       : [
           systemPrompt,
           formatSystemMemoryForPrompt(systemMemoryContext),
+          formatCompactStateForPrompt(compactState),
           "Living Archive access is host-mediated and read-only for this chat turn. Treat retrieved pages as contextual memory, not as permission to mutate the archive.",
           formatArchiveContextForPrompt(archiveContext),
         ].join("\n\n");
 
+    setChatRunPhase(recoveryAgentActive ? "tool-running" : "thinking");
     const recoveryTurn = recoveryAgentActive
       ? await requestEngineerRecoveryTurn({
           providerId: provider.id,
@@ -199,11 +231,14 @@ export const executeChatTurn = async ({
           runtimeNodeKind: runtimeNode.kind,
           model: route.model,
           systemPrompt: effectiveSystemPrompt,
-          messages: thread.messages,
+          messages: providerMessages,
           runtimeNodeEndpoint: runtimeNode.endpoint,
           authTier: route.decision.authTier,
         })
       : null;
+    if (!isRunCurrent(runToken)) {
+      return;
+    }
 
     const reply =
       recoveryTurn?.reply ??
@@ -218,8 +253,11 @@ export const executeChatTurn = async ({
         model: route.model,
         reasoningEffort: thinkingDepth,
         systemPrompt: effectiveSystemPrompt,
-        messages: thread.messages,
+        messages: providerMessages,
       }));
+    if (!isRunCurrent(runToken)) {
+      return;
+    }
 
     const withAssistant = appendAssistantMessage(cloneState(routedState), activeThread.id, reply, {
       archiveCitations: archiveCitationsFromBundle(archiveContext),
@@ -247,15 +285,22 @@ export const executeChatTurn = async ({
       );
     }
     commitReadyState(withAssistant);
+    setChatRunPhase("completed");
   } catch (error) {
+    if (!isRunCurrent(runToken)) {
+      return;
+    }
     const failure = errorMessageOf(error, "Strategist request failed before a reply was returned.");
-    const withFailure = appendAssistantMessage(cloneState(nextState), activeThread.id, failure);
+    const withFailure = appendAssistantMessage(cloneState(nextState), activeThread.id, failure, { status: "failed" });
     commitReadyState(withFailure);
     setChatNotice(failure);
+    setChatRunPhase("failed");
     setAgentActivityLabel(
       state.recoverySession.active ? "Recovery action failed. Review the latest error in chat." : "Reply failed. Review the latest error.",
     );
   } finally {
-    setChatBusy(false);
+    if (isRunCurrent(runToken)) {
+      setChatBusy(false);
+    }
   }
 };

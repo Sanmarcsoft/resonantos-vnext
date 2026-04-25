@@ -22,11 +22,18 @@ import type {
   ArchiveRuntimeStatus,
   ArchiveSearchResult,
   ConversationMessage,
+  ChatRunPhase,
   LocalRuntimeStatus,
   ProviderDiagnosticReport,
   RecoveryRouteCandidate,
   ResonantShellState,
 } from "./core/contracts";
+import {
+  appendTranscriptEvent,
+  branchTranscriptPayload,
+  compactThreadContext,
+  messageTranscriptPayload,
+} from "./core/context-memory";
 import { routedProviderLabel } from "./core/provider-service";
 import { persistState } from "./core/runtime";
 import {
@@ -111,6 +118,7 @@ export function App() {
   const [selectedAddonId, setSelectedAddonId] = useState<string>("");
   const [composer, setComposer] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
+  const [chatRunPhase, setChatRunPhase] = useState<ChatRunPhase>("idle");
   const [chatNotice, setChatNotice] = useState<string | null>(null);
   const [providerDrafts, setProviderDrafts] = useState<Record<string, string>>({});
   const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
@@ -161,6 +169,7 @@ export function App() {
   const chatScrollAnchorRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const speechRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const activeChatRunTokenRef = useRef<symbol | null>(null);
   const deferredSearch = useDeferredValue(search);
   const activeProviderForSelection = resolveActiveProviderForSelection(
     loadState.phase === "ready" ? loadState.state : null,
@@ -387,15 +396,24 @@ export function App() {
         ...item,
         threadId: forkId,
       }));
-      draft.conversationThreads.push({
+      const forkThread = {
         ...sourceThread,
         id: forkId,
         title: `${sourceThread.title} fork`,
         summary: `Forked after ${message.author}'s message.`,
         messages: forkedMessages,
-      });
+      };
+      draft.conversationThreads.push(forkThread);
       draft.uiPreferences.activeChatThreadId = forkId;
-      return draft;
+      return appendTranscriptEvent(draft, {
+        action: "thread-branched",
+        threadId: forkId,
+        channelId: forkThread.channelId,
+        agentId: forkThread.owningAgentId,
+        sourceThreadId: sourceThread.id,
+        sourceMessageId: message.id,
+        payload: branchTranscriptPayload(sourceThread, forkThread, message.id),
+      });
     });
     setComposer("");
     setAttachments([]);
@@ -408,6 +426,17 @@ export function App() {
     }
 
     setComposer(message.content);
+    updateRuntimeState((draft) =>
+      appendTranscriptEvent(draft, {
+        action: "message-edit-requested",
+        threadId: message.threadId,
+        channelId: message.channelId,
+        messageId: message.id,
+        role: message.role,
+        agentId: activeThread?.owningAgentId,
+        payload: messageTranscriptPayload(message),
+      }),
+    );
     setChatNotice("Message loaded into the composer. Edit and send when ready.");
   };
 
@@ -419,7 +448,15 @@ export function App() {
       }
 
       targetThread.messages = targetThread.messages.filter((item) => item.id !== message.id);
-      return draft;
+      return appendTranscriptEvent(draft, {
+        action: "message-deleted",
+        threadId: message.threadId,
+        channelId: message.channelId,
+        messageId: message.id,
+        role: message.role,
+        agentId: targetThread.owningAgentId,
+        payload: messageTranscriptPayload(message),
+      });
     });
     setChatNotice("Message deleted from this chat.");
   };
@@ -445,7 +482,7 @@ export function App() {
       }
 
       const forkId = `thread-fork-${Date.now()}`;
-      draft.conversationThreads.unshift({
+      const forkThread = {
         ...sourceThread,
         id: forkId,
         title: `${sourceThread.title} fork`,
@@ -455,10 +492,18 @@ export function App() {
           id: `${forkId}:${message.id.split(":").at(-1) ?? "m"}`,
           threadId: forkId,
         })),
-      });
+      };
+      draft.conversationThreads.unshift(forkThread);
       draft.uiPreferences.activeChatThreadId = forkId;
       draft.uiPreferences.pinnedChatThreadIds = (draft.uiPreferences.pinnedChatThreadIds ?? []).filter((id) => id !== forkId);
-      return draft;
+      return appendTranscriptEvent(draft, {
+        action: "thread-branched",
+        threadId: forkId,
+        channelId: forkThread.channelId,
+        agentId: forkThread.owningAgentId,
+        sourceThreadId: sourceThread.id,
+        payload: branchTranscriptPayload(sourceThread, forkThread),
+      });
     });
     setComposer("");
     setAttachments([]);
@@ -487,6 +532,34 @@ export function App() {
     setComposer("");
     setAttachments([]);
     setChatNotice("Chat deleted.");
+  };
+
+  const compactActiveChatContext = () => {
+    if (!activeThread) {
+      setChatNotice("No active chat is available to compact.");
+      return;
+    }
+
+    let preservedSummary = "";
+    updateRuntimeState((draft) => {
+      const nextState = compactThreadContext(draft, activeThread.id);
+      const compactState = nextState.contextMemoryStates.at(-1);
+      if (compactState?.threadId === activeThread.id) {
+        preservedSummary = [
+          `${compactState.preservedRecentMessageIds.length} recent message${compactState.preservedRecentMessageIds.length === 1 ? "" : "s"}`,
+          `${compactState.decisions.length} decision${compactState.decisions.length === 1 ? "" : "s"}`,
+          `${compactState.openTasks.length} task${compactState.openTasks.length === 1 ? "" : "s"}`,
+          `${compactState.preferences.length} preference${compactState.preferences.length === 1 ? "" : "s"}`,
+          `${compactState.artifacts.length} artifact${compactState.artifacts.length === 1 ? "" : "s"}`,
+        ].join(", ");
+      }
+      return nextState;
+    });
+    setChatNotice(
+      preservedSummary
+        ? `Context compacted. Preserved ${preservedSummary}, plus user intent and rationale.`
+        : "Context compaction did not run because this thread was not found.",
+    );
   };
 
   const selectChatAgent = (agentId: string) => {
@@ -748,9 +821,15 @@ export function App() {
   };
 
   const sendStrategistMessage = async (overrideMessage?: string) => {
-    if (!activeThread || !(overrideMessage ?? composer).trim() || chatBusy) {
+    if (!activeThread || !(overrideMessage ?? composer).trim()) {
       return;
     }
+    if (chatBusy) {
+      setChatNotice("Stop the current response before sending a follow-up correction.");
+      return;
+    }
+    const runToken = Symbol(`chat-run:${activeThread.id}:${Date.now()}`);
+    activeChatRunTokenRef.current = runToken;
     await executeChatTurn({
       snapshot: { state, bundled, sideloaded },
       activeThread,
@@ -764,11 +843,58 @@ export function App() {
       setAttachments,
       setChatNotice,
       setChatBusy,
+      setChatRunPhase,
       setAgentActivityLabel,
       setProviderDiagnostics,
       setRecoveryRuntimeStatus,
+      runToken,
+      isRunCurrent: (token) => activeChatRunTokenRef.current === token,
       errorMessageOf,
     });
+    if (activeChatRunTokenRef.current === runToken) {
+      activeChatRunTokenRef.current = null;
+      setChatRunPhase("idle");
+    }
+  };
+
+  const stopChatGeneration = () => {
+    if (!chatBusy || !activeThread) {
+      return;
+    }
+    activeChatRunTokenRef.current = null;
+    updateRuntimeState((draft) => {
+      const targetThread = draft.conversationThreads.find((thread) => thread.id === activeThread.id);
+      if (!targetThread) {
+        return draft;
+      }
+      const interruptedMessage: ConversationMessage = {
+        id: `${targetThread.id}:m${targetThread.messages.length + 1}`,
+        threadId: targetThread.id,
+        channelId: targetThread.channelId,
+        role: "assistant",
+        author:
+          targetThread.owningAgentId === draft.recoverySession.engineerAgentId
+            ? draft.agents.find((agent) => agent.id === draft.recoverySession.engineerAgentId)?.displayName ?? "Resonant Engineer Agent"
+            : draft.strategistIdentity.customName ?? draft.strategistIdentity.defaultName,
+        content: "Response stopped by the user before a complete reply was returned.",
+        createdAt: new Date().toISOString(),
+        status: "interrupted",
+      };
+      targetThread.messages = [...targetThread.messages, interruptedMessage];
+      return appendTranscriptEvent(draft, {
+        action: "generation-interrupted",
+        threadId: interruptedMessage.threadId,
+        channelId: interruptedMessage.channelId,
+        messageId: interruptedMessage.id,
+        role: interruptedMessage.role,
+        agentId: targetThread.owningAgentId,
+        payload: messageTranscriptPayload(interruptedMessage),
+      });
+    });
+    setChatBusy(false);
+    setChatRunPhase("interrupted");
+    setAgentActivityLabel("Response interrupted. You can send the correction now.");
+    setChatNotice("Response interrupted. Partial assistant message kept in the chat.");
   };
 
   const startRecoveryRunbook = () => {
@@ -1023,6 +1149,7 @@ export function App() {
         activeAgentId={activeThread?.owningAgentId ?? (recoveryModeActive ? state.recoverySession.engineerAgentId : "strategist.core")}
         channels={state.channels}
         chatBusy={chatBusy}
+        chatCanStop={chatRunPhase !== "idle"}
         chatNotice={chatNotice}
         composer={composer}
         attachments={attachments}
@@ -1071,6 +1198,8 @@ export function App() {
         onSelectAgent={selectChatAgent}
         onComposerChange={setComposer}
         onSend={() => void sendStrategistMessage()}
+        onStopGeneration={stopChatGeneration}
+        onCompactThread={compactActiveChatContext}
         onSaveMessageToArchive={(message) => {
           if (!activeThread) {
             return;

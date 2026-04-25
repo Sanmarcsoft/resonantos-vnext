@@ -1,0 +1,84 @@
+{
+  "id": "addon.opencode",
+  "name": "OpenCode",
+  "version": "0.1.0",
+  "author": "Resonant Alpha",
+  "category": "tool",
+  "description": "Open-source coding workspace add-on for delegated code tasks under ResonantOS capability and verification gates.",
+  "runtimeType": "embedded-module",
+  "surfaces": [
+    {
+      "id": "opencode-workspace",
+      "type": "embedded-pane",
+      "label": "OpenCode Workspace",
+      "description": "Open a coding workspace inside the ResonantOS center surface."
+    }
+  ],
+  "requestedCapabilities": [
+    {
+      "capability": "filesystem",
+      "granted": false,
+      "scope": "workspace",
+      "revocationBehavior": "hard-stop"
+    },
+    {
+      "capability": "shell",
+      "granted": false,
+      "scope": "workspace",
+      "revocationBehavior": "degrade"
+    },
+    {
+      "capability": "providers",
+      "granted": false,
+      "scope": "shared",
+      "revocationBehavior": "degrade"
+    },
+    {
+      "capability": "ui-embedding",
+      "granted": false,
+      "scope": "system",
+      "revocationBehavior": "hide-surface"
+    }
+  ],
+  "providerRequirements": {
+    "sharedProfiles": ["shared-local", "shared-minimax"],
+    "supportsPrivateCredentials": true,
+    "preferredRuntimeKinds": ["local", "remote-user-owned", "cloud"],
+    "fallbackPolicyId": "coding-default"
+  },
+  "archiveIntegration": {
+    "readScopes": ["living-archive/context"],
+    "intakeWriteScopes": ["LivingArchive/INTAKE/coding"],
+    "canRequestIngest": true,
+    "canWriteKnowledgePages": false
+  },
+  "health": {
+    "strategy": "workspace-process"
+  },
+  "delegation": {
+    "acceptsTasks": true,
+    "taskTypes": ["code-change", "bug-fix", "system-diagnosis"],
+    "artifactReturnTypes": ["summary", "diff", "file-list", "log", "diagnostic-report", "verification-report"],
+    "defaultTargetRuntime": "embedded-workspace",
+    "requiresHumanApprovalBeforeExecution": true,
+    "notes": [
+      "OpenCode must return changed files, commands run, verification evidence, and residual risks.",
+      "Direct filesystem and process access must stay scoped to the task workspace."
+    ]
+  },
+  "installHooks": {
+    "onInstall": "register-coding-workspace"
+  },
+  "compatibility": {
+    "shellVersion": "^0.1.0",
+    "platforms": ["macOS", "linux", "windows"]
+  },
+  "agents": [
+    {
+      "id": "opencode.runtime",
+      "displayName": "OpenCode",
+      "trustTier": "addon",
+      "workspaceBehavior": "delegated"
+    }
+  ]
+}

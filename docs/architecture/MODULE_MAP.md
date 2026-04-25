@@ -12,6 +12,7 @@ This map defines which folder owns which feature area so contributors do not kee
   - application contracts
   - persistence/runtime helpers
   - provider and archive policy helpers
+  - Delegation Packet contracts, validation, and `TASK.md` rendering
   - cross-module state utilities
   - recovery routing and host-mediated Engineer service bridges
 

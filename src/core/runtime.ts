@@ -417,7 +417,10 @@ const mergeConversationThreads = (
   defaults: ResonantShellState["conversationThreads"],
 ): ResonantShellState["conversationThreads"] => {
   const persistedById = new Map((persisted ?? []).map((thread) => [thread.id, thread]));
-  return defaults.map((thread) => ({ ...thread, ...(persistedById.get(thread.id) ?? {}) }));
+  const defaultThreads = defaults.map((thread) => ({ ...thread, ...(persistedById.get(thread.id) ?? {}) }));
+  const defaultIds = new Set(defaults.map((thread) => thread.id));
+  const extraPersistedThreads = (persisted ?? []).filter((thread) => !defaultIds.has(thread.id));
+  return [...defaultThreads, ...extraPersistedThreads];
 };
 
 const normalizeProviders = (
@@ -643,6 +646,8 @@ export const normalizeState = (state: ResonantShellState, base: ResonantShellSta
     workspaces: normalizeWorkspaces(state.workspaces, base.workspaces),
     archivePolicy: normalizeArchivePolicy(state.archivePolicy, base.archivePolicy),
     conversationThreads: mergeConversationThreads(state.conversationThreads, base.conversationThreads),
+    transcriptLedger: state.transcriptLedger ?? base.transcriptLedger,
+    contextMemoryStates: state.contextMemoryStates ?? base.contextMemoryStates,
     recoverySession: {
       ...base.recoverySession,
       ...(state.recoverySession ?? {}),

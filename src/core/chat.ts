@@ -2,6 +2,7 @@
 // Intent citation: docs/architecture/ADR-010-recovery-ladder.md
 
 import type { ConversationMessage, ConversationThread, LocalRuntimeStatus, ResonantShellState } from "./contracts";
+import { appendTranscriptEvent, messageTranscriptPayload } from "./context-memory";
 import { strategistDisplayName } from "./policies";
 
 const isoTimestamp = (): string => new Date().toISOString();
@@ -23,9 +24,10 @@ const appendMessage = (
   role: ConversationMessage["role"],
   author: string,
   content: string,
-  metadata?: Pick<ConversationMessage, "archiveCitations">,
-): ResonantShellState =>
-  updateThread(state, threadId, (thread) => {
+  metadata?: Pick<ConversationMessage, "archiveCitations" | "status">,
+): ResonantShellState => {
+  let appendedMessage: ConversationMessage | null = null;
+  const nextState = updateThread(state, threadId, (thread) => {
     const nextTitle =
       role === "user" && thread.title.startsWith("New chat")
         ? content.trim().slice(0, 42) || thread.title
@@ -44,6 +46,7 @@ const appendMessage = (
       content,
       ...metadata,
     };
+    appendedMessage = message;
 
     return {
       ...thread,
@@ -52,6 +55,20 @@ const appendMessage = (
       messages: [...thread.messages, message],
     };
   });
+  if (!appendedMessage) {
+    return nextState;
+  }
+  const transcriptMessage = appendedMessage as ConversationMessage;
+  return appendTranscriptEvent(nextState, {
+    action: "message-appended",
+    threadId,
+    channelId: transcriptMessage.channelId,
+    messageId: transcriptMessage.id,
+    role: transcriptMessage.role,
+    agentId: threadById(nextState, threadId)?.owningAgentId,
+    payload: messageTranscriptPayload(transcriptMessage),
+  });
+};
 
 export const appendUserMessage = (
   state: ResonantShellState,
@@ -63,7 +80,7 @@ export const appendAssistantMessage = (
   state: ResonantShellState,
   threadId: string,
   content: string,
-  metadata?: Pick<ConversationMessage, "archiveCitations">,
+  metadata?: Pick<ConversationMessage, "archiveCitations" | "status">,
 ): ResonantShellState => {
   const thread = threadById(state, threadId);
   const author =
@@ -90,7 +107,16 @@ export const createStrategistThread = (
   };
 
   return {
-    ...state,
+    ...appendTranscriptEvent(state, {
+      action: "thread-created",
+      threadId,
+      channelId: input.channelId,
+      agentId: "strategist.core",
+      payload: {
+        title: thread.title,
+        workspaceId: input.workspaceId,
+      },
+    }),
     conversationThreads: [thread, ...state.conversationThreads],
     uiPreferences: {
       ...state.uiPreferences,

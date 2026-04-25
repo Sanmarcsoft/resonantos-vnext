@@ -18,10 +18,19 @@ The Strategist chat is a persistent right-side rail in the ResonantOS shell.
 
 - Composer controls sit on the same lane under the input area.
 - Send uses a compact icon button with accent emphasis.
+- Active responses expose a Stop control in the same composer action lane.
+- Stopped responses remain visible as interrupted assistant messages so the user can inspect, delete, branch, or regenerate from the interrupted point.
 - File attach and dictate use minimal icon buttons.
 - Model and depth selectors remain present but visually quiet.
 - Context usage is shown as an estimate until real compaction and tokenizer-aware accounting exist.
 - Hover text must explain what the context indicator means and what it does not mean yet.
+
+## Runtime Rules
+
+- Chat runtime state must distinguish idle, thinking, retrieving, tool-running, interrupted, failed, and completed phases.
+- A user follow-up during an active response must not be silently accepted into an ambiguous state.
+- Until provider streaming and true IPC abort are implemented, Stop must invalidate the active run token, preserve an interrupted message, and suppress any late provider response from being appended.
+- Future streaming support should upgrade Stop from stale-response suppression to real provider/runtime cancellation where the provider supports it.
 
 ## Trust Rules
 
