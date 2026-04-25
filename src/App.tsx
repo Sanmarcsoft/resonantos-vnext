@@ -72,6 +72,7 @@ import type { ComposerAttachment, ThinkingDepth } from "./modules/chat/types";
 import { Panel } from "./components/Panel";
 import { ArchiveWorkspace } from "./modules/archive/ArchiveWorkspace";
 import { AddOnsWorkspace } from "./modules/addons/AddOnsWorkspace";
+import { DelegationWorkspace } from "./modules/delegation/DelegationWorkspace";
 import { OverviewWorkspace } from "./modules/overview/OverviewWorkspace";
 import { promoteRecoveryRoute, RECOVERY_RUNBOOK_PROMPT, setRecoveryMode } from "./modules/recovery/controller";
 import { RecoveryWorkspace } from "./modules/recovery/RecoveryWorkspace";
@@ -97,11 +98,12 @@ type LoadState =
   | { phase: "error"; message: string };
 
 type Section = ResonantShellState["uiPreferences"]["activeSection"];
-type DockIconId = "home" | "archive" | "addons" | "agent" | "settings";
+type DockIconId = "home" | "archive" | "delegation" | "addons" | "agent" | "settings";
 
 const navItems: Array<{ id: Section; label: string; eyebrow: string; icon: DockIconId; pinned?: boolean }> = [
   { id: "overview", label: "Home", eyebrow: "apps", icon: "home", pinned: true },
   { id: "archive", label: "Living Archive", eyebrow: "memory", icon: "archive", pinned: true },
+  { id: "delegation", label: "Delegation", eyebrow: "tasks", icon: "delegation", pinned: true },
   { id: "addons", label: "Add-ons", eyebrow: "catalog", icon: "addons", pinned: true },
   { id: "strategist", label: "Agent Identity", eyebrow: "identity", icon: "agent" },
   { id: "settings", label: "Settings", eyebrow: "system", icon: "settings", pinned: true },
@@ -1040,6 +1042,7 @@ export function App() {
               displayedStrategistName={displayedStrategistName}
               providerLabel={routedProviderLabel(strategistRoute)}
               onOpenArchive={() => setSection("archive")}
+              onOpenDelegation={() => setSection("delegation")}
               onOpenAddons={() => setSection("addons")}
               onOpenSettings={() => setSection("settings")}
             />
@@ -1093,6 +1096,15 @@ export function App() {
               onRefreshTolBundles={() => void refreshArchiveTolBundles()}
               onBuildTolBundle={(sessionId) => void runArchiveTolBundleBuild(sessionId)}
               onRunIngestProbe={() => void runArchiveIngestProbe()}
+            />
+          )}
+
+          {!recoveryModeActive && currentSection === "delegation" && (
+            <DelegationWorkspace
+              chatBusy={chatBusy}
+              onStartWorkspace={async (workspaceId) => {
+                await sendStrategistMessage(`start engineer task ${workspaceId}`);
+              }}
             />
           )}
 
@@ -1271,6 +1283,12 @@ function DockIcon(props: { icon: DockIconId }) {
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M9 5h6v4h4v6h-4v4H9v-4H5V9h4z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case "delegation":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 7h8M5 12h6M5 17h8M15 12h4m0 0-2-2m2 2-2 2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       );
     case "agent":

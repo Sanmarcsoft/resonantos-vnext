@@ -427,6 +427,13 @@ export const requestCreateTaskWorkspace = async (packet: DelegationPacket): Prom
   throw new Error("Task workspace creation is available only in the desktop shell.");
 };
 
+export const requestListTaskWorkspaces = async (): Promise<TaskWorkspace[]> => {
+  if (hasTauri()) {
+    return (await invoke("delegation_list_task_workspaces")) as TaskWorkspace[];
+  }
+  throw new Error("Task workspace listing is available only in the desktop shell.");
+};
+
 export const requestReadTaskWorkspace = async (workspaceId: string): Promise<TaskWorkspacePayload> => {
   if (hasTauri()) {
     return (await invoke("delegation_read_task_workspace", {

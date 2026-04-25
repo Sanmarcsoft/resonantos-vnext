@@ -1213,7 +1213,7 @@ export interface RecoverySession {
 }
 
 export interface UiPreferences {
-  activeSection: "overview" | "strategist" | "archive" | "addons" | "settings";
+  activeSection: "overview" | "strategist" | "archive" | "delegation" | "addons" | "settings";
   activeChatThreadId: string;
   pinnedChatThreadIds: string[];
   leftSidebarOpen: boolean;

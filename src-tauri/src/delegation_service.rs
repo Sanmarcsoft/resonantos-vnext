@@ -258,6 +258,28 @@ pub(crate) fn read_task_workspace_with_root(
     })
 }
 
+pub(crate) fn list_task_workspaces_with_root(
+    root: &Path,
+) -> Result<Vec<TaskWorkspaceRecord>, String> {
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut workspaces = Vec::new();
+    for entry in fs::read_dir(root)
+        .map_err(|error| format!("Failed to read task workspace root: {error}"))?
+    {
+        let entry =
+            entry.map_err(|error| format!("Failed to read task workspace entry: {error}"))?;
+        let entry_path = entry.path();
+        if !entry_path.is_dir() || !entry_path.join("delegation.packet.json").exists() {
+            continue;
+        }
+        workspaces.push(task_workspace_record_from_root(&entry_path)?);
+    }
+    workspaces.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(workspaces)
+}
+
 pub(crate) fn finish_task_workspace_with_root(
     root: &Path,
     request: FinishTaskWorkspaceRequest,
@@ -323,6 +345,11 @@ pub(crate) fn read_task_workspace(
     read_task_workspace_with_root(&root, request)
 }
 
+pub(crate) fn list_task_workspaces(app: &AppHandle) -> Result<Vec<TaskWorkspaceRecord>, String> {
+    let root = task_workspaces_dir(app)?;
+    list_task_workspaces_with_root(&root)
+}
+
 pub(crate) fn finish_task_workspace(
     app: &AppHandle,
     request: FinishTaskWorkspaceRequest,
@@ -335,8 +362,8 @@ pub(crate) fn finish_task_workspace(
 mod tests {
     use super::{
         create_task_workspace_with_root, finish_task_workspace_with_root,
-        read_task_workspace_with_root, CreateTaskWorkspaceRequest, FinishTaskWorkspaceRequest,
-        ReadTaskWorkspaceRequest,
+        list_task_workspaces_with_root, read_task_workspace_with_root, CreateTaskWorkspaceRequest,
+        FinishTaskWorkspaceRequest, ReadTaskWorkspaceRequest,
     };
     use serde_json::json;
     use std::fs;
@@ -377,6 +404,47 @@ mod tests {
             .join("workspace-engineer-1")
             .join("verification.json")
             .exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn lists_task_workspaces_from_root() {
+        let root = std::env::temp_dir().join(format!(
+            "resonantos-task-workspace-list-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        create_task_workspace_with_root(
+            &root,
+            CreateTaskWorkspaceRequest {
+                packet: json!({
+                    "id": "delegation-list-1",
+                    "workspaceId": "workspace-engineer-list-1",
+                    "targetAgentId": "setup.core"
+                }),
+                task_markdown: "# TASK.md\n\nRun the first diagnostic.\n".to_string(),
+            },
+        )
+        .expect("first workspace should be created");
+        create_task_workspace_with_root(
+            &root,
+            CreateTaskWorkspaceRequest {
+                packet: json!({
+                    "id": "delegation-list-2",
+                    "workspaceId": "workspace-engineer-list-2",
+                    "targetAgentId": "setup.core"
+                }),
+                task_markdown: "# TASK.md\n\nRun the second diagnostic.\n".to_string(),
+            },
+        )
+        .expect("second workspace should be created");
+
+        let workspaces = list_task_workspaces_with_root(&root).expect("workspaces should list");
+
+        assert_eq!(workspaces.len(), 2);
+        assert_eq!(workspaces[0].id, "workspace-engineer-list-1");
+        assert_eq!(workspaces[1].packet_id, "delegation-list-2");
 
         let _ = fs::remove_dir_all(root);
     }

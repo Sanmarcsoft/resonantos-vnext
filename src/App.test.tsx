@@ -26,6 +26,7 @@ const {
   requestProviderServiceChatCompletionStreamMock,
   abortProviderServiceChatCompletionMock,
   requestCreateTaskWorkspaceMock,
+  requestListTaskWorkspacesMock,
   requestReadTaskWorkspaceMock,
   requestFinishTaskWorkspaceMock,
   requestArchiveIngestProbeMock,
@@ -85,6 +86,19 @@ const {
     resultPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/result.md",
     verificationPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/verification.json",
   })),
+  requestListTaskWorkspacesMock: vi.fn(async () => [
+    {
+      id: "workspace-engineer-provider-diagnostic",
+      packetId: "delegation-workspace-engineer-provider-diagnostic",
+      rootPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic",
+      packetPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/delegation.packet.json",
+      taskMarkdownPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/TASK.md",
+      artifactsPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/artifacts",
+      logsPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/logs",
+      resultPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/result.md",
+      verificationPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/verification.json",
+    },
+  ]),
   requestReadTaskWorkspaceMock: vi.fn(async () => ({
     workspace: {
       id: "workspace-engineer-provider-diagnostic",
@@ -501,6 +515,7 @@ vi.mock("./core/runtime", () => ({
   persistState: vi.fn(async () => undefined),
   requestEngineerRecoveryTurn: requestEngineerRecoveryTurnMock,
   requestCreateTaskWorkspace: requestCreateTaskWorkspaceMock,
+  requestListTaskWorkspaces: requestListTaskWorkspacesMock,
   requestReadTaskWorkspace: requestReadTaskWorkspaceMock,
   requestFinishTaskWorkspace: requestFinishTaskWorkspaceMock,
   requestArchiveIngestProbe: requestArchiveIngestProbeMock,
@@ -595,6 +610,20 @@ describe("App boot flow", () => {
       resultPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/result.md",
       verificationPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/verification.json",
     });
+    requestListTaskWorkspacesMock.mockReset();
+    requestListTaskWorkspacesMock.mockResolvedValue([
+      {
+        id: "workspace-engineer-provider-diagnostic",
+        packetId: "delegation-workspace-engineer-provider-diagnostic",
+        rootPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic",
+        packetPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/delegation.packet.json",
+        taskMarkdownPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/TASK.md",
+        artifactsPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/artifacts",
+        logsPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/logs",
+        resultPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/result.md",
+        verificationPath: "/tmp/task-workspaces/workspace-engineer-provider-diagnostic/verification.json",
+      },
+    ]);
     requestReadTaskWorkspaceMock.mockReset();
     requestReadTaskWorkspaceMock.mockResolvedValue({
       workspace: {
@@ -1076,6 +1105,24 @@ describe("App boot flow", () => {
       }),
     );
     expect(requestProviderServiceChatCompletionMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the Delegation Monitor and can start a task workspace from the UI", async () => {
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delegation" }));
+
+    expect(await screen.findByText("Supervise work Augmentor delegates to agents and add-ons.")).toBeTruthy();
+    expect((await screen.findAllByText(/Engineer Provider Diagnostic/i)).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Start Engineer Task" }));
+
+    expect(await screen.findByText(/The Engineer task ran and the workspace was updated/i)).toBeTruthy();
+    expect(requestListTaskWorkspacesMock).toHaveBeenCalled();
+    expect(requestReadTaskWorkspaceMock).toHaveBeenCalledWith("workspace-engineer-provider-diagnostic");
+    expect(requestFinishTaskWorkspaceMock).toHaveBeenCalledTimes(1);
   });
 
   it("stops an active chat run, keeps an interrupted message, and ignores the late reply", async () => {

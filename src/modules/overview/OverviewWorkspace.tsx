@@ -24,6 +24,7 @@ export function OverviewWorkspace({
   displayedStrategistName,
   providerLabel,
   onOpenArchive,
+  onOpenDelegation,
   onOpenAddons,
   onOpenSettings,
 }: {
@@ -32,6 +33,7 @@ export function OverviewWorkspace({
   displayedStrategistName: string;
   providerLabel: string;
   onOpenArchive: () => void;
+  onOpenDelegation: () => void;
   onOpenAddons: () => void;
   onOpenSettings: () => void;
 }) {
@@ -98,6 +100,7 @@ export function OverviewWorkspace({
             <ActiveAppSurface
               app={activeApp}
               onOpenArchive={onOpenArchive}
+              onOpenDelegation={onOpenDelegation}
               onOpenAddons={onOpenAddons}
               onOpenSettings={onOpenSettings}
             />
@@ -128,11 +131,13 @@ export function OverviewWorkspace({
 function ActiveAppSurface({
   app,
   onOpenArchive,
+  onOpenDelegation,
   onOpenAddons,
   onOpenSettings,
 }: {
   app: LauncherApp;
   onOpenArchive: () => void;
+  onOpenDelegation: () => void;
   onOpenAddons: () => void;
   onOpenSettings: () => void;
 }) {
@@ -141,6 +146,8 @@ function ActiveAppSurface({
   const primaryHandler =
     app.id === "core.living-archive"
       ? onOpenArchive
+      : app.id === "core.delegation"
+        ? onOpenDelegation
       : app.id === "core.settings"
         ? onOpenSettings
         : app.status === "available" || app.status === "planned"
@@ -283,6 +290,15 @@ function buildLauncherApps(state: ResonantShellState, manifests: AddOnManifest[]
       status: "core",
       runtimeSurface: "system-workspace",
       primaryAction: "Open Archive",
+    },
+    {
+      id: "core.delegation",
+      name: "Delegation Monitor",
+      description: "Supervise task workspaces Augmentor creates for the Engineer and future add-on agents.",
+      category: "core",
+      status: "core",
+      runtimeSurface: "system-workspace",
+      primaryAction: "Open Delegation",
     },
     ...manifestApps,
     ...plannedApps,
