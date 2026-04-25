@@ -40,6 +40,39 @@ fn sanitize_assistant_content(provider_type: &str, content: &str) -> String {
     }
 }
 
+fn filter_think_stream_delta(delta: &str, inside_think: &mut bool) -> String {
+    let mut output = String::new();
+    let mut remainder = delta;
+
+    loop {
+        if *inside_think {
+            if let Some(end) = remainder.find("</think>") {
+                remainder = &remainder[end + "</think>".len()..];
+                *inside_think = false;
+                continue;
+            }
+            return output;
+        }
+
+        if let Some(start) = remainder.find("<think>") {
+            output.push_str(&remainder[..start]);
+            remainder = &remainder[start + "<think>".len()..];
+            *inside_think = true;
+            continue;
+        }
+
+        output.push_str(remainder);
+        return output;
+    }
+}
+
+fn sanitize_stream_delta(provider_type: &str, delta: &str, inside_think: &mut bool) -> String {
+    match provider_type {
+        "minimax" => filter_think_stream_delta(delta, inside_think),
+        _ => delta.to_string(),
+    }
+}
+
 fn request_messages_with_system_prompt(
     system_prompt: &str,
     messages: Vec<ChatMessageInput>,
@@ -1169,6 +1202,7 @@ async fn execute_cloud_provider_service_chat_stream(
     let mut full = String::new();
     let mut pending = String::new();
     let mut usage: Option<ProviderUsageTelemetry> = None;
+    let mut inside_think = false;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         if chat_run_aborted(&request.run_id) {
@@ -1199,7 +1233,7 @@ async fn execute_cloud_provider_service_chat_stream(
                 }
                 if let Some(delta) = extract_cloud_stream_delta(&payload) {
                     let sanitized_delta =
-                        sanitize_assistant_content(&request.provider_type, &delta);
+                        sanitize_stream_delta(&request.provider_type, &delta, &mut inside_think);
                     if !sanitized_delta.is_empty() {
                         full.push_str(&sanitized_delta);
                         emit_chat_stream_event(window, &request.run_id, "chunk", &sanitized_delta)?;
@@ -1406,9 +1440,10 @@ pub(crate) async fn execute_archive_ingest_probe(
 mod tests {
     use super::{
         ensure_runtime_kind_supported, extract_assistant_content, extract_cloud_usage,
-        extract_local_assistant_content, extract_local_usage, parse_ollama_model_names,
-        resolve_local_runtime_model, resolve_provider_base_url, resolve_provider_execution_adapter,
-        sanitize_assistant_content, strip_think_blocks, ProviderExecutionAdapter,
+        extract_local_assistant_content, extract_local_usage, filter_think_stream_delta,
+        parse_ollama_model_names, resolve_local_runtime_model, resolve_provider_base_url,
+        resolve_provider_execution_adapter, sanitize_assistant_content, sanitize_stream_delta,
+        strip_think_blocks, ProviderExecutionAdapter,
     };
     use serde_json::json;
 
@@ -1424,6 +1459,23 @@ mod tests {
             sanitize_assistant_content("openai", "Plain answer"),
             "Plain answer"
         );
+    }
+
+    #[test]
+    fn filters_minimax_thinking_across_stream_chunks() {
+        let mut inside_think = false;
+        let chunks = [
+            "<think>\nInternal",
+            " reasoning",
+            "</think>\n\ntele",
+            "metry smoke ok",
+        ];
+        let visible = chunks
+            .iter()
+            .map(|chunk| filter_think_stream_delta(chunk, &mut inside_think))
+            .collect::<String>();
+        assert_eq!(visible.trim(), "telemetry smoke ok");
+        assert!(!inside_think);
     }
 
     #[test]
@@ -1543,6 +1595,22 @@ mod tests {
         assert_eq!(usage.prompt_tokens, Some(120));
         assert_eq!(usage.completion_tokens, Some(30));
         assert_eq!(usage.total_tokens, Some(150));
+    }
+
+    #[test]
+    fn filters_streamed_minimax_thinking_across_chunks() {
+        let mut inside_think = false;
+
+        assert_eq!(
+            sanitize_stream_delta("minimax", "Visible <think>hidden", &mut inside_think),
+            "Visible "
+        );
+        assert!(inside_think);
+        assert_eq!(
+            sanitize_stream_delta("minimax", " still hidden</think> answer", &mut inside_think),
+            " answer"
+        );
+        assert!(!inside_think);
     }
 
     #[test]
