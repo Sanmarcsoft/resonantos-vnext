@@ -165,6 +165,7 @@ export function App() {
   const activeProviderForSelection = resolveActiveProviderForSelection(
     loadState.phase === "ready" ? loadState.state : null,
     selectedChatModel,
+    loadState.phase === "ready" ? loadState.state.uiPreferences.activeChatThreadId : undefined,
   );
 
   useEffect(() => {
@@ -812,18 +813,18 @@ export function App() {
         <div className="system-status-strip">
           <span
             className={`system-health ${strategistRecoveryActive ? "warning" : "ready"}`}
-            title={`${strategistRecoveryActive ? "Recovery Active" : "System Ready"} · ${activeRuntimeNode?.label ?? "No runtime"}`}
-            aria-label={`${strategistRecoveryActive ? "Recovery Active" : "System Ready"} · ${activeRuntimeNode?.label ?? "No runtime"}`}
+            title={`${recoveryModeActive ? "Recovery Active" : strategistRecoveryActive ? "Local runtime active" : "System Ready"} · ${activeRuntimeNode?.label ?? "No runtime"}`}
+            aria-label={`${recoveryModeActive ? "Recovery Active" : strategistRecoveryActive ? "Local runtime active" : "System Ready"} · ${activeRuntimeNode?.label ?? "No runtime"}`}
           />
           <button type="button" className="system-icon-button" title="Help and documentation" aria-label="Help and documentation" onClick={() => setSection("settings")}>
             <SystemTopIcon icon="help" />
           </button>
           <button
             type="button"
-            className={`system-icon-button system-emergency-button ${strategistRecoveryActive ? "active" : ""}`}
+            className={`system-icon-button system-emergency-button ${recoveryModeActive ? "active" : ""}`}
             onClick={() =>
               setRecoveryMode(
-                !strategistRecoveryActive,
+                !recoveryModeActive,
                 updateRuntimeState,
                 setChatNotice,
                 setAgentActivityLabel,
@@ -831,8 +832,8 @@ export function App() {
               )
             }
             disabled={chatBusy}
-            title={strategistRecoveryActive ? "Return to normal provider routing" : "Open Emergency Resurrection mode"}
-            aria-label={strategistRecoveryActive ? "Return To Cloud" : "Resurrect Local"}
+            title={recoveryModeActive ? "Exit Emergency Recovery mode" : "Open Emergency Resurrection mode"}
+            aria-label={recoveryModeActive ? "Exit Recovery" : "Resurrect Local"}
           >
             <SystemTopIcon icon="resurrect" />
           </button>
@@ -863,7 +864,7 @@ export function App() {
 
       <main className="main-shell">
 
-        {strategistRecoveryActive && (
+        {recoveryModeActive && (
           <div className="inline-notice warning recovery-notice">
             Recovery mode is active. Augmentor and archive ingest are offline while the Resonant Engineer Agent handles diagnosis and repair.
           </div>

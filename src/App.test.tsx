@@ -947,6 +947,8 @@ describe("App boot flow", () => {
 
     expect(screen.getByPlaceholderText("Message Resonant Engineer Agent")).toBeTruthy();
     expect(screen.getByText("Emergency Recovery")).toBeTruthy();
+    expect(screen.queryByText(/Recovery mode is active/i)).toBeNull();
+    expect(screen.getByRole("button", { name: "Resurrect Local" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Talk with Hermes/i })).toBeNull();
   });
 

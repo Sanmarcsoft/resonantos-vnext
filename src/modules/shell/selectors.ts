@@ -61,12 +61,15 @@ export type ShellViewModel = {
 export const resolveActiveProviderForSelection = (
   state: ResonantShellState | null,
   selectedChatModel: string,
+  activeThreadId?: string,
 ): ProviderProfile | undefined => {
   if (!state) {
     return undefined;
   }
 
-  const activeAgentId = state.recoverySession.active ? state.recoverySession.engineerAgentId : "strategist.core";
+  const activeThread = activeThreadId ? state.conversationThreads.find((thread) => thread.id === activeThreadId) : null;
+  const activeAgentId =
+    activeThread?.owningAgentId ?? (state.recoverySession.active ? state.recoverySession.engineerAgentId : "strategist.core");
   return (
     resolveAgentChatRoute(state, activeAgentId, selectedChatModel).provider ??
     resolveProviderPath(
