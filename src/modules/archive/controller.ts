@@ -12,6 +12,7 @@ import type {
   ArchiveLibraryClassificationReview,
   ArchiveLibraryImportMode,
   ArchiveLibraryImportResult,
+  ArchiveLibraryReorganisationPlan,
   ArchiveMemoryDomain,
   ArchiveQueuedIngestRequest,
   ArchiveReviewArtifact,
@@ -37,6 +38,7 @@ import {
   requestArchiveLibraryFolderSelection,
   requestArchiveLibraryClassificationReview,
   requestArchiveLibraryImport,
+  requestArchiveLibraryReorganisationPlan,
   requestArchiveProcessIngestRequest,
   requestArchivePromoteReviewArtifact,
   requestArchiveReviewArtifacts,
@@ -153,6 +155,14 @@ type ArchiveLibraryClassificationReviewControllerInput = {
   setChatNotice: Dispatch<SetStateAction<string | null>>;
   setArchiveSourceScanBusy: Dispatch<SetStateAction<boolean>>;
   setArchiveClassificationReview: Dispatch<SetStateAction<ArchiveLibraryClassificationReview | null>>;
+  errorMessageOf: (error: unknown, fallback: string) => string;
+};
+
+type ArchiveLibraryReorganisationPlanControllerInput = {
+  classificationManifestPath: string;
+  setChatNotice: Dispatch<SetStateAction<string | null>>;
+  setArchiveSourceScanBusy: Dispatch<SetStateAction<boolean>>;
+  setArchiveReorganisationPlan: Dispatch<SetStateAction<ArchiveLibraryReorganisationPlan | null>>;
   errorMessageOf: (error: unknown, fallback: string) => string;
 };
 
@@ -448,6 +458,28 @@ export const loadArchiveLibraryClassificationReview = async ({
     setArchiveClassificationReview(review);
   } catch (error) {
     setChatNotice(errorMessageOf(error, "Failed to open Living Archive classification review."));
+  } finally {
+    setArchiveSourceScanBusy(false);
+  }
+};
+
+export const generateArchiveLibraryReorganisationPlan = async ({
+  classificationManifestPath,
+  setChatNotice,
+  setArchiveSourceScanBusy,
+  setArchiveReorganisationPlan,
+  errorMessageOf,
+}: ArchiveLibraryReorganisationPlanControllerInput): Promise<void> => {
+  setArchiveSourceScanBusy(true);
+  setChatNotice(null);
+  try {
+    const plan = await requestArchiveLibraryReorganisationPlan(classificationManifestPath, "strategist.core");
+    setArchiveReorganisationPlan(plan);
+    setChatNotice(
+      `Generated reorganisation plan for ${plan.libraryName}. No files were moved; approval is still required.`,
+    );
+  } catch (error) {
+    setChatNotice(errorMessageOf(error, "Failed to generate Living Archive reorganisation plan."));
   } finally {
     setArchiveSourceScanBusy(false);
   }

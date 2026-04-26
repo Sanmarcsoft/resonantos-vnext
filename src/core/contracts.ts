@@ -644,6 +644,33 @@ export interface ArchiveLibraryClassificationReview {
   manifestPath: string;
 }
 
+export interface ArchiveLibraryReorganisationMove {
+  sourceId: string;
+  title: string;
+  proposedTarget: ArchiveClassificationTarget;
+  sourcePath: string;
+  destinationPath?: string;
+  action: "propose-move-after-approval" | "tag-only-review" | string;
+  confidence: "low" | "medium" | "high";
+  reason: string;
+}
+
+export interface ArchiveLibraryReorganisationPlan {
+  plannedAt: string;
+  actorId: string;
+  libraryId: string;
+  libraryName: string;
+  planPath: string;
+  rollbackPlanPath: string;
+  auditLogPath: string;
+  requiresApproval: boolean;
+  structuralChangesAllowed: boolean;
+  movesPlanned: number;
+  tagOnlyCount: number;
+  blockedCount: number;
+  entries: ArchiveLibraryReorganisationMove[];
+}
+
 export interface ArchiveSystemMemorySource {
   relativePath: string;
   absolutePath: string;

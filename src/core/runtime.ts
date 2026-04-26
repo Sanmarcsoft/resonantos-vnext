@@ -19,6 +19,7 @@ import type {
   ArchiveIntakeWriteResult,
   ArchiveImportedLibrarySummary,
   ArchiveLibraryClassificationReview,
+  ArchiveLibraryReorganisationPlan,
   ArchiveLibraryImportMode,
   ArchiveLibraryImportResult,
   ArchiveMemoryDomain,
@@ -254,6 +255,18 @@ export const requestArchiveLibraryClassificationReview = async (
     })) as ArchiveLibraryClassificationReview;
   }
   throw new Error("Living Archive classification review is available only in the desktop shell.");
+};
+
+export const requestArchiveLibraryReorganisationPlan = async (
+  classificationManifestPath: string,
+  actorId: string,
+): Promise<ArchiveLibraryReorganisationPlan> => {
+  if (hasTauri()) {
+    return (await invoke("archive_library_reorganisation_plan", {
+      request: { classificationManifestPath, actorId },
+    })) as ArchiveLibraryReorganisationPlan;
+  }
+  throw new Error("Living Archive reorganisation planning is available only in the desktop shell.");
 };
 
 export const requestArchiveSystemMemory = async (): Promise<ArchiveSystemMemoryStatus> => {
