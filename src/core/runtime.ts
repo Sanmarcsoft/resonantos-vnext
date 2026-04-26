@@ -18,6 +18,7 @@ import type {
   ArchiveIngestProbeResult,
   ArchiveIntakeWriteResult,
   ArchiveImportedLibrarySummary,
+  ArchiveLibraryClassificationReview,
   ArchiveLibraryImportMode,
   ArchiveLibraryImportResult,
   ArchiveMemoryDomain,
@@ -33,6 +34,7 @@ import type {
   LocalRuntimeStatus,
   ProviderDiagnosticReport,
   ProviderProfile,
+  ProviderSmokeTestResult,
   RecoveryRouteCandidate,
   ResonantShellState,
   TaskWorkspace,
@@ -243,6 +245,17 @@ export const requestArchiveImportedLibraries = async (): Promise<ArchiveImported
   throw new Error("Living Archive imported library registry is available only in the desktop shell.");
 };
 
+export const requestArchiveLibraryClassificationReview = async (
+  classificationManifestPath: string,
+): Promise<ArchiveLibraryClassificationReview> => {
+  if (hasTauri()) {
+    return (await invoke("archive_library_classification_review", {
+      request: { classificationManifestPath },
+    })) as ArchiveLibraryClassificationReview;
+  }
+  throw new Error("Living Archive classification review is available only in the desktop shell.");
+};
+
 export const requestArchiveSystemMemory = async (): Promise<ArchiveSystemMemoryStatus> => {
   if (hasTauri()) {
     return (await invoke("archive_system_memory")) as ArchiveSystemMemoryStatus;
@@ -385,6 +398,22 @@ export const requestProviderDiagnostics = async (providerId?: string): Promise<P
     return (await invoke("provider_diagnostics", { providerId })) as ProviderDiagnosticReport[];
   }
   throw new Error("Provider diagnostics are available only in the desktop shell.");
+};
+
+export const requestProviderSmokeTest = async (input: {
+  providerId: string;
+  providerType: ProviderProfile["providerType"];
+  apiBaseUrl?: string;
+  runtimeNodeId?: string;
+  runtimeNodeKind?: string;
+  runtimeNodeEndpoint?: string;
+  authTier?: string;
+  model: string;
+}): Promise<ProviderSmokeTestResult> => {
+  if (hasTauri()) {
+    return (await invoke("provider_smoke_test", input)) as ProviderSmokeTestResult;
+  }
+  throw new Error("Provider smoke tests are available only in the desktop shell.");
 };
 
 const readPersistedState = async (): Promise<ResonantShellState | null> => {
@@ -742,9 +771,12 @@ export const normalizeState = (state: ResonantShellState, base: ResonantShellSta
           : (state.uiPreferences?.activeSection ?? base.uiPreferences.activeSection),
       activeChatThreadId: state.uiPreferences?.activeChatThreadId ?? base.uiPreferences.activeChatThreadId,
       pinnedChatThreadIds: state.uiPreferences?.pinnedChatThreadIds ?? base.uiPreferences.pinnedChatThreadIds,
+      pinnedChatProjectIds: state.uiPreferences?.pinnedChatProjectIds ?? base.uiPreferences.pinnedChatProjectIds,
       leftSidebarOpen: state.uiPreferences?.leftSidebarOpen ?? base.uiPreferences.leftSidebarOpen,
       chatSidebarOpen: state.uiPreferences?.chatSidebarOpen ?? base.uiPreferences.chatSidebarOpen,
       chatSidebarWidth: state.uiPreferences?.chatSidebarWidth ?? base.uiPreferences.chatSidebarWidth,
+      chatHistoryOpen: state.uiPreferences?.chatHistoryOpen ?? base.uiPreferences.chatHistoryOpen,
+      windowZoom: state.uiPreferences?.windowZoom ?? base.uiPreferences.windowZoom,
     },
     coreServices: mergeById(state.coreServices, base.coreServices),
     providers: normalizeProviders(state.providers, base.providers),
@@ -755,6 +787,7 @@ export const normalizeState = (state: ResonantShellState, base: ResonantShellSta
     channels: normalizeChannels(state.channels, base.channels),
     workspaces: normalizeWorkspaces(state.workspaces, base.workspaces),
     archivePolicy: normalizeArchivePolicy(state.archivePolicy, base.archivePolicy),
+    chatProjects: state.chatProjects ?? base.chatProjects,
     conversationThreads: mergeConversationThreads(state.conversationThreads, base.conversationThreads),
     transcriptLedger: state.transcriptLedger ?? base.transcriptLedger,
     contextMemoryStates: state.contextMemoryStates ?? base.contextMemoryStates,

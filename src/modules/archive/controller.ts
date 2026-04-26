@@ -5,9 +5,11 @@ import type { Dispatch, SetStateAction } from "react";
 import type {
   AddOnManifest,
   ArchiveDocumentPayload,
+  ArchiveImportedLibrarySummary,
   ArchivePromoteReviewArtifactResult,
   ArchiveProcessIngestResult,
   ArchiveIngestProbeResult,
+  ArchiveLibraryClassificationReview,
   ArchiveLibraryImportMode,
   ArchiveLibraryImportResult,
   ArchiveMemoryDomain,
@@ -31,7 +33,9 @@ import {
   requestArchiveBuildTolBundle,
   requestArchiveIngestRequest,
   requestArchiveIngestProbe,
+  requestArchiveImportedLibraries,
   requestArchiveLibraryFolderSelection,
+  requestArchiveLibraryClassificationReview,
   requestArchiveLibraryImport,
   requestArchiveProcessIngestRequest,
   requestArchivePromoteReviewArtifact,
@@ -72,6 +76,13 @@ type ArchiveRuntimeStatusControllerInput = {
   setChatNotice: Dispatch<SetStateAction<string | null>>;
   setArchiveStatusBusy: Dispatch<SetStateAction<boolean>>;
   setArchiveStatus: Dispatch<SetStateAction<ArchiveRuntimeStatus | null>>;
+  errorMessageOf: (error: unknown, fallback: string) => string;
+};
+
+type ArchiveImportedLibrariesControllerInput = {
+  setChatNotice: Dispatch<SetStateAction<string | null>>;
+  setArchiveSourceScanBusy: Dispatch<SetStateAction<boolean>>;
+  setArchiveImportedLibraries: Dispatch<SetStateAction<ArchiveImportedLibrarySummary[]>>;
   errorMessageOf: (error: unknown, fallback: string) => string;
 };
 
@@ -133,6 +144,15 @@ type ArchiveLibraryImportControllerInput = {
   setChatNotice: Dispatch<SetStateAction<string | null>>;
   setArchiveSourceScanBusy: Dispatch<SetStateAction<boolean>>;
   setArchiveLibraryImportResult: Dispatch<SetStateAction<ArchiveLibraryImportResult | null>>;
+  setArchiveImportedLibraries?: Dispatch<SetStateAction<ArchiveImportedLibrarySummary[]>>;
+  errorMessageOf: (error: unknown, fallback: string) => string;
+};
+
+type ArchiveLibraryClassificationReviewControllerInput = {
+  classificationManifestPath: string;
+  setChatNotice: Dispatch<SetStateAction<string | null>>;
+  setArchiveSourceScanBusy: Dispatch<SetStateAction<boolean>>;
+  setArchiveClassificationReview: Dispatch<SetStateAction<ArchiveLibraryClassificationReview | null>>;
   errorMessageOf: (error: unknown, fallback: string) => string;
 };
 
@@ -210,6 +230,24 @@ export const loadArchiveRuntimeStatus = async ({
     setChatNotice(errorMessageOf(error, "Failed to load Living Archive runtime status."));
   } finally {
     setArchiveStatusBusy(false);
+  }
+};
+
+export const loadArchiveImportedLibraries = async ({
+  setChatNotice,
+  setArchiveSourceScanBusy,
+  setArchiveImportedLibraries,
+  errorMessageOf,
+}: ArchiveImportedLibrariesControllerInput): Promise<void> => {
+  setArchiveSourceScanBusy(true);
+  setChatNotice(null);
+  try {
+    const libraries = await requestArchiveImportedLibraries();
+    setArchiveImportedLibraries(libraries);
+  } catch (error) {
+    setChatNotice(errorMessageOf(error, "Failed to load Living Archive source registry."));
+  } finally {
+    setArchiveSourceScanBusy(false);
   }
 };
 
@@ -369,6 +407,7 @@ export const importArchiveLibrary = async ({
   setChatNotice,
   setArchiveSourceScanBusy,
   setArchiveLibraryImportResult,
+  setArchiveImportedLibraries,
   errorMessageOf,
 }: ArchiveLibraryImportControllerInput): Promise<void> => {
   setArchiveSourceScanBusy(true);
@@ -382,11 +421,33 @@ export const importArchiveLibrary = async ({
       actorId: "strategist.core",
     });
     setArchiveLibraryImportResult(result);
+    if (setArchiveImportedLibraries) {
+      setArchiveImportedLibraries(await requestArchiveImportedLibraries());
+    }
     setChatNotice(
       `Imported ${result.filesImported} file(s) into ${result.libraryName}. Managed location is now canonical.`,
     );
   } catch (error) {
     setChatNotice(errorMessageOf(error, "Failed to import library into Living Archive."));
+  } finally {
+    setArchiveSourceScanBusy(false);
+  }
+};
+
+export const loadArchiveLibraryClassificationReview = async ({
+  classificationManifestPath,
+  setChatNotice,
+  setArchiveSourceScanBusy,
+  setArchiveClassificationReview,
+  errorMessageOf,
+}: ArchiveLibraryClassificationReviewControllerInput): Promise<void> => {
+  setArchiveSourceScanBusy(true);
+  setChatNotice(null);
+  try {
+    const review = await requestArchiveLibraryClassificationReview(classificationManifestPath);
+    setArchiveClassificationReview(review);
+  } catch (error) {
+    setChatNotice(errorMessageOf(error, "Failed to open Living Archive classification review."));
   } finally {
     setArchiveSourceScanBusy(false);
   }

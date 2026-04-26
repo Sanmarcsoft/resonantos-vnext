@@ -46,11 +46,14 @@ const {
   requestArchiveBuildTolBundleMock,
   requestArchiveSourceFolderScanMock,
   requestArchiveLibraryImportMock,
+  requestArchiveImportedLibrariesMock,
+  requestArchiveLibraryClassificationReviewMock,
   requestArchiveLibraryFolderSelectionMock,
   requestLocalRuntimeStatusMock,
   requestEngineerRecoveryTurnMock,
   requestRecoveryRouteCandidatesMock,
   requestProviderDiagnosticsMock,
+  requestProviderSmokeTestMock,
 } = vi.hoisted(() => ({
   hydrateStateMock: vi.fn(),
   requestProviderServiceChatCompletionMock: vi.fn(async (_input?: unknown) => "This is a live Strategist test reply from MiniMax-M2.7."),
@@ -410,6 +413,38 @@ const {
       },
     ] as Array<Record<string, unknown>>,
   })),
+  requestArchiveImportedLibrariesMock: vi.fn(async () => [] as Array<Record<string, unknown>>),
+  requestArchiveLibraryClassificationReviewMock: vi.fn(async () => ({
+    artifactType: "library-classification-review",
+    createdAt: "unix:10",
+    actorId: "strategist.core",
+    libraryId: "resonant-os-base",
+    libraryName: "RESONANT_OS_BASE",
+    originalPath: "/Users/augmentor/Documents/RESONANT_OS_BASE",
+    canonicalRoot: "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/sources/resonant-os-base",
+    classificationStatus: "needs-ai-assisted-classification",
+    metadataStandard: "obsidian-frontmatter-wikilinks",
+    structuralChangesAllowed: false,
+    requiresHumanApprovalBeforeMove: true,
+    recordsTotal: 2,
+    proposalsPreviewed: 1,
+    remainingForFullReview: 1,
+    manifestPath:
+      "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-classification-review.json",
+    proposals: [
+      {
+        sourceId: "resonant-os-base-notes-identity",
+        title: "identity",
+        canonicalPath:
+          "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/sources/resonant-os-base/notes/identity.md",
+        proposedTarget: "human-knowledge",
+        confidence: "medium",
+        reason: "Matched human-authored path or title signals.",
+        tags: ["ownership/human", "source-type/md", "review/unapproved"],
+        wikilinks: ["[[identity]]"],
+      },
+    ] as Array<Record<string, unknown>>,
+  })),
   requestArchiveLibraryFolderSelectionMock: vi.fn(async () => "/Users/augmentor/Documents/RESONANT_OS_BASE"),
   requestLocalRuntimeStatusMock: vi.fn(async () => ({
     available: true,
@@ -497,6 +532,22 @@ const {
       ],
     },
   ]),
+  requestProviderSmokeTestMock: vi.fn(async () => ({
+    providerId: "shared-minimax",
+    model: "MiniMax-M2.7",
+    ok: true,
+    replyPreview: "provider smoke ok",
+    usage: {
+      providerId: "shared-minimax",
+      model: "MiniMax-M2.7",
+      source: "provider",
+      promptTokens: 42,
+      completionTokens: 8,
+      totalTokens: 50,
+    },
+    checkedAt: "unix:2",
+    summary: "Provider smoke test passed.",
+  })),
 }));
 
 vi.mock("./core/runtime", () => ({
@@ -521,6 +572,7 @@ vi.mock("./core/runtime", () => ({
   requestArchiveIngestProbe: requestArchiveIngestProbeMock,
   requestLocalRuntimeStatus: requestLocalRuntimeStatusMock,
   requestProviderDiagnostics: requestProviderDiagnosticsMock,
+  requestProviderSmokeTest: requestProviderSmokeTestMock,
   requestArchiveRuntimeStatus: requestArchiveRuntimeStatusMock,
   requestArchiveSystemMemory: requestArchiveSystemMemoryMock,
   requestArchiveSystemMemoryRefresh: requestArchiveSystemMemoryRefreshMock,
@@ -537,6 +589,8 @@ vi.mock("./core/runtime", () => ({
   requestArchiveBuildTolBundle: requestArchiveBuildTolBundleMock,
   requestArchiveSourceFolderScan: requestArchiveSourceFolderScanMock,
   requestArchiveLibraryImport: requestArchiveLibraryImportMock,
+  requestArchiveImportedLibraries: requestArchiveImportedLibrariesMock,
+  requestArchiveLibraryClassificationReview: requestArchiveLibraryClassificationReviewMock,
   requestArchiveLibraryFolderSelection: requestArchiveLibraryFolderSelectionMock,
   requestRecoveryRouteCandidates: requestRecoveryRouteCandidatesMock,
   requestProviderServiceChatCompletion: requestProviderServiceChatCompletionMock,
@@ -559,6 +613,14 @@ const deferred = <T,>() => {
   return { promise, resolve, reject };
 };
 
+const openChatHistory = async () => {
+  const toggle = screen.queryByRole("button", { name: "Show chat history" });
+  if (toggle) {
+    fireEvent.click(toggle);
+  }
+  await screen.findByLabelText("Chat history");
+};
+
 const providerStreamInputs = (): Array<{ systemPrompt: string; messages: ConversationMessage[] }> =>
   requestProviderServiceChatCompletionStreamMock.mock.calls.map((call) => call[0]) as Array<{
     systemPrompt: string;
@@ -566,8 +628,15 @@ const providerStreamInputs = (): Array<{ systemPrompt: string; messages: Convers
   }>;
 
 describe("App boot flow", () => {
-  afterEach(() => {
+  afterEach(async () => {
     cleanup();
+    if (typeof window.localStorage?.clear === "function") {
+      window.localStorage.clear();
+    }
+    if (typeof window.sessionStorage?.clear === "function") {
+      window.sessionStorage.clear();
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
   });
 
   beforeEach(() => {
@@ -954,6 +1023,41 @@ describe("App boot flow", () => {
         },
       ] as Array<Record<string, unknown>>,
     });
+    requestArchiveImportedLibrariesMock.mockReset();
+    requestArchiveImportedLibrariesMock.mockResolvedValue([]);
+    requestArchiveLibraryClassificationReviewMock.mockReset();
+    requestArchiveLibraryClassificationReviewMock.mockResolvedValue({
+      artifactType: "library-classification-review",
+      createdAt: "unix:10",
+      actorId: "strategist.core",
+      libraryId: "resonant-os-base",
+      libraryName: "RESONANT_OS_BASE",
+      originalPath: "/Users/augmentor/Documents/RESONANT_OS_BASE",
+      canonicalRoot:
+        "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/sources/resonant-os-base",
+      classificationStatus: "needs-ai-assisted-classification",
+      metadataStandard: "obsidian-frontmatter-wikilinks",
+      structuralChangesAllowed: false,
+      requiresHumanApprovalBeforeMove: true,
+      recordsTotal: 2,
+      proposalsPreviewed: 1,
+      remainingForFullReview: 1,
+      manifestPath:
+        "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-classification-review.json",
+      proposals: [
+        {
+          sourceId: "resonant-os-base-notes-identity",
+          title: "identity",
+          canonicalPath:
+            "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/sources/resonant-os-base/notes/identity.md",
+          proposedTarget: "human-knowledge",
+          confidence: "medium",
+          reason: "Matched human-authored path or title signals.",
+          tags: ["ownership/human", "source-type/md", "review/unapproved"],
+          wikilinks: ["[[identity]]"],
+        },
+      ],
+    });
     requestArchiveLibraryFolderSelectionMock.mockReset();
     requestArchiveLibraryFolderSelectionMock.mockResolvedValue("/Users/augmentor/Documents/RESONANT_OS_BASE");
     requestLocalRuntimeStatusMock.mockReset();
@@ -1046,6 +1150,23 @@ describe("App boot flow", () => {
         ],
       },
     ]);
+    requestProviderSmokeTestMock.mockReset();
+    requestProviderSmokeTestMock.mockResolvedValue({
+      providerId: "shared-minimax",
+      model: "MiniMax-M2.7",
+      ok: true,
+      replyPreview: "provider smoke ok",
+      usage: {
+        providerId: "shared-minimax",
+        model: "MiniMax-M2.7",
+        source: "provider",
+        promptTokens: 42,
+        completionTokens: 8,
+        totalTokens: 50,
+      },
+      checkedAt: "unix:2",
+      summary: "Provider smoke test passed.",
+    });
     Element.prototype.scrollIntoView = vi.fn();
   });
 
@@ -1364,7 +1485,7 @@ describe("App boot flow", () => {
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
     expect(screen.getAllByRole("button", { name: "Attach file" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("button", { name: "Start dictation" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Start dictation" })[0].hasAttribute("disabled")).toBe(true);
     expect(screen.getAllByLabelText(/Context usage/i).length).toBeGreaterThan(0);
     expect(screen.getAllByTitle(/Context ceiling comes from provider\/model metadata/i).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: "Send message" }).length).toBeGreaterThan(0);
@@ -1539,8 +1660,9 @@ describe("App boot flow", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /Context usage/i })[0]);
     expect(await screen.findByText(/Context compacted\. Preserved/i)).toBeTruthy();
 
+    await openChatHistory();
     fireEvent.click(screen.getAllByRole("button", { name: "Chat options" })[0]);
-    fireEvent.click(screen.getByRole("menuitem", { name: /Branch/i }));
+    fireEvent.click(screen.getAllByRole("menuitem", { name: /Branch/i })[0]);
     expect(await screen.findByText("Desktop Main Thread fork")).toBeTruthy();
 
     fireEvent.change(screen.getAllByPlaceholderText("Message Augmentor")[0], {
@@ -1562,8 +1684,10 @@ describe("App boot flow", () => {
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: "New chat" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /Augmentor/i }).at(-1)!);
+    await openChatHistory();
 
-    expect(screen.getByText("New chat 3")).toBeTruthy();
+    expect(screen.getByText(/New Augmentor chat/)).toBeTruthy();
   });
 
   it("opens chat history actions for pinning, branching, and deleting chats", async () => {
@@ -1571,12 +1695,13 @@ describe("App boot flow", () => {
 
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
+    await openChatHistory();
     fireEvent.click(screen.getAllByRole("button", { name: "Chat options" })[0]);
-    expect(screen.getByRole("menuitem", { name: /Unpin/i })).toBeTruthy();
-    expect(screen.getByRole("menuitem", { name: /Branch/i })).toBeTruthy();
-    expect(screen.getByRole("menuitem", { name: /Delete/i })).toBeTruthy();
+    expect(screen.getAllByRole("menuitem", { name: /Unpin/i })[0]).toBeTruthy();
+    expect(screen.getAllByRole("menuitem", { name: /Branch/i })[0]).toBeTruthy();
+    expect(screen.getAllByRole("menuitem", { name: /Delete/i })[0]).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("menuitem", { name: /Branch/i }));
+    fireEvent.click(screen.getAllByRole("menuitem", { name: /Branch/i })[0]);
     expect(screen.getByText("Desktop Main Thread fork")).toBeTruthy();
   });
 
@@ -1588,7 +1713,7 @@ describe("App boot flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Talk with Resonant Engineer Agent" }));
 
     expect(screen.getByPlaceholderText("Message Resonant Engineer Agent")).toBeTruthy();
-    expect(screen.getByText("Emergency Recovery")).toBeTruthy();
+    expect(screen.queryByText("Emergency Recovery")).toBeNull();
     expect(screen.queryByText(/Recovery mode is active/i)).toBeNull();
     expect(screen.getByRole("button", { name: "Resurrect Local" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Talk with Hermes/i })).toBeNull();
@@ -1604,6 +1729,18 @@ describe("App boot flow", () => {
     expect(await screen.findByText("Provider diagnostics")).toBeTruthy();
     expect((await screen.findAllByText("MiniMax Cloud Runtime")).length).toBeGreaterThan(0);
     expect(requestProviderDiagnosticsMock).toHaveBeenCalled();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Smoke Test" })[0]);
+
+    expect((await screen.findAllByText("Provider smoke test passed.")).length).toBeGreaterThan(0);
+    expect(screen.getByText(/MiniMax-M2.7 · 50 tokens/i)).toBeTruthy();
+    expect(screen.getByText("provider smoke ok")).toBeTruthy();
+    expect(requestProviderSmokeTestMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "shared-minimax",
+        model: "MiniMax-M2.7",
+      }),
+    );
   });
 
   it("runs the archive ingest probe through the archive workload route", async () => {
@@ -1689,6 +1826,49 @@ describe("App boot flow", () => {
       libraryName: "RESONANT_OS_BASE",
       actorId: "strategist.core",
     });
+  });
+
+  it("opens a host-owned mixed library classification review from the source registry", async () => {
+    requestArchiveImportedLibrariesMock.mockResolvedValue([
+      {
+        importedAt: "unix:10",
+        domain: "mixed-library",
+        importMode: "copy",
+        libraryId: "resonant-os-base",
+        libraryName: "RESONANT_OS_BASE",
+        originalPath: "/Users/augmentor/Documents/RESONANT_OS_BASE",
+        canonicalRoot:
+          "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/sources/resonant-os-base",
+        filesSeen: 2,
+        filesImported: 2,
+        skippedFiles: 0,
+        manifestPath:
+          "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-manifest.json",
+        versionLedgerPath:
+          "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-version-ledger.jsonl",
+        classificationManifestPath:
+          "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-classification-review.json",
+        classificationStatus: "needs-ai-assisted-classification",
+        metadataStandard: "obsidian-frontmatter-wikilinks",
+        obsidianVaultDetected: false,
+        recommendedAddon: "addon.obsidian",
+        recordsCount: 2,
+      },
+    ]);
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "Review Classification" }));
+
+    expect(await screen.findByText("Approve Classification Intent")).toBeTruthy();
+    expect(await screen.findByText("human approval required")).toBeTruthy();
+    expect(await screen.findByText("1 waiting for full review")).toBeTruthy();
+    expect(requestArchiveLibraryClassificationReviewMock).toHaveBeenCalledWith(
+      "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-classification-review.json",
+    );
   });
 
   it("uses the native folder picker to fill the library import path", async () => {
@@ -1831,6 +2011,7 @@ describe("App boot flow", () => {
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
+    expect((await screen.findAllByText(/03_TOL\/TOL Analysis/)).length).toBeGreaterThan(0);
     fireEvent.change(await screen.findByLabelText("Select source folder"), {
       target: { value: "03_TOL/TOL Analysis" },
     });

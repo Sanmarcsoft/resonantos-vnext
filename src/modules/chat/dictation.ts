@@ -19,7 +19,13 @@ export const resolveSpeechRecognitionCtor = (): (new () => BrowserSpeechRecognit
   return scope.SpeechRecognition ?? scope.webkitSpeechRecognition ?? null;
 };
 
+const isTauriRuntime = (): boolean =>
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
 export const canUseDictation = (): boolean =>
+  // Tauri WebViews currently expose partial media APIs that fail with invalid constraints.
+  !isTauriRuntime() &&
+  typeof window !== "undefined" &&
   typeof navigator !== "undefined" &&
   Boolean(navigator.mediaDevices?.getUserMedia) &&
   Boolean(resolveSpeechRecognitionCtor());

@@ -143,10 +143,17 @@ Additional UX rules:
 - The user can ask Augmentor to open apps, inspect state, or coordinate agents.
 - Chat rail collapse must not destroy conversation state.
 - The rail width must be resizable by the user and persisted in shell preferences.
+- The history/project column is independently toggleable. When opened, the total right rail expands and takes space from the center workspace; it must not squeeze the active chat conversation into a narrower column.
 - The rail must expose an agent selector for Augmentor, Resonant Engineer, Hermes, and future agents.
+- Creating a new chat must ask which available agent owns that chat. Projects can contain chats from different agents.
 - Each agent should have a distinct icon and accent color.
 - Chat history/instances must be navigable inside the rail, ideally through a compact expandable history strip.
+- Chat history should support project-style grouping so conversations can be organized by agent, add-on, or future user-defined projects instead of becoming a flat list.
+- The history strip must keep a top-level `Chats` section for conversations that do not belong to any project.
+- Project controls must be available from the rail, including create, pin, rename, branch, and delete. Deleting a project must not delete its chats by default.
+- While an agent is working, the rail must show visible background activity state such as thinking, reading context, running tools, streaming, elapsed time, or interruption state.
 - In emergency recovery, the rail can be replaced by the Resonant Engineer Agent rail.
+- Standard window zoom shortcuts must work in the desktop shell: Command/Ctrl `+`, Command/Ctrl `-`, and Command/Ctrl `0`. This is full-shell interface zoom, not text-size-only zoom.
 
 Agent color direction:
 

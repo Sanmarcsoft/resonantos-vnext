@@ -19,6 +19,8 @@ type SetComposer = (value: string) => void;
 type SetAttachments = (value: ComposerAttachment[]) => void;
 type SetNotice = (value: string | null) => void;
 
+const nowIso = (): string => new Date().toISOString();
+
 export function branchChatFromMessageAction({
   activeThread,
   message,
@@ -164,6 +166,33 @@ export function togglePinnedChatThreadAction({
   });
 }
 
+export function renameChatThreadAction({
+  threadId,
+  title,
+  updateRuntimeState,
+  setChatNotice,
+}: {
+  threadId: string;
+  title: string;
+  updateRuntimeState: RuntimeStateUpdater;
+  setChatNotice: SetNotice;
+}): void {
+  const trimmed = title.trim();
+  if (!trimmed) {
+    return;
+  }
+
+  updateRuntimeState((draft) => {
+    const thread = draft.conversationThreads.find((item) => item.id === threadId);
+    if (thread) {
+      thread.title = trimmed;
+      thread.summary = thread.summary || trimmed;
+    }
+    return draft;
+  });
+  setChatNotice("Chat renamed.");
+}
+
 export function branchChatThreadAction({
   threadId,
   updateRuntimeState,
@@ -211,6 +240,255 @@ export function branchChatThreadAction({
   setComposer("");
   setAttachments([]);
   setChatNotice("Chat branched into a new thread.");
+}
+
+export function createChatProjectAction({
+  title,
+  updateRuntimeState,
+  setChatNotice,
+}: {
+  title: string;
+  updateRuntimeState: RuntimeStateUpdater;
+  setChatNotice: SetNotice;
+}): void {
+  const trimmed = title.trim();
+  if (!trimmed) {
+    return;
+  }
+
+  const projectId = `chat-project-${Date.now()}`;
+  updateRuntimeState((draft) => {
+    draft.chatProjects = [
+      ...(draft.chatProjects ?? []),
+      {
+        id: projectId,
+        title: trimmed,
+        pinned: false,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      },
+    ];
+    return draft;
+  });
+  setChatNotice("Project created. Use its + button to create a chat inside it, or move existing chats from their menu.");
+}
+
+export function createAgentChatThreadAction({
+  agentId,
+  projectId,
+  state,
+  updateRuntimeState,
+  setComposer,
+  setAttachments,
+  setChatNotice,
+}: {
+  agentId: string;
+  projectId?: string;
+  state: ResonantShellState;
+  updateRuntimeState: RuntimeStateUpdater;
+  setComposer: SetComposer;
+  setAttachments: SetAttachments;
+  setChatNotice: SetNotice;
+}): void {
+  const agent = state.agents.find((item) => item.id === agentId);
+  const channel =
+    state.channels.find((item) => item.owningAgentId === agentId && item.enabled) ??
+    state.channels.find((item) => item.owningAgentId === agentId) ??
+    null;
+
+  if (!agent || !channel) {
+    setChatNotice("That agent is not available yet. Install or enable its channel first.");
+    return;
+  }
+
+  const threadId = `thread-${agentId.replace(/[^a-z0-9]+/gi, "-")}-${Date.now()}`;
+  const existingThreads = state.conversationThreads.filter((thread) => thread.owningAgentId === agentId).length;
+  const title = `New ${agent.displayName} chat ${existingThreads + 1}`;
+  const thread: ConversationThread = {
+    id: threadId,
+    title,
+    owningAgentId: agentId,
+    workspaceId: channel.workspaceId,
+    channelId: channel.id,
+    summary: `Fresh ${agent.displayName} workspace.`,
+    projectId,
+    messages: [],
+  };
+
+  updateRuntimeState((draft) => {
+    const nextState = appendTranscriptEvent(draft, {
+      action: "thread-created",
+      threadId,
+      channelId: channel.id,
+      agentId,
+      payload: {
+        title,
+        workspaceId: channel.workspaceId,
+        projectId,
+      },
+    });
+    nextState.conversationThreads = [thread, ...nextState.conversationThreads];
+    nextState.uiPreferences.activeChatThreadId = threadId;
+    nextState.uiPreferences.chatSidebarOpen = true;
+    if (projectId) {
+      const project = (nextState.chatProjects ?? []).find((item) => item.id === projectId);
+      if (project) {
+        project.updatedAt = nowIso();
+      }
+    }
+    return nextState;
+  });
+  setComposer("");
+  setAttachments([]);
+  setChatNotice(null);
+}
+
+export function moveChatThreadToProjectAction({
+  threadId,
+  projectId,
+  updateRuntimeState,
+  setChatNotice,
+}: {
+  threadId: string;
+  projectId: string | null;
+  updateRuntimeState: RuntimeStateUpdater;
+  setChatNotice: SetNotice;
+}): void {
+  updateRuntimeState((draft) => {
+    const thread = draft.conversationThreads.find((item) => item.id === threadId);
+    if (thread) {
+      thread.projectId = projectId ?? undefined;
+    }
+    if (projectId) {
+      const project = (draft.chatProjects ?? []).find((item) => item.id === projectId);
+      if (project) {
+        project.updatedAt = nowIso();
+      }
+    }
+    return draft;
+  });
+  setChatNotice(projectId ? "Chat moved into project." : "Chat moved back to Chats.");
+}
+
+export function renameChatProjectAction({
+  projectId,
+  title,
+  updateRuntimeState,
+  setChatNotice,
+}: {
+  projectId: string;
+  title: string;
+  updateRuntimeState: RuntimeStateUpdater;
+  setChatNotice: SetNotice;
+}): void {
+  const trimmed = title.trim();
+  if (!trimmed) {
+    return;
+  }
+
+  updateRuntimeState((draft) => {
+    const project = (draft.chatProjects ?? []).find((item) => item.id === projectId);
+    if (project) {
+      project.title = trimmed;
+      project.updatedAt = nowIso();
+    }
+    return draft;
+  });
+  setChatNotice("Project renamed.");
+}
+
+export function togglePinnedChatProjectAction({
+  projectId,
+  updateRuntimeState,
+}: {
+  projectId: string;
+  updateRuntimeState: RuntimeStateUpdater;
+}): void {
+  updateRuntimeState((draft) => {
+    const pinned = new Set(draft.uiPreferences.pinnedChatProjectIds ?? []);
+    if (pinned.has(projectId)) {
+      pinned.delete(projectId);
+    } else {
+      pinned.add(projectId);
+    }
+    draft.uiPreferences.pinnedChatProjectIds = Array.from(pinned);
+    draft.chatProjects = (draft.chatProjects ?? []).map((project) =>
+      project.id === projectId ? { ...project, pinned: pinned.has(projectId), updatedAt: nowIso() } : project,
+    );
+    return draft;
+  });
+}
+
+export function branchChatProjectAction({
+  projectId,
+  updateRuntimeState,
+  setChatNotice,
+}: {
+  projectId: string;
+  updateRuntimeState: RuntimeStateUpdater;
+  setChatNotice: SetNotice;
+}): void {
+  updateRuntimeState((draft) => {
+    const sourceProject = (draft.chatProjects ?? []).find((project) => project.id === projectId);
+    if (!sourceProject) {
+      return draft;
+    }
+
+    const forkProjectId = `chat-project-fork-${Date.now()}`;
+    const sourceThreads = draft.conversationThreads.filter((thread) => thread.projectId === projectId);
+    const forkThreads = sourceThreads.map((thread, index) => {
+      const forkThreadId = `${forkProjectId}-thread-${index + 1}`;
+      return {
+        ...thread,
+        id: forkThreadId,
+        title: `${thread.title} fork`,
+        summary: `Forked from ${thread.title}.`,
+        projectId: forkProjectId,
+        messages: thread.messages.map((message) => ({
+          ...message,
+          id: `${forkThreadId}:${message.id.split(":").at(-1) ?? "m"}`,
+          threadId: forkThreadId,
+        })),
+      };
+    });
+
+    draft.chatProjects = [
+      ...(draft.chatProjects ?? []),
+      {
+        id: forkProjectId,
+        title: `${sourceProject.title} fork`,
+        pinned: false,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      },
+    ];
+    draft.conversationThreads = [...forkThreads, ...draft.conversationThreads];
+    if (forkThreads[0]) {
+      draft.uiPreferences.activeChatThreadId = forkThreads[0].id;
+    }
+    return draft;
+  });
+  setChatNotice("Project branched into a new project.");
+}
+
+export function deleteChatProjectAction({
+  projectId,
+  updateRuntimeState,
+  setChatNotice,
+}: {
+  projectId: string;
+  updateRuntimeState: RuntimeStateUpdater;
+  setChatNotice: SetNotice;
+}): void {
+  updateRuntimeState((draft) => {
+    draft.chatProjects = (draft.chatProjects ?? []).filter((project) => project.id !== projectId);
+    draft.uiPreferences.pinnedChatProjectIds = (draft.uiPreferences.pinnedChatProjectIds ?? []).filter((id) => id !== projectId);
+    draft.conversationThreads = draft.conversationThreads.map((thread) =>
+      thread.projectId === projectId ? { ...thread, projectId: undefined } : thread,
+    );
+    return draft;
+  });
+  setChatNotice("Project deleted. Its chats were moved back to Chats.");
 }
 
 export function deleteChatThreadAction({

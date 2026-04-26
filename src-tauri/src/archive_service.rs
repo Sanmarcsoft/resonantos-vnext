@@ -425,6 +425,33 @@ pub(crate) struct ArchiveImportedLibrarySummary {
     pub(crate) records_count: usize,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveLibraryClassificationReviewRequest {
+    pub(crate) classification_manifest_path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveLibraryClassificationReview {
+    pub(crate) artifact_type: String,
+    pub(crate) created_at: String,
+    pub(crate) actor_id: String,
+    pub(crate) library_id: String,
+    pub(crate) library_name: String,
+    pub(crate) original_path: String,
+    pub(crate) canonical_root: String,
+    pub(crate) classification_status: String,
+    pub(crate) metadata_standard: String,
+    pub(crate) structural_changes_allowed: bool,
+    pub(crate) requires_human_approval_before_move: bool,
+    pub(crate) records_total: usize,
+    pub(crate) proposals_previewed: usize,
+    pub(crate) remaining_for_full_review: usize,
+    pub(crate) proposals: Vec<ArchiveClassificationProposal>,
+    pub(crate) manifest_path: String,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ArchiveSystemMemorySource {
@@ -627,7 +654,8 @@ use archive_source_library::{
     collect_imported_library_manifests, import_archive_library_with_runtime, supported_source_file,
 };
 pub(crate) use archive_source_library::{
-    import_archive_library, list_imported_archive_libraries, scan_archive_source_folders,
+    import_archive_library, list_imported_archive_libraries,
+    read_archive_library_classification_review, scan_archive_source_folders,
 };
 
 fn source_hash(path: &Path) -> Result<String, String> {

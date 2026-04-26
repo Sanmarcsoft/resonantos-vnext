@@ -12,10 +12,11 @@ use tauri::AppHandle;
 use super::{
     open_archive_db, relative_to_vault, slugify, source_hash, source_id_from_path,
     system_time_label, unix_timestamp, ArchiveClassificationProposal,
-    ArchiveImportedLibrarySummary, ArchiveLibraryImportRequest, ArchiveLibraryImportResult,
-    ArchiveLibraryImportSourceRecord, ArchiveRuntime, ArchiveSourceFolderScanRequest,
-    ArchiveSourceFolderScanResult, ArchiveSourceWatchIndexRecord, ArchiveSourceWatchRecord,
-    VaultMappingFile,
+    ArchiveImportedLibrarySummary, ArchiveLibraryClassificationReview,
+    ArchiveLibraryClassificationReviewRequest, ArchiveLibraryImportRequest,
+    ArchiveLibraryImportResult, ArchiveLibraryImportSourceRecord, ArchiveRuntime,
+    ArchiveSourceFolderScanRequest, ArchiveSourceFolderScanResult, ArchiveSourceWatchIndexRecord,
+    ArchiveSourceWatchRecord, VaultMappingFile,
 };
 
 fn source_watch_roots(runtime: &ArchiveRuntime) -> Vec<&VaultMappingFile> {
@@ -877,4 +878,109 @@ pub(crate) fn list_imported_archive_libraries(
             .then_with(|| left.library_name.cmp(&right.library_name))
     });
     Ok(libraries)
+}
+
+fn string_from_payload(payload: &Value, key: &str) -> String {
+    payload
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn resolve_classification_manifest_path(
+    runtime: &ArchiveRuntime,
+    requested_path: &str,
+) -> Result<PathBuf, String> {
+    let candidate = PathBuf::from(requested_path);
+    let resolved = if candidate.is_absolute() {
+        candidate
+    } else {
+        runtime.managed_root.join(candidate)
+    };
+    let normalized = resolved.canonicalize().map_err(|error| {
+        format!("Failed to resolve library classification review path: {error}")
+    })?;
+    let allowed = runtime
+        .allowed_roots()
+        .into_iter()
+        .any(|root| normalized == root || normalized.starts_with(&root));
+    if !allowed {
+        return Err(format!(
+            "Library classification review path `{}` is outside the allowed archive roots.",
+            normalized.display()
+        ));
+    }
+    let file_name = normalized
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if !file_name.ends_with("-classification-review.json") {
+        return Err(
+            "Only Living Archive classification-review artifacts can be opened here.".to_string(),
+        );
+    }
+    Ok(normalized)
+}
+
+pub(crate) fn read_archive_library_classification_review(
+    app: &AppHandle,
+    request: ArchiveLibraryClassificationReviewRequest,
+) -> Result<ArchiveLibraryClassificationReview, String> {
+    let runtime = ArchiveRuntime::resolve(app)?;
+    let manifest_path =
+        resolve_classification_manifest_path(&runtime, &request.classification_manifest_path)?;
+    let raw = fs::read_to_string(&manifest_path).map_err(|error| {
+        format!("Failed to read library classification review artifact: {error}")
+    })?;
+    let payload = serde_json::from_str::<Value>(&raw)
+        .map_err(|error| format!("Invalid library classification review JSON: {error}"))?;
+    let artifact_type = string_from_payload(&payload, "artifactType");
+    if artifact_type != "library-classification-review" {
+        return Err(
+            "Selected artifact is not a Living Archive library classification review.".to_string(),
+        );
+    }
+    let proposals = serde_json::from_value::<Vec<ArchiveClassificationProposal>>(
+        payload
+            .get("proposals")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+    )
+    .map_err(|error| format!("Invalid library classification proposals: {error}"))?;
+    let summary = payload.get("summary").unwrap_or(&Value::Null);
+    let policy = payload.get("policy").unwrap_or(&Value::Null);
+    Ok(ArchiveLibraryClassificationReview {
+        artifact_type,
+        created_at: string_from_payload(&payload, "createdAt"),
+        actor_id: string_from_payload(&payload, "actorId"),
+        library_id: string_from_payload(&payload, "libraryId"),
+        library_name: string_from_payload(&payload, "libraryName"),
+        original_path: string_from_payload(&payload, "originalPath"),
+        canonical_root: string_from_payload(&payload, "canonicalRoot"),
+        classification_status: string_from_payload(&payload, "classificationStatus"),
+        metadata_standard: string_from_payload(&payload, "metadataStandard"),
+        structural_changes_allowed: policy
+            .get("structuralChangesAllowed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        requires_human_approval_before_move: policy
+            .get("requiresHumanApprovalBeforeMove")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        records_total: summary
+            .get("recordsTotal")
+            .and_then(Value::as_u64)
+            .unwrap_or(proposals.len() as u64) as usize,
+        proposals_previewed: summary
+            .get("proposalsPreviewed")
+            .and_then(Value::as_u64)
+            .unwrap_or(proposals.len() as u64) as usize,
+        remaining_for_full_review: summary
+            .get("remainingForFullReview")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize,
+        proposals,
+        manifest_path: manifest_path.display().to_string(),
+    })
 }

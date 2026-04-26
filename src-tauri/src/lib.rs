@@ -17,10 +17,12 @@ use crate::archive_service::{
     import_archive_library, list_archive_ingest_requests, list_archive_review_artifacts,
     list_archive_tol_bundle_candidates, list_imported_archive_libraries,
     process_archive_ingest_request, promote_archive_review_artifact, query_archive_runtime_status,
-    queue_archive_ingest_request, read_archive_document, refresh_archive_system_memory,
+    queue_archive_ingest_request, read_archive_document,
+    read_archive_library_classification_review, refresh_archive_system_memory,
     scan_archive_source_folders, search_archive, write_archive_intake_artifact,
     ArchiveDocumentPayload, ArchiveImportedLibrarySummary, ArchiveIngestRequestRecord,
     ArchiveIngestRequestResult, ArchiveIntakeWriteRequest, ArchiveIntakeWriteResult,
+    ArchiveLibraryClassificationReview, ArchiveLibraryClassificationReviewRequest,
     ArchiveLibraryImportRequest, ArchiveLibraryImportResult, ArchiveProcessIngestRequest,
     ArchiveProcessIngestResult, ArchivePromoteReviewArtifactRequest,
     ArchivePromoteReviewArtifactResult, ArchiveQueuedIngestRequest, ArchiveReadDocumentRequest,
@@ -42,10 +44,10 @@ use crate::host_state::{
 use crate::provider_service::{
     abort_provider_service_chat_stream, execute_archive_ingest_probe,
     execute_provider_service_chat, execute_provider_service_chat_stream,
-    query_local_runtime_status, query_provider_diagnostics, query_recovery_route_candidates,
-    ArchiveIngestProbeRequest, ArchiveIngestProbeResult, ChatMessageInput, LocalRuntimeStatus,
-    ProviderDiagnosticReport, ProviderServiceChatRequest, ProviderServiceChatStreamRequest,
-    RecoveryRouteCandidate,
+    execute_provider_smoke_test, query_local_runtime_status, query_provider_diagnostics,
+    query_recovery_route_candidates, ArchiveIngestProbeRequest, ArchiveIngestProbeResult,
+    ChatMessageInput, LocalRuntimeStatus, ProviderDiagnosticReport, ProviderServiceChatRequest,
+    ProviderServiceChatStreamRequest, ProviderSmokeTestResult, RecoveryRouteCandidate,
 };
 use crate::recovery_service::{
     execute_engineer_recovery_turn, EngineerRecoveryTurnRequest, EngineerRecoveryTurnResult,
@@ -201,6 +203,14 @@ fn archive_imported_libraries(
     app: AppHandle,
 ) -> Result<Vec<ArchiveImportedLibrarySummary>, String> {
     list_imported_archive_libraries(&app)
+}
+
+#[tauri::command]
+fn archive_library_classification_review(
+    app: AppHandle,
+    request: ArchiveLibraryClassificationReviewRequest,
+) -> Result<ArchiveLibraryClassificationReview, String> {
+    read_archive_library_classification_review(&app, request)
 }
 
 #[tauri::command]
@@ -412,6 +422,37 @@ async fn provider_service_chat_completion_stream(
 }
 
 #[tauri::command]
+async fn provider_smoke_test(
+    app: AppHandle,
+    provider_id: String,
+    provider_type: String,
+    api_base_url: Option<String>,
+    runtime_node_id: Option<String>,
+    runtime_node_kind: Option<String>,
+    runtime_node_endpoint: Option<String>,
+    auth_tier: Option<String>,
+    model: String,
+) -> Result<ProviderSmokeTestResult, String> {
+    execute_provider_smoke_test(
+        &app,
+        ProviderServiceChatRequest {
+            provider_id,
+            provider_type,
+            api_base_url,
+            runtime_node_id,
+            runtime_node_kind,
+            runtime_node_endpoint,
+            auth_tier,
+            model,
+            reasoning_effort: "minimal".to_string(),
+            system_prompt: String::new(),
+            messages: Vec::new(),
+        },
+    )
+    .await
+}
+
+#[tauri::command]
 fn provider_service_abort_chat_completion(run_id: String) -> Result<(), String> {
     abort_provider_service_chat_stream(&run_id);
     Ok(())
@@ -468,6 +509,7 @@ pub fn run() {
             archive_scan_source_folders,
             archive_import_library,
             archive_imported_libraries,
+            archive_library_classification_review,
             archive_system_memory,
             archive_refresh_system_memory,
             archive_search,
@@ -484,6 +526,7 @@ pub fn run() {
             engineer_recovery_turn,
             recovery_route_candidates,
             provider_diagnostics,
+            provider_smoke_test,
             provider_service_chat_completion,
             provider_service_chat_completion_stream,
             provider_service_abort_chat_completion,

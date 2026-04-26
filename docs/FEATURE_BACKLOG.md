@@ -58,6 +58,21 @@ Last updated: 2026-04-26
   - provider execution adapters now declare streaming and abort support
   - chat only uses streaming when the selected route supports it
   - the activity rail distinguishes streamed replies from generic thinking
+- Added first project-style chat navigation on 2026-04-26:
+  - chat history now receives all agent threads and groups them under agent/project sections
+  - the history strip has more room for readable chat titles, recency, and per-thread actions
+  - active runs now render an in-conversation status card with phase and elapsed time so the rail does not feel dead while the agent works
+- Added persisted chat projects on 2026-04-26:
+  - unprojected conversations now live under a top-level `Chats` section
+  - user-created projects can contain threads from different agents
+  - chat menus support pin, rename, branch, and delete
+  - project menus support pin, rename, branch, and delete; project deletion preserves chats by moving them back to `Chats`
+- Added chat rail layout and creation improvements on 2026-04-26:
+  - chat rail resize range now supports a narrower chat-only rail
+  - opening chat history expands the total right rail instead of stealing width from the active chat
+  - new chat creation now opens an agent picker so the user chooses Augmentor, Resonant Engineer, or future installed agents per chat
+  - shell zoom shortcuts now support full-interface zoom with Command/Ctrl `+`, Command/Ctrl `-`, and Command/Ctrl `0`
+  - Home/App workspace visuals were simplified to reduce visible nested-box clutter
 - Desktop-safe audio dictate implementation.
 - Attachment pipeline beyond text embedding and metadata fallback.
 - Richer thread management for multiple Strategist instances.

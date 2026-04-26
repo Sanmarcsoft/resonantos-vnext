@@ -1,6 +1,6 @@
 // Intent citation: docs/architecture/ADR-002-modular-codebase.md
 
-import type { ProviderDiagnosticReport, ProviderProfile, ResonantShellState } from "../../core/contracts";
+import type { ProviderDiagnosticReport, ProviderProfile, ProviderSmokeTestResult, ResonantShellState } from "../../core/contracts";
 import { Panel } from "../../components/Panel";
 
 export type SettingsSection = "providers" | "strategy" | "defaults" | "shell";
@@ -19,6 +19,8 @@ type SettingsWorkspaceProps = {
   providerDiagnostics: ProviderDiagnosticReport[];
   providerDiagnosticsBusy: boolean;
   activeProviderProbeId: string | null;
+  providerSmokeResults: Record<string, ProviderSmokeTestResult>;
+  providerSmokeBusyId: string | null;
   providerDrafts: Record<string, string>;
   onSettingsSectionChange: (section: SettingsSection) => void;
   onUpdateProvider: (profileId: string, field: "primaryModel" | "fallbackModel" | "status", value: string) => void;
@@ -26,6 +28,7 @@ type SettingsWorkspaceProps = {
   onSaveProviderSecret: (profileId: string) => void;
   onProbeProvider: (profileId: string) => void;
   onProbeAllProviders: () => void;
+  onSmokeTestProvider: (profileId: string) => void;
 };
 
 const providerNeedsSecret = (profile: ProviderProfile): boolean =>
@@ -102,6 +105,9 @@ export function SettingsWorkspace(props: SettingsWorkspaceProps) {
                     props.providerDiagnostics.find((report) => report.providerId === profile.id),
                     props.providerDiagnosticsBusy && props.activeProviderProbeId === profile.id,
                     () => props.onProbeProvider(profile.id),
+                    props.providerSmokeResults[profile.id],
+                    props.providerSmokeBusyId === profile.id,
+                    () => props.onSmokeTestProvider(profile.id),
                   )}
                   <label className="field">
                     <span>Primary model</span>
@@ -293,6 +299,9 @@ function renderProviderDiagnostics(
   report: ProviderDiagnosticReport | undefined,
   busy: boolean,
   onProbe: () => void,
+  smokeResult: ProviderSmokeTestResult | undefined,
+  smokeBusy: boolean,
+  onSmokeTest: () => void,
 ) {
   return (
     <div className="provider-diagnostics-block">
@@ -306,8 +315,20 @@ function renderProviderDiagnostics(
           <button type="button" className="button-secondary" onClick={onProbe} disabled={busy}>
             {busy ? "Probing..." : "Probe"}
           </button>
+          <button type="button" className="button-secondary" onClick={onSmokeTest} disabled={smokeBusy}>
+            {smokeBusy ? "Testing..." : "Smoke Test"}
+          </button>
         </div>
       </div>
+      {smokeResult && (
+        <div className="provider-smoke-result">
+          <strong>{smokeResult.summary}</strong>
+          <span>
+            {smokeResult.model} · {smokeResult.usage?.totalTokens ? `${smokeResult.usage.totalTokens} tokens` : "usage unavailable"}
+          </span>
+          <p>{smokeResult.replyPreview}</p>
+        </div>
+      )}
       {report && (
         <>
           <p className="provider-diagnostics-meta">

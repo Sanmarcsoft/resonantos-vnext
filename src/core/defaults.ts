@@ -8,6 +8,7 @@ import type {
   ArchivePolicy,
   CapabilityGrant,
   ChannelDefinition,
+  ChatProject,
   ConversationThread,
   CoreService,
   ModelStrategyState,
@@ -598,6 +599,8 @@ export const conversationThreads: ConversationThread[] = [
   },
 ];
 
+export const chatProjects: ChatProject[] = [];
+
 export const recoverySession = {
   active: false,
   engineerAgentId: "setup.core",
@@ -775,6 +778,7 @@ export const buildDefaultState = (manifests: AddOnManifest[]): ResonantShellStat
     channels,
     workspaces,
     archivePolicy,
+    chatProjects,
     conversationThreads,
     transcriptLedger: [],
     contextMemoryStates: [],
@@ -784,9 +788,12 @@ export const buildDefaultState = (manifests: AddOnManifest[]): ResonantShellStat
       activeSection: "overview",
       activeChatThreadId: "thread-main-desktop",
       pinnedChatThreadIds: ["thread-main-desktop"],
+      pinnedChatProjectIds: [],
       leftSidebarOpen: true,
       chatSidebarOpen: true,
-      chatSidebarWidth: 460,
+      chatHistoryOpen: false,
+      chatSidebarWidth: 520,
+      windowZoom: 1,
       theme: "resonant-dark",
     },
     distributionModel: "curated-plus-sideload",

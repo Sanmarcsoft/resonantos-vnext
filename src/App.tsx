@@ -6,6 +6,8 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type {
   AddOnManifest,
   ArchiveDocumentPayload,
+  ArchiveImportedLibrarySummary,
+  ArchiveLibraryClassificationReview,
   ArchivePromoteReviewArtifactResult,
   ArchiveProcessIngestResult,
   ArchiveQueuedIngestRequest,
@@ -24,6 +26,7 @@ import type {
   ChatRunPhase,
   LocalRuntimeStatus,
   ProviderDiagnosticReport,
+  ProviderSmokeTestResult,
   RecoveryRouteCandidate,
   ResonantShellState,
 } from "./core/contracts";
@@ -40,6 +43,8 @@ import {
   buildArchiveTolBundle,
   decideArchiveReviewArtifact,
   importArchiveLibrary,
+  loadArchiveLibraryClassificationReview,
+  loadArchiveImportedLibraries,
   loadArchiveTolBundles,
   loadArchiveDocument,
   loadArchiveReviewQueue,
@@ -62,13 +67,21 @@ import { executeChatTurn } from "./modules/chat/controller";
 import { StrategistChatRail } from "./modules/chat/StrategistChatRail";
 import {
   branchChatFromMessageAction,
+  branchChatProjectAction,
   branchChatThreadAction,
+  createAgentChatThreadAction,
+  createChatProjectAction,
+  deleteChatProjectAction,
   compactActiveChatContextAction,
   deleteChatMessageAction,
   deleteChatThreadAction,
   editUserMessageAction,
+  moveChatThreadToProjectAction,
+  renameChatProjectAction,
+  renameChatThreadAction,
   selectChatAgentAction,
   stopChatGenerationAction,
+  togglePinnedChatProjectAction,
   togglePinnedChatThreadAction,
 } from "./modules/chat/thread-controller";
 import type { ComposerAttachment, ThinkingDepth } from "./modules/chat/types";
@@ -83,13 +96,13 @@ import { loadInitialShellState, loadRecoveryRuntimeSnapshot } from "./modules/sh
 import { buildShellViewModel, resolveActiveProviderForSelection } from "./modules/shell/selectors";
 import {
   executeRefreshProviderDiagnostics,
+  executeProviderSmokeTest,
   executeSaveProviderSecret,
   updateProviderProfile,
 } from "./modules/settings/controller";
 import { SettingsWorkspace, type SettingsSection } from "./modules/settings/SettingsWorkspace";
 import {
   activateChatThread,
-  createNewStrategistChat,
   renameStrategistIdentity,
   toggleStrategistChannel,
 } from "./modules/strategist/controller";
@@ -112,7 +125,16 @@ const navItems: Array<{ id: Section; label: string; eyebrow: string; icon: DockI
   { id: "settings", label: "Settings", eyebrow: "system", icon: "settings", pinned: true },
 ];
 
-const clampChatWidth = (width: number): number => Math.min(720, Math.max(560, Math.round(width)));
+const CHAT_HISTORY_WIDTH = 300;
+const CHAT_RAIL_MIN_WIDTH = 420;
+const CHAT_RAIL_MAX_WIDTH = 1240;
+const CHAT_RAIL_WITH_HISTORY_MIN_WIDTH = 760;
+const ZOOM_STEP = 0.05;
+const MIN_WINDOW_ZOOM = 0.85;
+const MAX_WINDOW_ZOOM = 1.25;
+
+const clampChatWidth = (width: number): number => Math.min(CHAT_RAIL_MAX_WIDTH, Math.max(CHAT_RAIL_MIN_WIDTH, Math.round(width)));
+const clampWindowZoom = (zoom: number): number => Math.min(MAX_WINDOW_ZOOM, Math.max(MIN_WINDOW_ZOOM, Number(zoom.toFixed(2))));
 
 const errorMessageOf = (error: unknown, fallback: string): string =>
   typeof error === "string" ? error : error instanceof Error ? error.message : fallback;
@@ -132,6 +154,8 @@ export function App() {
   const [providerDiagnostics, setProviderDiagnostics] = useState<ProviderDiagnosticReport[]>([]);
   const [providerDiagnosticsBusy, setProviderDiagnosticsBusy] = useState(false);
   const [activeProviderProbeId, setActiveProviderProbeId] = useState<string | null>(null);
+  const [providerSmokeResults, setProviderSmokeResults] = useState<Record<string, ProviderSmokeTestResult>>({});
+  const [providerSmokeBusyId, setProviderSmokeBusyId] = useState<string | null>(null);
   const [thinkingDepth, setThinkingDepth] = useState<ThinkingDepth>("high");
   const [selectedChatModel, setSelectedChatModel] = useState<string>("");
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
@@ -164,6 +188,8 @@ export function App() {
   const [archiveTolBundleResult, setArchiveTolBundleResult] = useState<ArchiveTolBundleBuildResult | null>(null);
   const [archiveSourceScanBusy, setArchiveSourceScanBusy] = useState(false);
   const [archiveSourceScanResult, setArchiveSourceScanResult] = useState<ArchiveSourceFolderScanResult | null>(null);
+  const [archiveImportedLibraries, setArchiveImportedLibraries] = useState<ArchiveImportedLibrarySummary[]>([]);
+  const [archiveClassificationReview, setArchiveClassificationReview] = useState<ArchiveLibraryClassificationReview | null>(null);
   const [archiveLibraryImportResult, setArchiveLibraryImportResult] = useState<ArchiveLibraryImportResult | null>(null);
   const [archiveProbeBusy, setArchiveProbeBusy] = useState(false);
   const [archiveProbeResult, setArchiveProbeResult] = useState<{
@@ -269,6 +295,44 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey)) {
+        return;
+      }
+
+      const key = event.key;
+      const direction = key === "+" || key === "=" ? 1 : key === "-" || key === "_" ? -1 : key === "0" ? 0 : null;
+      if (direction === null) {
+        return;
+      }
+
+      event.preventDefault();
+      setLoadState((current) => {
+        if (current.phase !== "ready") {
+          return current;
+        }
+        const currentZoom = current.state.uiPreferences.windowZoom ?? 1;
+        const nextZoom = direction === 0 ? 1 : clampWindowZoom(currentZoom + direction * ZOOM_STEP);
+        const nextState = {
+          ...current.state,
+          uiPreferences: {
+            ...current.state.uiPreferences,
+            windowZoom: nextZoom,
+          },
+        };
+        void persistState(nextState);
+        return {
+          ...current,
+          state: nextState,
+        };
+      });
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
     if (loadState.phase !== "ready") {
       return;
     }
@@ -341,7 +405,6 @@ export function App() {
     recoveryModeActive,
     visibleThreads,
     activeThread,
-    activeThreadChannel,
     strategist,
     engineerAgent,
     strategistRoute,
@@ -377,6 +440,18 @@ export function App() {
   const toggleChatSidebar = () => {
     updateRuntimeState((draft) => {
       draft.uiPreferences.chatSidebarOpen = !draft.uiPreferences.chatSidebarOpen;
+      return draft;
+    });
+  };
+
+  const setChatHistoryOpen = (open: boolean) => {
+    updateRuntimeState((draft) => {
+      const currentWidth = clampChatWidth(draft.uiPreferences.chatSidebarWidth);
+      draft.uiPreferences.chatHistoryOpen = open;
+      draft.uiPreferences.chatSidebarOpen = true;
+      draft.uiPreferences.chatSidebarWidth = open
+        ? Math.max(CHAT_RAIL_WITH_HISTORY_MIN_WIDTH, clampChatWidth(currentWidth + CHAT_HISTORY_WIDTH))
+        : clampChatWidth(currentWidth - CHAT_HISTORY_WIDTH);
       return draft;
     });
   };
@@ -458,11 +533,37 @@ export function App() {
     });
   };
 
+  const runProviderSmokeTest = async (providerId: string) => {
+    await executeProviderSmokeTest({
+      snapshot: { state, bundled, sideloaded },
+      providerId,
+      setProviderSmokeBusyId,
+      setProviderSmokeResults,
+      setSettingsNotice,
+      errorMessageOf,
+    });
+  };
+
   const refreshArchiveRuntime = async () => {
     await loadArchiveRuntimeStatus({
       setChatNotice,
       setArchiveStatusBusy,
       setArchiveStatus,
+      errorMessageOf,
+    });
+    await loadArchiveImportedLibraries({
+      setChatNotice,
+      setArchiveSourceScanBusy,
+      setArchiveImportedLibraries,
+      errorMessageOf,
+    });
+  };
+
+  const refreshArchiveSourceRegistry = async () => {
+    await loadArchiveImportedLibraries({
+      setChatNotice,
+      setArchiveSourceScanBusy,
+      setArchiveImportedLibraries,
       errorMessageOf,
     });
   };
@@ -530,6 +631,17 @@ export function App() {
       setChatNotice,
       setArchiveSourceScanBusy,
       setArchiveLibraryImportResult,
+      setArchiveImportedLibraries,
+      errorMessageOf,
+    });
+  };
+
+  const openArchiveClassificationReview = async (classificationManifestPath: string) => {
+    await loadArchiveLibraryClassificationReview({
+      classificationManifestPath,
+      setChatNotice,
+      setArchiveSourceScanBusy,
+      setArchiveClassificationReview,
       errorMessageOf,
     });
   };
@@ -691,13 +803,19 @@ export function App() {
 
   const shellStyle = {
     "--chat-rail-width": `${clampChatWidth(state.uiPreferences.chatSidebarWidth)}px`,
+    "--chat-history-width": `${CHAT_HISTORY_WIDTH}px`,
+  } as CSSProperties;
+  const zoomStyle = {
+    "--app-zoom": `${state.uiPreferences.windowZoom ?? 1}`,
   } as CSSProperties;
   const activeChatAgent = activeThread ? state.agents.find((agent) => agent.id === activeThread.owningAgentId) : null;
   const activeChatAgentName =
     activeChatAgent?.id === "strategist.core" ? displayedStrategistName : activeChatAgent?.displayName ?? displayedStrategistName;
 
   return (
-    <div className={`shell ${state.uiPreferences.chatSidebarOpen ? "chat-open" : "chat-closed"}`} style={shellStyle}>
+    <div className="app-zoom-viewport" style={zoomStyle}>
+      <div className="app-zoom-stage">
+        <div className={`shell ${state.uiPreferences.chatSidebarOpen ? "chat-open" : "chat-closed"}`} style={shellStyle}>
       <header className="system-topbar" aria-label="ResonantOS system bar">
         <div className="system-menu">
           <button type="button" className="system-logo-button" title="ResonantOS Home" onClick={() => setSection("overview")}>
@@ -827,16 +945,20 @@ export function App() {
               archiveTolBundleResult={archiveTolBundleResult}
               archiveSourceScanBusy={archiveSourceScanBusy}
               archiveSourceScanResult={archiveSourceScanResult}
+              archiveImportedLibraries={archiveImportedLibraries}
+              archiveClassificationReview={archiveClassificationReview}
               archiveLibraryImportResult={archiveLibraryImportResult}
               ingestProbeBusy={archiveProbeBusy}
               ingestProbeResult={archiveProbeResult}
               onRefreshArchiveStatus={() => void refreshArchiveRuntime()}
+              onRefreshArchiveSourceRegistry={() => void refreshArchiveSourceRegistry()}
               onRefreshArchiveQueue={() => void refreshArchiveQueue()}
               onRunArchiveSearch={(query) => void runArchiveSearch(query)}
               onOpenArchiveDocument={(path) => void openArchiveDocument(path)}
               onQueueArchiveSource={(source) => void queueArchiveSource(source)}
               onScanSourceFolders={(rootPath) => void runArchiveSourceFolderScan(rootPath)}
               onPickLibraryFolder={runPickArchiveLibraryFolder}
+              onOpenClassificationReview={(classificationManifestPath) => void openArchiveClassificationReview(classificationManifestPath)}
               onImportLibrary={(input) => void runArchiveLibraryImport(input)}
               onQueueWatchedSource={(source) => void queueWatchedArchiveSource(source)}
               onProcessArchiveRequest={(requestFile) => void runArchiveQueuedRequest(requestFile)}
@@ -891,6 +1013,8 @@ export function App() {
               providerDiagnostics={providerDiagnostics}
               providerDiagnosticsBusy={providerDiagnosticsBusy}
               activeProviderProbeId={activeProviderProbeId}
+              providerSmokeResults={providerSmokeResults}
+              providerSmokeBusyId={providerSmokeBusyId}
               providerDrafts={providerDrafts}
               onSettingsSectionChange={setSettingsSection}
               onUpdateProvider={(profileId, field, value) =>
@@ -902,6 +1026,7 @@ export function App() {
               onSaveProviderSecret={(profileId) => void handleSaveProviderSecret(profileId)}
               onProbeProvider={(profileId) => void refreshProviderDiagnostics(profileId)}
               onProbeAllProviders={() => void refreshProviderDiagnostics()}
+              onSmokeTestProvider={(profileId) => void runProviderSmokeTest(profileId)}
             />
           )}
         </section>
@@ -918,8 +1043,10 @@ export function App() {
             : "Primary trusted conversation channel."
         }
         activeThread={activeThread}
-        strategistThreads={visibleThreads}
+        strategistThreads={state.conversationThreads}
+        chatProjects={state.chatProjects ?? []}
         pinnedThreadIds={state.uiPreferences.pinnedChatThreadIds}
+        pinnedProjectIds={state.uiPreferences.pinnedChatProjectIds ?? []}
         availableAgents={state.agents
           .filter((agent) => agent.id === "strategist.core" || agent.id === state.recoverySession.engineerAgentId)
           .filter((agent) => state.channels.some((channel) => channel.owningAgentId === agent.id && channel.enabled))
@@ -933,6 +1060,7 @@ export function App() {
         chatBusy={chatBusy}
         chatCanStop={chatRunPhase !== "idle"}
         chatSupportsAbort={activeRoute.executionAdapter?.supportsAbort === true}
+        chatRunPhase={chatRunPhase}
         chatNotice={chatNotice}
         composer={composer}
         attachments={attachments}
@@ -944,6 +1072,7 @@ export function App() {
         contextUsageLabel={contextUsageLabel}
         contextUsageRatio={contextUsageRatio}
         contextUsageTitle={contextUsageTitle}
+        historyOpen={state.uiPreferences.chatHistoryOpen}
         activityLabel={agentActivityLabel}
         recoveryRuntimeStatus={
           recoveryModeActive
@@ -960,21 +1089,46 @@ export function App() {
         }
         chatScrollAnchorRef={chatScrollAnchorRef}
         fileInputRef={fileInputRef}
-        onCreateNewChat={() =>
-          createNewStrategistChat({
+        onCreateNewChat={(agentId, projectId) =>
+          createAgentChatThreadAction({
+            agentId,
+            projectId,
             state,
-            activeChannel: activeThreadChannel,
             updateRuntimeState,
             setComposer,
             setAttachments,
             setChatNotice,
           })
         }
+        onCreateProject={(title) =>
+          createChatProjectAction({
+            title,
+            updateRuntimeState,
+            setChatNotice,
+          })
+        }
+        onSetHistoryOpen={setChatHistoryOpen}
         onToggleSidebar={toggleChatSidebar}
         onSetActiveThread={(threadId) =>
           activateChatThread(threadId, updateRuntimeState, setComposer, setChatNotice, setAttachments)
         }
         onTogglePinnedThread={(threadId) => togglePinnedChatThreadAction({ threadId, updateRuntimeState })}
+        onRenameThread={(threadId, title) =>
+          renameChatThreadAction({
+            threadId,
+            title,
+            updateRuntimeState,
+            setChatNotice,
+          })
+        }
+        onMoveThreadToProject={(threadId, projectId) =>
+          moveChatThreadToProjectAction({
+            threadId,
+            projectId,
+            updateRuntimeState,
+            setChatNotice,
+          })
+        }
         onDeleteThread={(threadId) =>
           deleteChatThreadAction({
             activeThread,
@@ -991,6 +1145,29 @@ export function App() {
             updateRuntimeState,
             setComposer,
             setAttachments,
+            setChatNotice,
+          })
+        }
+        onTogglePinnedProject={(projectId) => togglePinnedChatProjectAction({ projectId, updateRuntimeState })}
+        onRenameProject={(projectId, title) =>
+          renameChatProjectAction({
+            projectId,
+            title,
+            updateRuntimeState,
+            setChatNotice,
+          })
+        }
+        onBranchProject={(projectId) =>
+          branchChatProjectAction({
+            projectId,
+            updateRuntimeState,
+            setChatNotice,
+          })
+        }
+        onDeleteProject={(projectId) =>
+          deleteChatProjectAction({
+            projectId,
+            updateRuntimeState,
             setChatNotice,
           })
         }
@@ -1081,6 +1258,8 @@ export function App() {
         onRemoveAttachment={(attachmentId) => removeComposerAttachment(attachmentId, setAttachments)}
         onStartResize={startChatRailResize}
       />
+        </div>
+      </div>
     </div>
   );
 }

@@ -6,6 +6,8 @@ import type {
   ArchiveActorPolicy,
   ArchiveClassificationProposal,
   ArchiveDocumentPayload,
+  ArchiveImportedLibrarySummary,
+  ArchiveLibraryClassificationReview,
   ArchivePromoteReviewArtifactResult,
   ArchiveProcessIngestResult,
   ArchiveIngestProbeResult,
@@ -28,7 +30,9 @@ import type {
 import { canPerformArchiveAction } from "../../core/policies";
 import { resolveArchiveIngestRoute, routedProviderLabel } from "../../core/provider-service";
 import { Panel } from "../../components/Panel";
+import { ArchiveClassificationReviewPanel } from "./ArchiveClassificationReviewPanel";
 import { ArchiveReviewDesk } from "./ArchiveReviewDesk";
+import { ArchiveSourceRegistry } from "./ArchiveSourceRegistry";
 
 type ArchiveWorkspaceProps = {
   state: ResonantShellState;
@@ -48,6 +52,8 @@ type ArchiveWorkspaceProps = {
   archiveTolBundleResult: ArchiveTolBundleBuildResult | null;
   archiveSourceScanBusy: boolean;
   archiveSourceScanResult: ArchiveSourceFolderScanResult | null;
+  archiveImportedLibraries: ArchiveImportedLibrarySummary[];
+  archiveClassificationReview: ArchiveLibraryClassificationReview | null;
   archiveLibraryImportResult: ArchiveLibraryImportResult | null;
   ingestProbeBusy: boolean;
   ingestProbeResult: {
@@ -57,12 +63,14 @@ type ArchiveWorkspaceProps = {
     resolutionReason: string;
   } | null;
   onRefreshArchiveStatus: () => void;
+  onRefreshArchiveSourceRegistry: () => void;
   onRefreshArchiveQueue: () => void;
   onRunArchiveSearch: (query: string) => void;
   onOpenArchiveDocument: (path: string) => void;
   onQueueArchiveSource: (source: ArchiveSearchSourceHit) => void;
   onScanSourceFolders: (rootPath?: string) => void;
   onPickLibraryFolder: () => Promise<string | null>;
+  onOpenClassificationReview: (classificationManifestPath: string) => void;
   onImportLibrary: (input: {
     sourcePath: string;
     domain: ArchiveMemoryDomain;
@@ -98,16 +106,20 @@ export function ArchiveWorkspace({
   archiveTolBundleResult,
   archiveSourceScanBusy,
   archiveSourceScanResult,
+  archiveImportedLibraries,
+  archiveClassificationReview,
   archiveLibraryImportResult,
   ingestProbeBusy,
   ingestProbeResult,
   onRefreshArchiveStatus,
+  onRefreshArchiveSourceRegistry,
   onRefreshArchiveQueue,
   onRunArchiveSearch,
   onOpenArchiveDocument,
   onQueueArchiveSource,
   onScanSourceFolders,
   onPickLibraryFolder,
+  onOpenClassificationReview,
   onImportLibrary,
   onQueueWatchedSource,
   onProcessArchiveRequest,
@@ -121,7 +133,6 @@ export function ArchiveWorkspace({
 }: ArchiveWorkspaceProps) {
   const ingestRoute = resolveArchiveIngestRoute(state);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedSourceRoot, setSelectedSourceRoot] = useState("");
   const [libraryPath, setLibraryPath] = useState("");
   const [libraryName, setLibraryName] = useState("");
   const [libraryDomain, setLibraryDomain] = useState<ArchiveMemoryDomain>("mixed-library");
@@ -136,7 +147,6 @@ export function ArchiveWorkspace({
   const audio2TolEnabled = Boolean(audio2TolInstallation?.installed && audio2TolInstallation.enabled);
   const actionableWatchedSources =
     archiveSourceScanResult?.records.filter((record) => record.status === "new" || record.status === "changed") ?? [];
-  const selectableSourceRoots = archiveStatus?.mappings.filter((mapping) => mapping.exists) ?? [];
   const classificationProposals = archiveLibraryImportResult
     ? (archiveLibraryImportResult.classificationProposals ?? [])
     : [];
@@ -316,6 +326,17 @@ export function ArchiveWorkspace({
           )}
         </Panel>
       </section>
+
+      <ArchiveSourceRegistry
+        archiveStatus={archiveStatus}
+        archiveSourceScanBusy={archiveSourceScanBusy}
+        archiveSourceScanResult={archiveSourceScanResult}
+        archiveImportedLibraries={archiveImportedLibraries}
+        onRefreshArchiveSourceRegistry={onRefreshArchiveSourceRegistry}
+        onScanSourceFolders={onScanSourceFolders}
+        onOpenClassificationReview={onOpenClassificationReview}
+      />
+      {archiveClassificationReview ? <ArchiveClassificationReviewPanel review={archiveClassificationReview} /> : null}
 
       <Panel
         className="library-importer-panel"
@@ -497,32 +518,6 @@ export function ArchiveWorkspace({
             </div>
           </section>
         ) : null}
-        <details className="archive-details">
-          <summary>Advanced: scan already mapped folders</summary>
-          <div className="source-scan-actions">
-            <select
-              value={selectedSourceRoot}
-              onChange={(event) => setSelectedSourceRoot(event.target.value)}
-              aria-label="Select source folder"
-            >
-              <option value="">All raw and derived source folders</option>
-              {selectableSourceRoots.map((mapping) => (
-                <option key={`${mapping.role}:${mapping.path}`} value={mapping.path}>
-                  {mapping.subtype ? `${mapping.subtype} · ` : ""}
-                  {mapping.path}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="button-secondary touch-action"
-              onClick={() => onScanSourceFolders(selectedSourceRoot || undefined)}
-              disabled={archiveSourceScanBusy}
-            >
-              {archiveSourceScanBusy ? "Scanning..." : "Scan Source Folder"}
-            </button>
-          </div>
-        </details>
         {archiveSourceScanResult ? (
           <>
             <div className="archive-command-metrics compact" aria-label="Source folder scan summary">

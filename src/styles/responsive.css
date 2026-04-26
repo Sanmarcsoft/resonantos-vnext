@@ -37,6 +37,10 @@
   .workspace-grid,
   .archive-rail,
   .archive-command-layout,
+  .source-registry-hero,
+  .source-registry-scanbar,
+  .source-registry-summary,
+  .source-registry-grid,
 	  .archive-primary-grid,
 	  .archive-secondary-grid,
 	  .library-importer-intro,
@@ -93,6 +97,10 @@
 
   .policy-columns,
 	  .archive-command-metrics,
+  .source-registry-hero,
+  .source-registry-scanbar,
+  .source-registry-summary,
+  .source-registry-grid,
 	  .archive-search-grid,
 	  .library-importer-intro,
 	  .library-import-form,
@@ -157,6 +165,10 @@
   .policy-columns,
   .archive-command-layout,
   .archive-command-metrics,
+  .source-registry-hero,
+  .source-registry-scanbar,
+  .source-registry-summary,
+  .source-registry-grid,
   .archive-help-card,
   .archive-primary-grid,
 	  .archive-secondary-grid,
@@ -198,6 +210,9 @@
   .agent-heading,
   .pane-header,
 	  .archive-command-actions,
+  .source-registry-actions,
+  .source-root-card,
+  .imported-library-head,
 	  .archive-import-result-head,
 	  .classification-proposal-main,
 	  .recovery-dashboard-card-head,
@@ -211,6 +226,9 @@
   }
 
   .panel-header,
+  .source-registry-hero,
+  .source-root-card,
+  .imported-library-head,
   .classification-review-head,
   .archive-import-result-head {
     grid-template-columns: 1fr;

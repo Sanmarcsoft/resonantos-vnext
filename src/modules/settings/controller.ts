@@ -2,9 +2,9 @@
 // Intent citation: docs/architecture/ADR-009-rust-service-ipc-boundary.md
 
 import type { Dispatch, SetStateAction } from "react";
-import type { AddOnManifest, ProviderDiagnosticReport, ResonantShellState } from "../../core/contracts";
+import type { AddOnManifest, ProviderDiagnosticReport, ProviderSmokeTestResult, ResonantShellState } from "../../core/contracts";
 import { applyProviderDiagnostics } from "../../core/policies";
-import { requestProviderDiagnostics, saveProviderSecret } from "../../core/runtime";
+import { requestProviderDiagnostics, requestProviderSmokeTest, saveProviderSecret } from "../../core/runtime";
 
 type ReadyShellSnapshot = {
   state: ResonantShellState;
@@ -35,6 +35,15 @@ type SaveProviderSecretInput = {
   setProviderDiagnosticsBusy: Dispatch<SetStateAction<boolean>>;
   setActiveProviderProbeId: Dispatch<SetStateAction<string | null>>;
   setProviderDiagnostics: Dispatch<SetStateAction<ProviderDiagnosticReport[]>>;
+  errorMessageOf: (error: unknown, fallback: string) => string;
+};
+
+type RunProviderSmokeTestInput = {
+  snapshot: ReadyShellSnapshot;
+  providerId: string;
+  setProviderSmokeBusyId: Dispatch<SetStateAction<string | null>>;
+  setProviderSmokeResults: Dispatch<SetStateAction<Record<string, ProviderSmokeTestResult>>>;
+  setSettingsNotice: Dispatch<SetStateAction<string | null>>;
   errorMessageOf: (error: unknown, fallback: string) => string;
 };
 
@@ -126,6 +135,41 @@ export const executeSaveProviderSecret = async ({
     });
   } catch (error) {
     setSettingsNotice(errorMessageOf(error, "Failed to save provider secret."));
+  }
+};
+
+export const executeProviderSmokeTest = async ({
+  snapshot,
+  providerId,
+  setProviderSmokeBusyId,
+  setProviderSmokeResults,
+  setSettingsNotice,
+  errorMessageOf,
+}: RunProviderSmokeTestInput): Promise<void> => {
+  const provider = snapshot.state.providers.find((item) => item.id === providerId);
+  if (!provider) {
+    setSettingsNotice(`Provider ${providerId} was not found.`);
+    return;
+  }
+  const runtimeNode = snapshot.state.runtimeNodes.find((node) => node.providerProfileId === provider.id);
+  try {
+    setProviderSmokeBusyId(providerId);
+    const result = await requestProviderSmokeTest({
+      providerId: provider.id,
+      providerType: provider.providerType,
+      apiBaseUrl: provider.apiBaseUrl,
+      runtimeNodeId: runtimeNode?.id,
+      runtimeNodeKind: runtimeNode?.kind,
+      runtimeNodeEndpoint: runtimeNode?.endpoint,
+      authTier: provider.authTier,
+      model: provider.primaryModel,
+    });
+    setProviderSmokeResults((current) => ({ ...current, [providerId]: result }));
+    setSettingsNotice(result.summary);
+  } catch (error) {
+    setSettingsNotice(errorMessageOf(error, "Provider smoke test failed."));
+  } finally {
+    setProviderSmokeBusyId(null);
   }
 };
 

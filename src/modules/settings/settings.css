@@ -25,6 +25,26 @@
   font-size: 0.78rem;
 }
 
+.provider-smoke-result {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.72rem 0.76rem;
+  border-radius: 12px;
+  border: 1px solid rgba(16, 185, 129, 0.22);
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.provider-smoke-result span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.provider-smoke-result p {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
 .provider-diagnostics-list {
   display: grid;
   gap: 0.6rem;
@@ -138,4 +158,3 @@
 .setting-note strong {
   font-size: 0.92rem;
 }
-

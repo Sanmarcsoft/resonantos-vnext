@@ -24,6 +24,7 @@ import {
   resolveStrategistChatRoute,
   type ProviderRouteResolution,
 } from "../../core/provider-service";
+import { canUseDictation } from "../chat/dictation";
 import type { ComposerAttachment } from "../chat/types";
 
 type ViewModelInput = {
@@ -209,6 +210,6 @@ export const buildShellViewModel = ({
     contextUsageRatio,
     contextUsageLabel,
     contextUsageTitle,
-    dictationAvailable: typeof window !== "undefined",
+    dictationAvailable: canUseDictation(),
   };
 };

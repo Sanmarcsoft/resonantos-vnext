@@ -277,6 +277,16 @@ export interface ProviderDiagnosticReport {
   runtimeDiagnostics: ProviderRuntimeDiagnostic[];
 }
 
+export interface ProviderSmokeTestResult {
+  providerId: string;
+  model: string;
+  ok: boolean;
+  replyPreview: string;
+  usage?: ProviderUsageTelemetry;
+  checkedAt: string;
+  summary: string;
+}
+
 export interface ProviderRuntimeNode {
   id: string;
   label: string;
@@ -613,6 +623,25 @@ export interface ArchiveImportedLibrarySummary {
   obsidianVaultDetected: boolean;
   recommendedAddon?: string;
   recordsCount: number;
+}
+
+export interface ArchiveLibraryClassificationReview {
+  artifactType: string;
+  createdAt: string;
+  actorId: string;
+  libraryId: string;
+  libraryName: string;
+  originalPath: string;
+  canonicalRoot: string;
+  classificationStatus: string;
+  metadataStandard: string;
+  structuralChangesAllowed: boolean;
+  requiresHumanApprovalBeforeMove: boolean;
+  recordsTotal: number;
+  proposalsPreviewed: number;
+  remainingForFullReview: number;
+  proposals: ArchiveClassificationProposal[];
+  manifestPath: string;
 }
 
 export interface ArchiveSystemMemorySource {
@@ -1191,7 +1220,16 @@ export interface ConversationThread {
   workspaceId: string;
   channelId: string;
   summary: string;
+  projectId?: string;
   messages: ConversationMessage[];
+}
+
+export interface ChatProject {
+  id: string;
+  title: string;
+  pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type RecoveryChecklistStepStatus = "pending" | "active" | "complete";
@@ -1216,9 +1254,12 @@ export interface UiPreferences {
   activeSection: "overview" | "strategist" | "archive" | "delegation" | "addons" | "settings";
   activeChatThreadId: string;
   pinnedChatThreadIds: string[];
+  pinnedChatProjectIds: string[];
   leftSidebarOpen: boolean;
   chatSidebarOpen: boolean;
+  chatHistoryOpen: boolean;
   chatSidebarWidth: number;
+  windowZoom: number;
   theme: "resonant-dark";
 }
 
@@ -1233,6 +1274,7 @@ export interface ResonantShellState {
   channels: ChannelDefinition[];
   workspaces: WorkspaceDefinition[];
   archivePolicy: ArchivePolicy;
+  chatProjects: ChatProject[];
   conversationThreads: ConversationThread[];
   transcriptLedger: ConversationTranscriptEvent[];
   contextMemoryStates: ContextMemoryState[];

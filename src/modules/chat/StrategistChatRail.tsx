@@ -1,8 +1,8 @@
 // Intent citation: docs/architecture/ADR-002-modular-codebase.md
 // UX citation: docs/architecture/ADR-004-chat-rail.md
 
-import { useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
-import type { ChannelDefinition, ConversationMessage, ConversationThread } from "../../core/contracts";
+import { useEffect, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import type { ChannelDefinition, ChatProject, ChatRunPhase, ConversationMessage, ConversationThread } from "../../core/contracts";
 import { MessageContent } from "./MessageContent";
 import {
   ArchiveIcon,
@@ -31,7 +31,9 @@ type StrategistChatRailProps = {
   description: string;
   activeThread: ConversationThread | null;
   strategistThreads: ConversationThread[];
+  chatProjects: ChatProject[];
   pinnedThreadIds: string[];
+  pinnedProjectIds: string[];
   availableAgents: Array<{
     id: string;
     displayName: string;
@@ -42,6 +44,7 @@ type StrategistChatRailProps = {
   chatBusy: boolean;
   chatCanStop: boolean;
   chatSupportsAbort: boolean;
+  chatRunPhase: ChatRunPhase;
   chatNotice: string | null;
   composer: string;
   attachments: ComposerAttachment[];
@@ -53,6 +56,7 @@ type StrategistChatRailProps = {
   contextUsageLabel: string;
   contextUsageRatio: number;
   contextUsageTitle: string;
+  historyOpen: boolean;
   activityLabel: string;
   recoveryRuntimeStatus?: {
     activeRouteLabel: string;
@@ -65,12 +69,20 @@ type StrategistChatRailProps = {
   } | null;
   chatScrollAnchorRef: RefObject<HTMLDivElement | null>;
   fileInputRef: RefObject<HTMLInputElement | null>;
-  onCreateNewChat: () => void;
+  onCreateNewChat: (agentId: string, projectId?: string) => void;
+  onCreateProject: (title: string) => void;
+  onSetHistoryOpen: (open: boolean) => void;
   onToggleSidebar: () => void;
   onSetActiveThread: (threadId: string) => void;
   onTogglePinnedThread: (threadId: string) => void;
+  onRenameThread: (threadId: string, title: string) => void;
+  onMoveThreadToProject: (threadId: string, projectId: string | null) => void;
   onDeleteThread: (threadId: string) => void;
   onBranchThread: (threadId: string) => void;
+  onTogglePinnedProject: (projectId: string) => void;
+  onRenameProject: (projectId: string, title: string) => void;
+  onDeleteProject: (projectId: string) => void;
+  onBranchProject: (projectId: string) => void;
   onSelectAgent: (agentId: string) => void;
   onComposerChange: (value: string) => void;
   onSend: () => void;
@@ -89,10 +101,80 @@ type StrategistChatRailProps = {
 };
 
 export function StrategistChatRail(props: StrategistChatRailProps) {
-  const [historyOpen, setHistoryOpen] = useState(true);
   const [openThreadMenuId, setOpenThreadMenuId] = useState<string | null>(null);
+  const [openProjectMenuId, setOpenProjectMenuId] = useState<string | null>(null);
+  const [projectComposerOpen, setProjectComposerOpen] = useState(false);
+  const [projectDraft, setProjectDraft] = useState("");
+  const [agentPicker, setAgentPicker] = useState<{ projectId?: string } | null>(null);
+  const [activeRunStartedAt, setActiveRunStartedAt] = useState<number | null>(null);
+  const [activityNow, setActivityNow] = useState(Date.now());
+
+  useEffect(() => {
+    if (!props.chatBusy) {
+      setActiveRunStartedAt(null);
+      return;
+    }
+
+    setActiveRunStartedAt((current) => current ?? Date.now());
+    const timer = window.setInterval(() => setActivityNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [props.chatBusy]);
+
   const copyMessage = (message: ConversationMessage) => {
     void navigator.clipboard?.writeText(message.content);
+  };
+  const formatElapsed = (startedAt: number | null): string => {
+    if (!startedAt) {
+      return "just now";
+    }
+    const totalSeconds = Math.max(0, Math.floor((activityNow - startedAt) / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes <= 0) {
+      return `${seconds}s`;
+    }
+    return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+  };
+  const phaseLabel = (phase: ChatRunPhase): string => {
+    switch (phase) {
+      case "retrieving":
+        return "Reading context";
+      case "streaming":
+        return "Writing response";
+      case "tool-running":
+        return "Running tools";
+      case "thinking":
+        return "Thinking";
+      case "interrupted":
+        return "Interrupted";
+      case "failed":
+        return "Failed";
+      case "completed":
+        return "Completed";
+      case "idle":
+      default:
+        return "Standing by";
+    }
+  };
+  const threadUpdatedAt = (thread: ConversationThread): number => {
+    const lastMessage = thread.messages.at(-1);
+    return lastMessage ? Date.parse(lastMessage.createdAt) || 0 : 0;
+  };
+  const threadAgeLabel = (thread: ConversationThread): string => {
+    const updatedAt = threadUpdatedAt(thread);
+    if (!updatedAt) {
+      return "";
+    }
+    const elapsedMs = Math.max(0, Date.now() - updatedAt);
+    const elapsedDays = Math.floor(elapsedMs / 86_400_000);
+    if (elapsedDays > 0) {
+      return `${elapsedDays}d`;
+    }
+    const elapsedHours = Math.floor(elapsedMs / 3_600_000);
+    if (elapsedHours > 0) {
+      return `${elapsedHours}h`;
+    }
+    return "now";
   };
   const generationStatsTitle = (message: ConversationMessage): string => {
     const usage = message.providerUsage;
@@ -121,17 +203,127 @@ export function StrategistChatRail(props: StrategistChatRailProps) {
     return lines.join("\n");
   };
   const pinnedThreadIds = new Set(props.pinnedThreadIds);
-  const pinnedThreads = props.strategistThreads.filter((thread) => pinnedThreadIds.has(thread.id));
-  const recentThreads = props.strategistThreads.filter((thread) => !pinnedThreadIds.has(thread.id));
+  const pinnedProjectIds = new Set(props.pinnedProjectIds);
+  const sortedThreads = [...props.strategistThreads].sort((left, right) => threadUpdatedAt(right) - threadUpdatedAt(left));
+  const pinnedThreads = sortedThreads.filter((thread) => pinnedThreadIds.has(thread.id) && !thread.projectId);
+  const unprojectedThreads = sortedThreads.filter((thread) => !thread.projectId && !pinnedThreadIds.has(thread.id));
+  const sortedProjects = [...props.chatProjects].sort((left, right) => {
+    const leftPinned = pinnedProjectIds.has(left.id) || left.pinned;
+    const rightPinned = pinnedProjectIds.has(right.id) || right.pinned;
+    if (leftPinned !== rightPinned) {
+      return leftPinned ? -1 : 1;
+    }
+    return (Date.parse(right.updatedAt) || 0) - (Date.parse(left.updatedAt) || 0);
+  });
+  const submitProject = () => {
+    const title = projectDraft.trim();
+    if (!title) {
+      return;
+    }
+    props.onCreateProject(title);
+    setProjectDraft("");
+    setProjectComposerOpen(false);
+  };
+  const openAgentPicker = (projectId?: string) => {
+    setAgentPicker({ projectId });
+  };
+  const createChatForAgent = (agentId: string) => {
+    props.onCreateNewChat(agentId, agentPicker?.projectId);
+    setAgentPicker(null);
+  };
+  const renderThreadOptionsMenu = (thread: ConversationThread, isPinned: boolean) => (
+    <div className="chat-history-menu" role="menu">
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          props.onTogglePinnedThread(thread.id);
+          setOpenThreadMenuId(null);
+        }}
+      >
+        <PinIcon />
+        {isPinned ? "Unpin" : "Pin"}
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          const title = window.prompt("Rename chat", thread.title);
+          if (title?.trim()) {
+            props.onRenameThread(thread.id, title);
+          }
+          setOpenThreadMenuId(null);
+        }}
+      >
+        <EditIcon />
+        Rename
+      </button>
+      {thread.projectId ? (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            props.onMoveThreadToProject(thread.id, null);
+            setOpenThreadMenuId(null);
+          }}
+        >
+          <HistoryIcon />
+          Move to Chats
+        </button>
+      ) : null}
+      {props.chatProjects.map((project) =>
+        project.id === thread.projectId ? null : (
+          <button
+            key={project.id}
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              props.onMoveThreadToProject(thread.id, project.id);
+              setOpenThreadMenuId(null);
+            }}
+          >
+            <HistoryIcon />
+            Move to {project.title}
+          </button>
+        ),
+      )}
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          props.onBranchThread(thread.id);
+          setOpenThreadMenuId(null);
+        }}
+      >
+        <BranchIcon />
+        Branch
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          props.onDeleteThread(thread.id);
+          setOpenThreadMenuId(null);
+        }}
+      >
+        <TrashIcon />
+        Delete
+      </button>
+    </div>
+  );
   const renderHistoryThread = (thread: ConversationThread) => {
     const channel = props.channels.find((item) => item.id === thread.channelId);
     const isPinned = pinnedThreadIds.has(thread.id);
+    const agent = props.availableAgents.find((item) => item.id === thread.owningAgentId);
 
     return (
       <div key={thread.id} className={`chat-history-row ${props.activeThread?.id === thread.id ? "active" : ""}`}>
         <button type="button" className="chat-history-thread" onClick={() => props.onSetActiveThread(thread.id)}>
           <strong>{thread.title}</strong>
-          <span>{channel?.label ?? thread.channelId}</span>
+          <span>
+            {agent?.displayName ?? channel?.label ?? thread.channelId}
+            {threadAgeLabel(thread) ? ` · ${threadAgeLabel(thread)}` : ""}
+          </span>
         </button>
         <div className="chat-history-menu-anchor">
           <button
@@ -143,43 +335,95 @@ export function StrategistChatRail(props: StrategistChatRailProps) {
           >
             <MoreIcon />
           </button>
-          {openThreadMenuId === thread.id && (
-            <div className="chat-history-menu" role="menu">
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  props.onTogglePinnedThread(thread.id);
-                  setOpenThreadMenuId(null);
-                }}
-              >
-                <PinIcon />
-                {isPinned ? "Unpin" : "Pin"}
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  props.onBranchThread(thread.id);
-                  setOpenThreadMenuId(null);
-                }}
-              >
-                <BranchIcon />
-                Branch
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  props.onDeleteThread(thread.id);
-                  setOpenThreadMenuId(null);
-                }}
-              >
-                <TrashIcon />
-                Delete
-              </button>
-            </div>
-          )}
+          {openThreadMenuId === thread.id && renderThreadOptionsMenu(thread, isPinned)}
+        </div>
+      </div>
+    );
+  };
+  const renderProject = (project: ChatProject) => {
+    const projectThreads = sortedThreads.filter((thread) => thread.projectId === project.id);
+    const isPinned = pinnedProjectIds.has(project.id) || project.pinned;
+
+    return (
+      <div key={project.id} className={`chat-project-group ${isPinned ? "pinned" : ""}`}>
+        <div className="chat-project-head">
+          <HistoryIcon />
+          <strong>{project.title}</strong>
+          <small>{projectThreads.length}</small>
+          <button
+            type="button"
+            className="chat-project-add"
+            aria-label={`New chat in ${project.title}`}
+            title={`New chat in ${project.title}`}
+            onClick={() => openAgentPicker(project.id)}
+          >
+            <PlusIcon />
+          </button>
+          <div className="chat-history-menu-anchor">
+            <button
+              type="button"
+              className="chat-history-menu-trigger"
+              aria-label="Project options"
+              title="Project options"
+              onClick={() => setOpenProjectMenuId((current) => (current === project.id ? null : project.id))}
+            >
+              <MoreIcon />
+            </button>
+            {openProjectMenuId === project.id && (
+              <div className="chat-history-menu" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    props.onTogglePinnedProject(project.id);
+                    setOpenProjectMenuId(null);
+                  }}
+                >
+                  <PinIcon />
+                  {isPinned ? "Unpin" : "Pin"}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    const title = window.prompt("Rename project", project.title);
+                    if (title?.trim()) {
+                      props.onRenameProject(project.id, title);
+                    }
+                    setOpenProjectMenuId(null);
+                  }}
+                >
+                  <EditIcon />
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    props.onBranchProject(project.id);
+                    setOpenProjectMenuId(null);
+                  }}
+                >
+                  <BranchIcon />
+                  Branch
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    props.onDeleteProject(project.id);
+                    setOpenProjectMenuId(null);
+                  }}
+                >
+                  <TrashIcon />
+                  Delete
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="chat-project-thread-list">
+          {projectThreads.length > 0 ? projectThreads.map(renderHistoryThread) : <p className="chat-history-empty">No chats yet.</p>}
         </div>
       </div>
     );
@@ -216,17 +460,31 @@ export function StrategistChatRail(props: StrategistChatRailProps) {
         <div className="chat-header-actions">
           <button
             type="button"
-            className={`chat-icon-button ${historyOpen ? "active" : ""}`}
-            aria-label={historyOpen ? "Hide chat history" : "Show chat history"}
-            title={historyOpen ? "Hide chat history" : "Show chat history"}
-            onClick={() => setHistoryOpen((current) => !current)}
+            className={`chat-icon-button ${props.historyOpen ? "active" : ""}`}
+            aria-label={props.historyOpen ? "Hide chat history" : "Show chat history"}
+            title={props.historyOpen ? "Hide chat history" : "Show chat history"}
+            onClick={() => props.onSetHistoryOpen(!props.historyOpen)}
           >
             <HistoryIcon />
           </button>
           {props.mode !== "emergency" && (
-            <button type="button" className="chat-icon-button prominent" aria-label="New chat" title="New chat" onClick={props.onCreateNewChat}>
+            <button type="button" className="chat-icon-button prominent" aria-label="New chat" title="New chat" onClick={() => openAgentPicker()}>
               <PlusIcon />
             </button>
+          )}
+          {props.activeThread && !props.historyOpen && (
+            <div className="chat-history-menu-anchor">
+              <button
+                type="button"
+                className="chat-icon-button"
+                aria-label="Chat options"
+                title="Chat options"
+                onClick={() => setOpenThreadMenuId((current) => (current === props.activeThread?.id ? null : props.activeThread?.id ?? null))}
+              >
+                <MoreIcon />
+              </button>
+              {openThreadMenuId === props.activeThread.id && renderThreadOptionsMenu(props.activeThread, pinnedThreadIds.has(props.activeThread.id))}
+            </div>
           )}
           <button type="button" className="chat-icon-button" aria-label="Hide chat rail" title="Hide chat rail" onClick={props.onToggleSidebar}>
             <HideIcon />
@@ -263,9 +521,69 @@ export function StrategistChatRail(props: StrategistChatRailProps) {
         </div>
       )}
 
-      <div className={`chat-workspace ${historyOpen ? "history-open" : "history-closed"}`}>
-        {historyOpen && (
+      {agentPicker && (
+        <div className="chat-agent-picker" role="dialog" aria-label="Choose agent for new chat">
+          <div>
+            <strong>New chat</strong>
+            <span>{agentPicker.projectId ? "Choose the agent for this project chat." : "Choose the agent for this chat."}</span>
+          </div>
+          <div className="chat-agent-picker-grid">
+            {props.availableAgents.map((agent) => (
+              <button key={agent.id} type="button" onClick={() => createChatForAgent(agent.id)}>
+                <span>{agent.shortLabel}</span>
+                <strong>{agent.displayName}</strong>
+              </button>
+            ))}
+          </div>
+          <button type="button" className="chat-agent-picker-close" onClick={() => setAgentPicker(null)}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      <div className={`chat-workspace ${props.historyOpen ? "history-open" : "history-closed"}`}>
+        {props.historyOpen && (
           <aside className="chat-history-panel" aria-label="Chat history">
+            {props.mode !== "emergency" && (
+              <div className="chat-history-actions">
+                <button type="button" className="chat-history-new" onClick={() => openAgentPicker()}>
+                  <PlusIcon />
+                  <span>New chat</span>
+                </button>
+                <button type="button" className="chat-history-new" onClick={() => setProjectComposerOpen((current) => !current)}>
+                  <PlusIcon />
+                  <span>New project</span>
+                </button>
+              </div>
+            )}
+            {projectComposerOpen && (
+              <form
+                className="chat-project-composer"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  submitProject();
+                }}
+              >
+                <input
+                  autoFocus
+                  value={projectDraft}
+                  onChange={(event) => setProjectDraft(event.target.value)}
+                  placeholder="Project name"
+                />
+                <div>
+                  <button type="submit">Create</button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProjectComposerOpen(false);
+                      setProjectDraft("");
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
             {pinnedThreads.length > 0 && (
               <section>
                 <span>Pinned</span>
@@ -273,8 +591,12 @@ export function StrategistChatRail(props: StrategistChatRailProps) {
               </section>
             )}
             <section>
-              <span>History</span>
-              {recentThreads.map(renderHistoryThread)}
+              <span>Chats</span>
+              {unprojectedThreads.length > 0 ? unprojectedThreads.map(renderHistoryThread) : <p className="chat-history-empty">No unprojected chats.</p>}
+            </section>
+            <section>
+              <span>Projects</span>
+              {sortedProjects.length > 0 ? sortedProjects.map(renderProject) : <p className="chat-history-empty">No projects yet.</p>}
             </section>
           </aside>
         )}
@@ -349,6 +671,16 @@ export function StrategistChatRail(props: StrategistChatRailProps) {
             </div>
               </article>
             ))}
+            {props.chatBusy && (
+              <div className="chat-run-status-card" aria-live="polite">
+                <div className="chat-run-status-head">
+                  <span className="agent-activity-pulse" />
+                  <strong>{phaseLabel(props.chatRunPhase)}</strong>
+                  <small>{formatElapsed(activeRunStartedAt)}</small>
+                </div>
+                <p>{props.activityLabel}</p>
+              </div>
+            )}
             <div ref={props.chatScrollAnchorRef} />
           </div>
 

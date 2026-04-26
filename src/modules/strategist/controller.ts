@@ -13,6 +13,7 @@ type CreateChatInput = {
   setComposer: (value: string) => void;
   setAttachments: (value: ComposerAttachment[]) => void;
   setChatNotice: (value: string | null) => void;
+  projectId?: string;
 };
 
 export const renameStrategistIdentity = (
@@ -52,6 +53,7 @@ export const createNewStrategistChat = ({
   setComposer,
   setAttachments,
   setChatNotice,
+  projectId,
 }: CreateChatInput): void => {
   if (state.recoverySession.active) {
     return;
@@ -66,6 +68,7 @@ export const createNewStrategistChat = ({
     createStrategistThread(draft, {
       channelId: channel.id,
       workspaceId: channel.workspaceId,
+      projectId,
     }),
   );
   setComposer("");

@@ -349,6 +349,23 @@ pub(crate) struct ProviderUsageTelemetry {
     pub(crate) tokens_per_second: Option<f64>,
 }
 
+struct ProviderServiceChatResponse {
+    content: String,
+    usage: Option<ProviderUsageTelemetry>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderSmokeTestResult {
+    pub(crate) provider_id: String,
+    pub(crate) model: String,
+    pub(crate) ok: bool,
+    pub(crate) reply_preview: String,
+    pub(crate) usage: Option<ProviderUsageTelemetry>,
+    pub(crate) checked_at: String,
+    pub(crate) summary: String,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ArchiveIngestProbeRequest {
@@ -623,7 +640,16 @@ pub(crate) async fn probe_http_endpoint(url: &str) -> Result<String, String> {
         .send()
         .await
         .map_err(|error| format!("Failed to reach `{url}`: {error}"))?;
-    Ok(format!("reachable with HTTP {}", response.status()))
+    http_probe_outcome(url, response.status())
+}
+
+fn http_probe_outcome(url: &str, status: reqwest::StatusCode) -> Result<String, String> {
+    if status.is_success() || status.is_redirection() {
+        return Ok(format!("reachable with HTTP {status}"));
+    }
+    Err(format!(
+        "Endpoint `{url}` responded with HTTP {status}; reachable, but not a healthy runtime probe."
+    ))
 }
 
 fn runtime_kind_rank(kind: &str) -> usize {
@@ -1039,10 +1065,10 @@ pub(crate) async fn query_provider_diagnostics(
     Ok(reports)
 }
 
-async fn execute_cloud_provider_service_chat(
+async fn execute_cloud_provider_service_chat_with_usage(
     app: &AppHandle,
     request: &ProviderServiceChatRequest,
-) -> Result<String, String> {
+) -> Result<ProviderServiceChatResponse, String> {
     let api_key = resolve_provider_secret(app, &request.provider_id)?.ok_or_else(|| {
         "No provider secret is configured for this Strategist profile.".to_string()
     })?;
@@ -1095,12 +1121,24 @@ async fn execute_cloud_provider_service_chat(
     }
 
     let content = extract_assistant_content(&payload)?;
-    Ok(sanitize_assistant_content(&request.provider_type, &content))
+    Ok(ProviderServiceChatResponse {
+        content: sanitize_assistant_content(&request.provider_type, &content),
+        usage: extract_cloud_usage(&request.provider_id, &request.model, &payload),
+    })
 }
 
-async fn execute_local_provider_service_chat(
+async fn execute_cloud_provider_service_chat(
+    app: &AppHandle,
     request: &ProviderServiceChatRequest,
 ) -> Result<String, String> {
+    execute_cloud_provider_service_chat_with_usage(app, request)
+        .await
+        .map(|response| response.content)
+}
+
+async fn execute_local_provider_service_chat_with_usage(
+    request: &ProviderServiceChatRequest,
+) -> Result<ProviderServiceChatResponse, String> {
     let base_url = local_runtime_base_url(request.runtime_node_endpoint.clone());
     ensure_local_runtime_ready(&base_url).await?;
 
@@ -1135,7 +1173,18 @@ async fn execute_local_provider_service_chat(
     }
 
     let content = extract_local_assistant_content(&payload)?;
-    Ok(sanitize_assistant_content("local", &content))
+    Ok(ProviderServiceChatResponse {
+        content: sanitize_assistant_content("local", &content),
+        usage: extract_local_usage(&request.provider_id, &request.model, &payload),
+    })
+}
+
+async fn execute_local_provider_service_chat(
+    request: &ProviderServiceChatRequest,
+) -> Result<String, String> {
+    execute_local_provider_service_chat_with_usage(request)
+        .await
+        .map(|response| response.content)
 }
 
 async fn execute_cloud_provider_service_chat_stream(
@@ -1391,6 +1440,60 @@ pub(crate) async fn execute_provider_service_chat(
     }
 }
 
+fn smoke_reply_preview(content: &str) -> String {
+    const MAX_CHARS: usize = 220;
+    let mut preview = content.trim().replace('\n', " ");
+    if preview.chars().count() > MAX_CHARS {
+        preview = preview.chars().take(MAX_CHARS).collect::<String>();
+        preview.push('…');
+    }
+    preview
+}
+
+pub(crate) async fn execute_provider_smoke_test(
+    app: &AppHandle,
+    request: ProviderServiceChatRequest,
+) -> Result<ProviderSmokeTestResult, String> {
+    ensure_runtime_kind_supported(
+        request.runtime_node_id.as_deref(),
+        request.runtime_node_kind.as_deref(),
+        request.auth_tier.as_deref(),
+    )?;
+    let adapter = resolve_provider_execution_adapter(
+        &request.provider_type,
+        request.runtime_node_kind.as_deref(),
+    )?;
+    let provider_id = request.provider_id.clone();
+    let model = request.model.clone();
+    let smoke_request = ProviderServiceChatRequest {
+        system_prompt: "You are running a ResonantOS provider smoke test. Reply with a short confirmation only.".to_string(),
+        messages: vec![ChatMessageInput {
+            role: "user".to_string(),
+            content: "Reply exactly: provider smoke ok".to_string(),
+        }],
+        reasoning_effort: "minimal".to_string(),
+        ..request
+    };
+    let response = match adapter {
+        ProviderExecutionAdapter::LocalOllama => {
+            execute_local_provider_service_chat_with_usage(&smoke_request).await?
+        }
+        ProviderExecutionAdapter::CloudOpenAiCompatible
+        | ProviderExecutionAdapter::CloudMiniMaxCompatible => {
+            execute_cloud_provider_service_chat_with_usage(app, &smoke_request).await?
+        }
+    };
+    Ok(ProviderSmokeTestResult {
+        provider_id,
+        model,
+        ok: true,
+        reply_preview: smoke_reply_preview(&response.content),
+        usage: response.usage,
+        checked_at: now_iso_string(),
+        summary: "Provider smoke test passed.".to_string(),
+    })
+}
+
 pub(crate) async fn execute_archive_ingest_probe(
     app: &AppHandle,
     request: ArchiveIngestProbeRequest,
@@ -1441,9 +1544,9 @@ mod tests {
     use super::{
         ensure_runtime_kind_supported, extract_assistant_content, extract_cloud_usage,
         extract_local_assistant_content, extract_local_usage, filter_think_stream_delta,
-        parse_ollama_model_names, resolve_local_runtime_model, resolve_provider_base_url,
-        resolve_provider_execution_adapter, sanitize_assistant_content, sanitize_stream_delta,
-        strip_think_blocks, ProviderExecutionAdapter,
+        http_probe_outcome, parse_ollama_model_names, resolve_local_runtime_model,
+        resolve_provider_base_url, resolve_provider_execution_adapter, sanitize_assistant_content,
+        sanitize_stream_delta, strip_think_blocks, ProviderExecutionAdapter,
     };
     use serde_json::json;
 
@@ -1476,6 +1579,22 @@ mod tests {
             .collect::<String>();
         assert_eq!(visible.trim(), "telemetry smoke ok");
         assert!(!inside_think);
+    }
+
+    #[test]
+    fn endpoint_probe_treats_http_errors_as_attention() {
+        assert_eq!(
+            http_probe_outcome("https://api.example.test/v1", reqwest::StatusCode::OK)
+                .expect("200 should be healthy"),
+            "reachable with HTTP 200 OK"
+        );
+        let error = http_probe_outcome(
+            "https://api.example.test/v1",
+            reqwest::StatusCode::NOT_FOUND,
+        )
+        .expect_err("404 should not be healthy");
+        assert!(error.contains("HTTP 404 Not Found"));
+        assert!(error.contains("not a healthy runtime probe"));
     }
 
     #[test]

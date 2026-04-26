@@ -223,6 +223,187 @@
   gap: 1rem;
 }
 
+.archive-source-registry-panel {
+  gap: 1rem;
+}
+
+.source-registry-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: start;
+  min-width: 0;
+  padding: 1rem;
+  border-radius: 20px;
+  border: 1px solid rgba(16, 185, 129, 0.18);
+  background:
+    radial-gradient(circle at top left, rgba(16, 185, 129, 0.1), transparent 24rem),
+    rgba(16, 185, 129, 0.035);
+}
+
+.source-registry-hero h3 {
+  margin: 0.25rem 0 0.45rem;
+  font-size: clamp(1.05rem, 1.6vw, 1.35rem);
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+}
+
+.source-registry-hero p {
+  margin: 0;
+  max-width: 72ch;
+  color: var(--text-secondary);
+}
+
+.source-registry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  min-width: min(100%, 18rem);
+}
+
+.source-registry-scanbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: end;
+  min-width: 0;
+}
+
+.source-registry-scanbar label {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.source-registry-scanbar select {
+  min-width: 0;
+  min-height: 44px;
+}
+
+.source-registry-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.registry-metric {
+  min-width: 0;
+  padding: 0.75rem;
+  border-radius: 16px;
+  border: 1px solid rgba(138, 128, 112, 0.14);
+  background: rgba(255, 248, 236, 0.035);
+}
+
+.registry-metric.warning {
+  border-color: rgba(245, 158, 11, 0.24);
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.registry-metric span {
+  display: block;
+  color: var(--text-muted);
+  font: 0.68rem/1 "JetBrains Mono", monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.registry-metric strong {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 1rem;
+}
+
+.registry-metric p {
+  margin: 0.25rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.source-registry-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+.source-registry-section {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.9rem;
+  border-radius: 18px;
+  border: 1px solid rgba(138, 128, 112, 0.14);
+  background: rgba(9, 11, 12, 0.18);
+}
+
+.source-registry-section-head strong {
+  display: block;
+  margin-top: 0.22rem;
+  font-size: 0.95rem;
+}
+
+.source-root-list,
+.imported-library-list {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.source-root-card,
+.imported-library-card {
+  min-width: 0;
+  padding: 0.78rem;
+  border-radius: 15px;
+  border: 1px solid rgba(138, 128, 112, 0.14);
+  background: rgba(255, 248, 236, 0.03);
+}
+
+.source-root-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: start;
+}
+
+.source-root-card strong,
+.imported-library-card strong {
+  display: block;
+  font-size: 0.9rem;
+}
+
+.source-root-card p,
+.imported-library-card p {
+  margin: 0.28rem 0 0;
+  color: var(--text-secondary);
+  font: 0.72rem/1.45 "JetBrains Mono", monospace;
+  overflow-wrap: anywhere;
+}
+
+.source-root-actions {
+  display: grid;
+  justify-items: end;
+  gap: 0.5rem;
+}
+
+.imported-library-card {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.imported-library-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: start;
+  min-width: 0;
+}
+
 .library-importer-intro {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.85fr);
@@ -895,4 +1076,3 @@
   min-height: 44px;
   min-width: 44px;
 }
-

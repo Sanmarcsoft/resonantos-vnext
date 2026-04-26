@@ -103,7 +103,7 @@ export const updateConversationMessage = (
 
 export const createStrategistThread = (
   state: ResonantShellState,
-  input: { channelId: string; workspaceId: string; title?: string },
+  input: { channelId: string; workspaceId: string; title?: string; projectId?: string },
 ): ResonantShellState => {
   const threadId = `thread-${Date.now()}`;
   const existingThreads = state.conversationThreads.filter((thread) => thread.owningAgentId === "strategist.core").length;
@@ -114,6 +114,7 @@ export const createStrategistThread = (
     workspaceId: input.workspaceId,
     channelId: input.channelId,
     summary: "Fresh Strategist workspace.",
+    projectId: input.projectId,
     messages: [],
   };
 

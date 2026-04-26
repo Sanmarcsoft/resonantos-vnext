@@ -1,9 +1,26 @@
+.app-zoom-viewport {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 14% 12%, rgba(16, 185, 129, 0.1), transparent 24rem),
+    radial-gradient(circle at 84% 8%, rgba(217, 119, 6, 0.1), transparent 22rem),
+    linear-gradient(160deg, #13110f 0%, #181411 42%, #0f0d0b 100%);
+}
+
+.app-zoom-stage {
+  width: calc(100vw / var(--app-zoom, 1));
+  height: calc(100vh / var(--app-zoom, 1));
+  transform: scale(var(--app-zoom, 1));
+  transform-origin: top left;
+}
+
 .shell {
   display: grid;
   grid-template-columns: 76px minmax(0, 1fr) var(--chat-rail-width, 460px);
   grid-template-rows: 38px minmax(0, 1fr);
-  height: 100vh;
-  width: 100vw;
+  height: 100%;
+  width: 100%;
   min-width: 0;
   overflow: hidden;
 }
@@ -423,8 +440,24 @@
   align-content: start;
   min-width: 0;
   padding: 0.95rem;
-  box-shadow: var(--shadow);
+  box-shadow: none;
   overflow: visible;
+}
+
+.overview-workspace .panel,
+.app-launcher-panel,
+.active-app-panel,
+.running-workspaces-panel {
+  border-color: transparent;
+  background: transparent;
+}
+
+.overview-workspace .workspace-snapshot,
+.overview-workspace .service-card,
+.overview-workspace .workspace-card,
+.overview-workspace .addon-card {
+  border-color: rgba(138, 128, 112, 0.12);
+  background: rgba(255, 248, 236, 0.025);
 }
 
 .panel-header {
@@ -955,3 +988,29 @@
   background: rgba(9, 11, 12, 0.22);
 }
 
+/* UX citation: docs/product/UX-001-resonantos-app-shell.md */
+.home-hero-panel,
+.app-launcher-panel,
+.active-app-panel,
+.running-workspaces-panel {
+  box-shadow: none;
+}
+
+.app-launcher-panel,
+.active-app-panel,
+.running-workspaces-panel {
+  border-color: transparent;
+  background: transparent;
+}
+
+.home-health-pill,
+.workspace-preview,
+.running-app-card {
+  border-color: rgba(138, 128, 112, 0.12);
+  background-color: rgba(255, 248, 236, 0.025);
+}
+
+.app-tile {
+  border-color: rgba(138, 128, 112, 0.1);
+  background: rgba(9, 11, 12, 0.18);
+}
