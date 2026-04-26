@@ -1,6 +1,6 @@
 # ResonantOS vNext Feature Backlog
 
-Last updated: 2026-04-25
+Last updated: 2026-04-26
 
 ## Core Shell
 
@@ -47,6 +47,13 @@ Last updated: 2026-04-25
   - Stop keeps a visible interrupted assistant message
   - stale provider replies are suppressed after interruption
   - host-side abort is requested when the selected route declares abort support
+- Reduced shell-owned chat workflow on 2026-04-26:
+  - moved chat thread branching, deletion, edit loading, pinning, compaction, agent switching, and interruption into `src/modules/chat/thread-controller.ts`
+  - removed the visible Regenerate action until a real regeneration controller exists
+- Split the global stylesheet on 2026-04-26:
+  - `src/styles.css` is now an ordered import manifest
+  - shell/shared rules live under `src/styles/`
+  - module-specific rules now live next to Chat, Archive, Recovery, Delegation, and Settings modules
 - Added first streaming capability policy:
   - provider execution adapters now declare streaming and abort support
   - chat only uses streaming when the selected route supports it
@@ -54,6 +61,7 @@ Last updated: 2026-04-25
 - Desktop-safe audio dictate implementation.
 - Attachment pipeline beyond text embedding and metadata fallback.
 - Richer thread management for multiple Strategist instances.
+- Add real Regenerate behavior before re-enabling the assistant-message toolbar action.
 
 ## Context Memory
 
@@ -126,6 +134,11 @@ Last updated: 2026-04-25
   - deterministic system pages are generated under `Memory/AI_MEMORY/system`
   - source-hash manifest is generated under `Memory/AI_MEMORY/provenance/system-memory-manifest.json`
   - Strategist and Resonant Engineer chat prompts now load System Architecture Memory before normal user archive context
+- Started archive host modularization on 2026-04-26:
+  - extracted System Architecture Memory implementation into `src-tauri/src/archive_service/archive_system_memory.rs`
+  - extracted source folder scanning, source-watch indexing, and library import into `src-tauri/src/archive_service/archive_source_library.rs`
+  - extracted review artifact generation, approval decisions, and trusted wiki promotion into `src-tauri/src/archive_service/archive_review.rs`
+  - kept Tauri command behavior unchanged while reducing the main archive service surface
 - Continue Library Importer:
   - add user confirmation for move-on-import before files are moved
   - upgrade the JSONL source-version ledger into local Git-style source history where appropriate
@@ -134,6 +147,10 @@ Last updated: 2026-04-25
 - Add optional background folder watching on top of the deterministic source scan command.
 - Scoped add-on archive read/write flow.
 - Replace append-only provenance merge with deeper section-level semantic merge logic.
+- Continue archive host modularization:
+  - completed first split pass for System Architecture Memory, source library/imports, Audio2TOL/TOL bundles, and review/promotion
+  - split runtime/config resolution into an archive runtime module
+  - split trusted wiki promotion further if promotion logic outgrows the review module
 
 ## Add-on Platform
 

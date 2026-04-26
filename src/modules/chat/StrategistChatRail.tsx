@@ -15,7 +15,6 @@ import {
   MoreIcon,
   PinIcon,
   PlusIcon,
-  RegenerateIcon,
   SendIcon,
   StatsIcon,
   StopIcon,
@@ -331,9 +330,6 @@ export function StrategistChatRail(props: StrategistChatRailProps) {
                     onClick={() => props.onSaveMessageToArchive(message)}
                   >
                     <ArchiveIcon />
-                  </button>
-                  <button type="button" className="message-action-button" aria-label="Regenerate message" title="Regenerate message: pending regeneration controller wiring.">
-                    <RegenerateIcon />
                   </button>
                   {message.providerUsage?.source === "local-runtime" ? (
                     <button

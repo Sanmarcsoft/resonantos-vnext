@@ -1,6 +1,6 @@
 # Module Map
 
-Last updated: 2026-04-25
+Last updated: 2026-04-26
 
 ## Intent
 
@@ -42,16 +42,33 @@ This map defines which folder owns which feature area so contributors do not kee
 
 - `src-tauri/src/archive_service.rs`
   - Living Archive runtime resolution from `ARCHIVE_CONFIG.json` + `VAULT_MAP.json`
-  - host-owned System Architecture Memory status and refresh
   - SQLite-backed archive stats and recent activity
   - archive search
   - guarded archive document reads
   - intake artifact writes
   - ingest request queue writes
   - review queue reads
+
+- `src-tauri/src/archive_service/archive_system_memory.rs`
+  - host-owned System Architecture Memory source collection
+  - deterministic system memory page rendering
+  - system memory manifest status/staleness checks
+
+- `src-tauri/src/archive_service/archive_source_library.rs`
+  - source folder scan and watch-index handling
+  - managed library imports into Human Knowledge, External Knowledge, AI Memory, or Mixed Library
+  - imported-library manifests and classification-review artifacts
+
+- `src-tauri/src/archive_service/archive_tol_bundles.rs`
+  - Audio2TOL/TOL session discovery
+  - raw audio, transcript, analysis, and processing-metadata bundle construction
+  - add-on-facing TOL intake queueing without trusted wiki writes
+
+- `src-tauri/src/archive_service/archive_review.rs`
   - Strategist-owned ingest-review artifact generation for queued requests
   - archive approval-tier evaluation and persisted review decisions
   - approved review-artifact promotion into trusted wiki pages with backups
+  - trusted wiki page rendering, backups, and SQLite index updates
 
 - `src-tauri/src/recovery_service.rs`
   - Engineer recovery turn loop
@@ -64,12 +81,25 @@ This map defines which folder owns which feature area so contributors do not kee
   - message rendering
   - dictation support
   - chat execution controller
+  - chat thread mutation controller for branching, deleting, editing, pinning, compaction, agent switching, and interruption
   - explicit Augmentor-to-Engineer delegation workspace creation and start bridge
   - planned context budget and compaction UI from `docs/architecture/ADR-016-context-memory-compaction.md`
   - scoped Living Archive context retrieval for Strategist turns
   - chat-to-archive intake capture controller
   - composer attachment and dictation controller
   - chat-local types, icons, and utilities
+
+- `src/modules/chat/*.css`
+  - chat message, composer, and right-rail styling
+
+- `src/modules/archive/archive.css`
+  - Living Archive workspace, review, search, reader, and import styling
+
+- `src/modules/recovery/recovery.css`
+  - emergency recovery dashboard and recovery-mode styling
+
+- `src/styles/`
+  - global variables/reset, shell chrome, shared workspace cards, and responsive cascade rules
 
 - `src/modules/delegation/`
   - Delegation Monitor center workspace
