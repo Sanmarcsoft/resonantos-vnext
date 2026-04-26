@@ -452,6 +452,44 @@ pub(crate) struct ArchiveLibraryClassificationReview {
     pub(crate) manifest_path: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveLibraryReorganisationPlanRequest {
+    pub(crate) classification_manifest_path: String,
+    pub(crate) actor_id: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveLibraryReorganisationMove {
+    pub(crate) source_id: String,
+    pub(crate) title: String,
+    pub(crate) proposed_target: String,
+    pub(crate) source_path: String,
+    pub(crate) destination_path: Option<String>,
+    pub(crate) action: String,
+    pub(crate) confidence: String,
+    pub(crate) reason: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveLibraryReorganisationPlan {
+    pub(crate) planned_at: String,
+    pub(crate) actor_id: String,
+    pub(crate) library_id: String,
+    pub(crate) library_name: String,
+    pub(crate) plan_path: String,
+    pub(crate) rollback_plan_path: String,
+    pub(crate) audit_log_path: String,
+    pub(crate) requires_approval: bool,
+    pub(crate) structural_changes_allowed: bool,
+    pub(crate) moves_planned: usize,
+    pub(crate) tag_only_count: usize,
+    pub(crate) blocked_count: usize,
+    pub(crate) entries: Vec<ArchiveLibraryReorganisationMove>,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ArchiveSystemMemorySource {
@@ -656,6 +694,7 @@ use archive_source_library::{
 pub(crate) use archive_source_library::{
     import_archive_library, list_imported_archive_libraries,
     read_archive_library_classification_review, scan_archive_source_folders,
+    write_archive_library_reorganisation_plan,
 };
 
 fn source_hash(path: &Path) -> Result<String, String> {
