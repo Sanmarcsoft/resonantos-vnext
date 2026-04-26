@@ -20,15 +20,16 @@ use crate::archive_service::{
     queue_archive_ingest_request, read_archive_document,
     read_archive_library_classification_review, refresh_archive_system_memory,
     scan_archive_source_folders, search_archive, write_archive_intake_artifact,
+    write_archive_library_reorganisation_plan,
     ArchiveDocumentPayload, ArchiveImportedLibrarySummary, ArchiveIngestRequestRecord,
     ArchiveIngestRequestResult, ArchiveIntakeWriteRequest, ArchiveIntakeWriteResult,
     ArchiveLibraryClassificationReview, ArchiveLibraryClassificationReviewRequest,
-    ArchiveLibraryImportRequest, ArchiveLibraryImportResult, ArchiveProcessIngestRequest,
+    ArchiveLibraryImportRequest, ArchiveLibraryImportResult, ArchiveLibraryReorganisationPlan,
+    ArchiveLibraryReorganisationPlanRequest, ArchiveProcessIngestRequest,
     ArchiveProcessIngestResult, ArchivePromoteReviewArtifactRequest,
     ArchivePromoteReviewArtifactResult, ArchiveQueuedIngestRequest, ArchiveReadDocumentRequest,
     ArchiveReviewArtifact, ArchiveReviewDecisionRequest, ArchiveReviewDecisionResult,
     ArchiveRuntimeStatus, ArchiveSearchRequest, ArchiveSearchResult,
-    ArchiveSourceFolderScanRequest, ArchiveSourceFolderScanResult,
     ArchiveSystemMemoryRefreshResult, ArchiveSystemMemoryStatus, ArchiveTolBundleBuildRequest,
     ArchiveTolBundleBuildResult, ArchiveTolBundleCandidate,
 };
@@ -211,6 +212,14 @@ fn archive_library_classification_review(
     request: ArchiveLibraryClassificationReviewRequest,
 ) -> Result<ArchiveLibraryClassificationReview, String> {
     read_archive_library_classification_review(&app, request)
+}
+
+#[tauri::command]
+fn archive_library_reorganisation_plan(
+    app: AppHandle,
+    request: ArchiveLibraryReorganisationPlanRequest,
+) -> Result<ArchiveLibraryReorganisationPlan, String> {
+    write_archive_library_reorganisation_plan(&app, request)
 }
 
 #[tauri::command]
@@ -510,6 +519,7 @@ pub fn run() {
             archive_import_library,
             archive_imported_libraries,
             archive_library_classification_review,
+            archive_library_reorganisation_plan,
             archive_system_memory,
             archive_refresh_system_memory,
             archive_search,

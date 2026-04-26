@@ -2,7 +2,8 @@
 // Intent citation: docs/architecture/ADR-011-living-archive-host-service.md
 
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection};
@@ -14,9 +15,11 @@ use super::{
     system_time_label, unix_timestamp, ArchiveClassificationProposal,
     ArchiveImportedLibrarySummary, ArchiveLibraryClassificationReview,
     ArchiveLibraryClassificationReviewRequest, ArchiveLibraryImportRequest,
-    ArchiveLibraryImportResult, ArchiveLibraryImportSourceRecord, ArchiveRuntime,
-    ArchiveSourceFolderScanRequest, ArchiveSourceFolderScanResult, ArchiveSourceWatchIndexRecord,
-    ArchiveSourceWatchRecord, VaultMappingFile,
+    ArchiveLibraryImportResult, ArchiveLibraryImportSourceRecord,
+    ArchiveLibraryReorganisationMove, ArchiveLibraryReorganisationPlan,
+    ArchiveLibraryReorganisationPlanRequest, ArchiveRuntime, ArchiveSourceFolderScanRequest,
+    ArchiveSourceFolderScanResult, ArchiveSourceWatchIndexRecord, ArchiveSourceWatchRecord,
+    VaultMappingFile,
 };
 
 fn source_watch_roots(runtime: &ArchiveRuntime) -> Vec<&VaultMappingFile> {
@@ -982,5 +985,177 @@ pub(crate) fn read_archive_library_classification_review(
             .unwrap_or(0) as usize,
         proposals,
         manifest_path: manifest_path.display().to_string(),
+    })
+}
+
+fn relative_canonical_source_path(canonical_root: &str, canonical_path: &str) -> PathBuf {
+    let root = PathBuf::from(canonical_root);
+    let path = PathBuf::from(canonical_path);
+    path.strip_prefix(&root)
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            path.file_name()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("unresolved-source"))
+        })
+}
+
+fn reorganisation_destination(
+    runtime: &ArchiveRuntime,
+    review: &ArchiveLibraryClassificationReview,
+    proposal: &ArchiveClassificationProposal,
+) -> Option<PathBuf> {
+    let domain = match proposal.proposed_target.as_str() {
+        "human-knowledge" => "human-knowledge",
+        "external-knowledge" => "external-knowledge",
+        _ => return None,
+    };
+    Some(
+        runtime
+            .memory_domain_root(domain)
+            .join("sources")
+            .join(&review.library_id)
+            .join(relative_canonical_source_path(
+                &review.canonical_root,
+                &proposal.canonical_path,
+            )),
+    )
+}
+
+pub(crate) fn write_archive_library_reorganisation_plan(
+    app: &AppHandle,
+    request: ArchiveLibraryReorganisationPlanRequest,
+) -> Result<ArchiveLibraryReorganisationPlan, String> {
+    let runtime = ArchiveRuntime::resolve(app)?;
+    let review = read_archive_library_classification_review(
+        app,
+        ArchiveLibraryClassificationReviewRequest {
+            classification_manifest_path: request.classification_manifest_path,
+        },
+    )?;
+    let planned_at = unix_timestamp();
+    let metadata_root = PathBuf::from(&review.manifest_path)
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| runtime.memory_domain_root("mixed-library").join("metadata"));
+    fs::create_dir_all(&metadata_root)
+        .map_err(|error| format!("Failed to create reorganisation metadata root: {error}"))?;
+
+    let entries = review
+        .proposals
+        .iter()
+        .map(|proposal| {
+            let destination = reorganisation_destination(&runtime, &review, proposal);
+            ArchiveLibraryReorganisationMove {
+                source_id: proposal.source_id.clone(),
+                title: proposal.title.clone(),
+                proposed_target: proposal.proposed_target.clone(),
+                source_path: proposal.canonical_path.clone(),
+                destination_path: destination.map(|path| path.display().to_string()),
+                action: if proposal.proposed_target == "unclear" {
+                    "tag-only-review".to_string()
+                } else {
+                    "propose-move-after-approval".to_string()
+                },
+                confidence: proposal.confidence.clone(),
+                reason: proposal.reason.clone(),
+            }
+        })
+        .collect::<Vec<_>>();
+    let moves_planned = entries
+        .iter()
+        .filter(|entry| entry.action == "propose-move-after-approval")
+        .count();
+    let tag_only_count = entries
+        .iter()
+        .filter(|entry| entry.action == "tag-only-review")
+        .count();
+    let blocked_count = review.remaining_for_full_review + tag_only_count;
+    let slug = slugify(&review.library_name);
+    let plan_path = metadata_root.join(format!("{slug}-reorganisation-plan.json"));
+    let rollback_plan_path = metadata_root.join(format!("{slug}-rollback-plan.json"));
+    let audit_log_path = metadata_root.join(format!("{slug}-reorganisation-audit.jsonl"));
+    let plan_payload = json!({
+        "schemaVersion": 1,
+        "artifactType": "library-reorganisation-plan",
+        "plannedAt": planned_at,
+        "actorId": request.actor_id,
+        "libraryId": review.library_id,
+        "libraryName": review.library_name,
+        "classificationManifestPath": review.manifest_path,
+        "requiresApproval": true,
+        "structuralChangesAllowed": false,
+        "executionPolicy": {
+            "filesMovedByThisCommand": 0,
+            "futureMoveRequiresExplicitHumanApproval": true,
+            "unclearSourcesRemainInMixedLibrary": true
+        },
+        "summary": {
+            "movesPlanned": moves_planned,
+            "tagOnlyCount": tag_only_count,
+            "blockedCount": blocked_count
+        },
+        "entries": entries.clone(),
+    });
+    fs::write(
+        &plan_path,
+        serde_json::to_string_pretty(&plan_payload)
+            .map_err(|error| format!("Failed to encode reorganisation plan: {error}"))?,
+    )
+    .map_err(|error| format!("Failed to write reorganisation plan: {error}"))?;
+
+    let rollback_payload = json!({
+        "schemaVersion": 1,
+        "artifactType": "library-reorganisation-rollback-plan",
+        "plannedAt": planned_at,
+        "libraryId": review.library_id,
+        "libraryName": review.library_name,
+        "sourcePlanPath": plan_path.display().to_string(),
+        "rollbackPolicy": {
+            "appliesOnlyAfterFutureMoveExecution": true,
+            "filesMovedByThisCommand": 0,
+            "restoreFromSourcePath": true
+        },
+        "entries": entries.clone(),
+    });
+    fs::write(
+        &rollback_plan_path,
+        serde_json::to_string_pretty(&rollback_payload)
+            .map_err(|error| format!("Failed to encode rollback plan: {error}"))?,
+    )
+    .map_err(|error| format!("Failed to write rollback plan: {error}"))?;
+
+    let audit_line = json!({
+        "event": "library-reorganisation-plan-created",
+        "plannedAt": planned_at,
+        "actorId": request.actor_id,
+        "libraryId": review.library_id,
+        "planPath": plan_path.display().to_string(),
+        "rollbackPlanPath": rollback_plan_path.display().to_string(),
+        "filesMoved": 0,
+        "requiresApproval": true
+    });
+    let mut audit = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&audit_log_path)
+        .map_err(|error| format!("Failed to open reorganisation audit log: {error}"))?;
+    writeln!(audit, "{audit_line}")
+        .map_err(|error| format!("Failed to append reorganisation audit log: {error}"))?;
+
+    Ok(ArchiveLibraryReorganisationPlan {
+        planned_at,
+        actor_id: request.actor_id,
+        library_id: review.library_id,
+        library_name: review.library_name,
+        plan_path: plan_path.display().to_string(),
+        rollback_plan_path: rollback_plan_path.display().to_string(),
+        audit_log_path: audit_log_path.display().to_string(),
+        requires_approval: true,
+        structural_changes_allowed: false,
+        moves_planned,
+        tag_only_count,
+        blocked_count,
+        entries,
     })
 }
