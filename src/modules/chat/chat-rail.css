@@ -648,6 +648,241 @@
   background: rgba(251, 191, 36, 0.08);
 }
 
+.context-memory-panel {
+  display: grid;
+  gap: 0.58rem;
+  max-height: min(54vh, 520px);
+  overflow: auto;
+  padding: 0.72rem;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(16, 185, 129, 0.12), transparent 34%),
+    rgba(255, 248, 236, 0.035);
+  box-shadow: inset 0 0 0 1px rgba(255, 248, 236, 0.055);
+}
+
+.context-memory-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.context-memory-head div {
+  display: flex;
+  align-items: baseline;
+  gap: 0.44rem;
+  min-width: 0;
+}
+
+.context-memory-head span,
+.context-memory-foot span,
+.context-memory-meter-labels span {
+  color: rgba(138, 128, 112, 0.94);
+  font-size: 0.68rem;
+}
+
+.context-memory-head strong {
+  color: rgba(187, 247, 208, 0.94);
+  font-size: 0.9rem;
+}
+
+.context-memory-head button {
+  min-height: 30px;
+  padding: 0.28rem 0.62rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.14);
+  color: rgba(187, 247, 208, 0.95);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.context-memory-actions {
+  display: flex;
+  gap: 0.34rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.context-memory-head button:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.context-memory-location {
+  margin: 0;
+  color: rgba(196, 186, 168, 0.74);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.context-memory-meter {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.context-memory-meter-track {
+  position: relative;
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 248, 236, 0.08);
+}
+
+.context-memory-meter-used {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.82), rgba(251, 191, 36, 0.72));
+}
+
+.context-memory-meter-threshold {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  transform: translateX(-1px);
+  background: rgba(251, 191, 36, 0.7);
+}
+
+.context-memory-meter-threshold.hard {
+  background: rgba(248, 113, 113, 0.9);
+}
+
+.context-memory-meter-labels,
+.context-memory-foot {
+  display: flex;
+  gap: 0.48rem;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.context-memory-flow {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.24rem;
+}
+
+.context-memory-flow span {
+  min-height: 38px;
+  display: grid;
+  place-items: center;
+  padding: 0.28rem;
+  border-radius: 12px;
+  background: rgba(255, 248, 236, 0.04);
+  color: rgba(138, 128, 112, 0.92);
+  font-size: 0.62rem;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.context-memory-flow span.active {
+  background: rgba(16, 185, 129, 0.1);
+  color: rgba(187, 247, 208, 0.9);
+}
+
+.context-memory-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.34rem;
+}
+
+.context-memory-card {
+  display: grid;
+  gap: 0.16rem;
+  min-width: 0;
+  padding: 0.48rem;
+  border-radius: 12px;
+  background: rgba(14, 12, 10, 0.38);
+}
+
+.context-memory-card span {
+  color: rgba(138, 128, 112, 0.95);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.context-memory-card strong {
+  color: rgba(232, 223, 207, 0.94);
+  font-size: 0.68rem;
+  line-height: 1.28;
+  overflow-wrap: anywhere;
+}
+
+.context-memory-card.primary {
+  background: rgba(16, 185, 129, 0.075);
+}
+
+.context-memory-foot {
+  justify-content: flex-start;
+  line-height: 1.32;
+}
+
+.context-memory-foot strong {
+  color: #f5d48d;
+  font-size: 0.68rem;
+}
+
+.context-memory-editor {
+  display: grid;
+  gap: 0.46rem;
+  padding: 0.58rem;
+  border-radius: 14px;
+  background: rgba(14, 12, 10, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(255, 248, 236, 0.055);
+}
+
+.context-memory-editor label {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.context-memory-editor label span {
+  color: rgba(138, 128, 112, 0.96);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.context-memory-editor textarea {
+  width: 100%;
+  min-height: 42px;
+  resize: vertical;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 248, 236, 0.045);
+  color: rgba(232, 223, 207, 0.96);
+  padding: 0.46rem;
+  font: inherit;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.context-memory-editor-actions {
+  display: flex;
+  gap: 0.42rem;
+  justify-content: flex-end;
+}
+
+.context-memory-editor-actions button {
+  min-height: 30px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.28rem 0.62rem;
+  background: rgba(255, 248, 236, 0.075);
+  color: rgba(232, 223, 207, 0.92);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.context-memory-editor-actions button:first-child {
+  background: rgba(16, 185, 129, 0.16);
+  color: rgba(187, 247, 208, 0.96);
+}
+
 .chat-send-button {
   display: inline-flex;
   align-items: center;

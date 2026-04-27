@@ -1572,6 +1572,42 @@ mod tests {
     }
 
     #[test]
+    fn rejects_move_import_before_audited_execution_exists() {
+        let root = std::env::temp_dir().join(format!(
+            "resonantos-library-move-reject-test-{}-{}",
+            std::process::id(),
+            super::unix_timestamp().replace(':', "-")
+        ));
+        let source_root = root.join("source-folder");
+        let source_file = source_root.join("identity.md");
+        fs::create_dir_all(&source_root).expect("test source folder should be writable");
+        fs::write(&source_file, "# Identity\nHuman-authored source.")
+            .expect("test source file should be writable");
+        let runtime = test_archive_runtime(&root);
+
+        let result = super::import_archive_library_with_runtime(
+            &runtime,
+            super::ArchiveLibraryImportRequest {
+                source_path: source_root.display().to_string(),
+                domain: "human-knowledge".to_string(),
+                import_mode: "move".to_string(),
+                library_name: Some("Identity Vault".to_string()),
+                actor_id: "strategist.core".to_string(),
+            },
+        );
+
+        assert!(result.is_err());
+        let error = result.err().expect("move import should be rejected");
+        assert!(error.contains("Move-on-import is disabled"));
+        assert!(
+            source_file.exists(),
+            "rejected move import must preserve the original source file"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn mixed_library_import_writes_classification_review_artifact() {
         let root = std::env::temp_dir().join(format!(
             "resonantos-mixed-library-import-test-{}-{}",

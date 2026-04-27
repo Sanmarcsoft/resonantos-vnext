@@ -165,6 +165,8 @@ Rules:
 - classification labels must include Human Knowledge, External Knowledge, and unclear/needs human decision
 - reorganization should be paired with metadata tagging and wikilinking, not only folder moves
 - the first classification review may approve intent only; actual file moves require a separate host-mediated command with audit log and rollback plan
+- `move` import mode is disabled until a dedicated execution flow exists; copy-on-import remains the default safe path
+- v1 reorganisation plans are preview-only artifacts and are not eligible for execution until all imported files have been reviewed or explicitly paged through by the human
 
 The UI must explain why this matters:
 

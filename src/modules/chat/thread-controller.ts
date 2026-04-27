@@ -2,7 +2,13 @@
 // UX citation: docs/architecture/ADR-004-chat-rail.md
 
 import type { MutableRefObject } from "react";
-import type { ChatRunPhase, ConversationMessage, ConversationThread, ResonantShellState } from "../../core/contracts";
+import type {
+  ChatRunPhase,
+  ContextMemoryState,
+  ConversationMessage,
+  ConversationThread,
+  ResonantShellState,
+} from "../../core/contracts";
 import {
   appendTranscriptEvent,
   branchTranscriptPayload,
@@ -18,6 +24,16 @@ type RuntimeStateUpdater = (updater: (current: ResonantShellState) => ResonantSh
 type SetComposer = (value: string) => void;
 type SetAttachments = (value: ComposerAttachment[]) => void;
 type SetNotice = (value: string | null) => void;
+
+export type CompactMemoryPatch = {
+  compactedAt: string;
+  userIntent: Pick<ContextMemoryState["userIntent"], "goal" | "why" | "successCriteria" | "prioritySignals">;
+  workingSummary: string;
+  facts: string[];
+  decisions: string[];
+  preferences: string[];
+  openTasks: string[];
+};
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -563,6 +579,107 @@ export function compactActiveChatContextAction({
       ? `Context compacted. Preserved ${preservedSummary}, plus user intent and rationale.`
       : "Context compaction did not run because this thread was not found.",
   );
+}
+
+export function updateCompactMemoryAction({
+  activeThread,
+  patch,
+  updateRuntimeState,
+  setChatNotice,
+}: {
+  activeThread: ConversationThread | null;
+  patch: CompactMemoryPatch;
+  updateRuntimeState: RuntimeStateUpdater;
+  setChatNotice: SetNotice;
+}): void {
+  if (!activeThread) {
+    setChatNotice("No active chat is available for memory editing.");
+    return;
+  }
+
+  let updated = false;
+  updateRuntimeState((draft) => {
+    const memoryIndex = [...(draft.contextMemoryStates ?? [])]
+      .map((state, index) => ({ state, index }))
+      .reverse()
+      .find(({ state }) => state.threadId === activeThread.id && state.compactedAt === patch.compactedAt)?.index;
+    if (typeof memoryIndex !== "number") {
+      return draft;
+    }
+
+    const current = draft.contextMemoryStates[memoryIndex];
+    const firstSourceId = current.userIntent.sourceMessageIds[0] ?? current.sourceRange.fromMessageId;
+    const mapStatements = <T extends { sourceMessageIds: string[] }>(
+      values: string[],
+      existing: T[],
+      create: (statement: string, index: number, sourceMessageIds: string[]) => T,
+    ): T[] =>
+      values
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .map((value, index) => ({
+          ...(existing[index] ?? create(value, index, [firstSourceId])),
+          ...create(value, index, existing[index]?.sourceMessageIds ?? [firstSourceId]),
+        }));
+
+    draft.contextMemoryStates[memoryIndex] = {
+      ...current,
+      userIntent: {
+        ...current.userIntent,
+        goal: patch.userIntent.goal.trim() || current.userIntent.goal,
+        why: patch.userIntent.why.trim() || current.userIntent.why,
+        successCriteria: patch.userIntent.successCriteria.map((value) => value.trim()).filter(Boolean),
+        prioritySignals: patch.userIntent.prioritySignals.map((value) => value.trim()).filter(Boolean),
+      },
+      workingSummary: patch.workingSummary.trim() || current.workingSummary,
+      facts: mapStatements(patch.facts, current.facts, (statement, index, sourceMessageIds) => ({
+        factId: current.facts[index]?.factId ?? `fact-user-edit-${index + 1}`,
+        statement,
+        scope: current.facts[index]?.scope ?? "project",
+        confidence: "verified",
+        observedAt: current.facts[index]?.observedAt ?? nowIso(),
+        sourceMessageIds,
+      })),
+      decisions: mapStatements(patch.decisions, current.decisions, (decision, index, sourceMessageIds) => ({
+        decisionId: current.decisions[index]?.decisionId ?? `decision-user-edit-${index + 1}`,
+        title: decision.slice(0, 72) || `Decision ${index + 1}`,
+        decision,
+        reason: current.decisions[index]?.reason ?? "Corrected by the user in the context-memory review panel.",
+        scope: current.decisions[index]?.scope ?? "conversation",
+        status: current.decisions[index]?.status ?? "accepted",
+        sourceMessageIds,
+        relatedDocPaths: current.decisions[index]?.relatedDocPaths ?? [],
+      })),
+      preferences: mapStatements(patch.preferences, current.preferences, (statement, index, sourceMessageIds) => ({
+        preferenceId: current.preferences[index]?.preferenceId ?? `preference-user-edit-${index + 1}`,
+        statement,
+        appliesTo: current.preferences[index]?.appliesTo ?? "current ResonantOS workstream",
+        sourceMessageIds,
+      })),
+      openTasks: mapStatements(patch.openTasks, current.openTasks, (description, index, sourceMessageIds) => ({
+        taskId: current.openTasks[index]?.taskId ?? `task-user-edit-${index + 1}`,
+        owner: current.openTasks[index]?.owner ?? "agent",
+        status: current.openTasks[index]?.status ?? "open",
+        description,
+        blockingReason: current.openTasks[index]?.blockingReason,
+        verificationRequired: current.openTasks[index]?.verificationRequired ?? ["deterministic checks before completion"],
+        sourceMessageIds,
+      })),
+    };
+    updated = true;
+    return appendTranscriptEvent(draft, {
+      action: "context-memory-edited",
+      threadId: activeThread.id,
+      channelId: activeThread.channelId,
+      agentId: activeThread.owningAgentId,
+      payload: {
+        compactedAt: patch.compactedAt,
+        editedFields: ["intent", "summary", "facts", "decisions", "preferences", "tasks"],
+      },
+    });
+  });
+
+  setChatNotice(updated ? "Context memory updated. Future replies will use the corrected compact memory." : "No compact memory was found to update.");
 }
 
 export function selectChatAgentAction({

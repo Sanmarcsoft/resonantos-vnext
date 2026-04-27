@@ -148,6 +148,9 @@ export const contextUsageRatio = (budget: ContextBudget): number =>
 export const shouldAutoCompactContext = (budget: ContextBudget): boolean =>
   budget.usedInputTokens >= budget.compactionThreshold;
 
+export const shouldHardStopContext = (budget: ContextBudget): boolean =>
+  budget.usedInputTokens >= budget.hardStopThreshold;
+
 export const formatTokenCount = (value: number): string => {
   if (value >= 1000) {
     return `${(value / 1000).toFixed(1)}k`;
@@ -215,6 +218,14 @@ const sentenceFrom = (content: string): string =>
     .split(/(?<=[.!?])\s+/)[0]
     ?.slice(0, 240) ?? "";
 
+const sentencesFrom = (content: string): string[] =>
+  content
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.slice(0, 240))
+    .filter(Boolean);
+
 const sourceRangeFor = (messages: ConversationMessage[]): ContextMemoryState["sourceRange"] => ({
   fromMessageId: messages[0]?.id ?? "",
   toMessageId: messages.at(-1)?.id ?? "",
@@ -249,10 +260,11 @@ const successCriteriaFrom = (messages: ConversationMessage[]): string[] =>
 const artifactRefsFrom = (messages: ConversationMessage[]): ContextMemoryState["artifacts"] => {
   const refs: ContextMemoryState["artifacts"] = [];
   const pathPattern = /(?:\.{0,2}\/|\/Users\/|docs\/|src\/|src-tauri\/|public\/)[^\s),`]+/g;
+  const urlPattern = /https?:\/\/[^\s),`]+/g;
+  const commitPattern = /\b[0-9a-f]{7,40}\b/gi;
 
   for (const message of messages) {
-    const matches = message.content.match(pathPattern) ?? [];
-    for (const ref of matches) {
+    for (const ref of message.content.match(pathPattern) ?? []) {
       refs.push({
         artifactId: `artifact-${refs.length + 1}`,
         kind: ref.match(/\.(png|jpg|jpeg|gif|webp)$/i) ? "screenshot" : "file",
@@ -261,10 +273,65 @@ const artifactRefsFrom = (messages: ConversationMessage[]): ContextMemoryState["
         sourceMessageIds: [message.id],
       });
     }
+    for (const ref of message.content.match(urlPattern) ?? []) {
+      refs.push({
+        artifactId: `artifact-${refs.length + 1}`,
+        kind: "external-url",
+        label: ref,
+        ref,
+        sourceMessageIds: [message.id],
+      });
+    }
+    for (const ref of message.content.match(commitPattern) ?? []) {
+      refs.push({
+        artifactId: `artifact-${refs.length + 1}`,
+        kind: "commit",
+        label: ref.slice(0, 12),
+        ref,
+        sourceMessageIds: [message.id],
+      });
+    }
   }
 
   return refs;
 };
+
+const factScopeFor = (content: string): ContextMemoryState["facts"][number]["scope"] => {
+  if (/\b(i am|my|for me|in my case|i have|i use)\b/i.test(content)) {
+    return "user";
+  }
+  if (/\b(resonantos|augmentor|engineer|living archive|openclaw|hermes|obsidian|audio2tol)\b/i.test(content)) {
+    return "system";
+  }
+  if (/\b(research|external|company|client|meeting|document)\b/i.test(content)) {
+    return "external";
+  }
+  return "project";
+};
+
+const factsFrom = (messages: ConversationMessage[]): ContextMemoryState["facts"] =>
+  messages
+    .filter((message) => factPattern.test(message.content))
+    .slice(-12)
+    .flatMap((message) =>
+      sentencesFrom(message.content)
+        .filter((sentence) => factPattern.test(sentence))
+        .map((sentence) => ({
+          statement: sentence,
+          scope: factScopeFor(sentence),
+          confidence: message.role === "user" ? ("verified" as const) : ("unverified" as const),
+          observedAt: message.createdAt,
+          sourceMessageIds: [message.id],
+        })),
+    )
+    .slice(-12)
+    .map((fact, index) => ({
+      factId: `fact-${index + 1}`,
+      ...fact,
+    }))
+    .filter((fact) => fact.statement.length > 0);
+
+const factPattern = /\b(is|are|has|have|uses|runs|contains|supports|currently|default|available|installed|configured)\b/i;
 
 const decisionsFrom = (messages: ConversationMessage[]): ContextMemoryState["decisions"] =>
   messages
@@ -296,14 +363,22 @@ const tasksFrom = (messages: ConversationMessage[]): ContextMemoryState["openTas
   messages
     .filter((message) => /\b(next|implement|fix|add|create|test|validate|need to|go ahead)\b/i.test(message.content))
     .slice(-10)
-    .map((message, index) => ({
-      taskId: `task-${index + 1}`,
-      owner: message.role === "user" ? "agent" : "unknown",
-      status: "open" as const,
-      description: sentenceFrom(message.content),
-      verificationRequired: ["deterministic checks before completion"],
-      sourceMessageIds: [message.id],
-    }));
+    .map((message, index) => {
+      const status = /\b(done|implemented|fixed|passed|validated|completed)\b/i.test(message.content)
+        ? ("done" as const)
+        : /\b(blocked|cannot|can't|failed|not available)\b/i.test(message.content)
+          ? ("blocked" as const)
+          : ("open" as const);
+      return {
+        taskId: `task-${index + 1}`,
+        owner: message.role === "user" ? "agent" : "unknown",
+        status,
+        description: sentenceFrom(message.content),
+        blockingReason: status === "blocked" ? "Extracted from blocked/failed language during deterministic compaction." : undefined,
+        verificationRequired: status === "done" ? [] : ["deterministic checks before completion"],
+        sourceMessageIds: [message.id],
+      };
+    });
 
 export const buildDeterministicCompactState = (
   thread: ConversationThread,
@@ -335,7 +410,7 @@ export const buildDeterministicCompactState = (
       .filter(Boolean)
       .join(" "),
     decisions: decisionsFrom(messages),
-    facts: [],
+    facts: factsFrom(messages),
     preferences: preferencesFrom(userMessages),
     openTasks: tasksFrom(messages),
     artifacts: artifactRefsFrom(messages),
@@ -462,8 +537,9 @@ export const formatCompactStateForPrompt = (compactState: ContextMemoryState | n
     `- Priority signals: ${compactState.userIntent.prioritySignals.join("; ") || "none captured"}`,
     `- Working summary: ${compactState.workingSummary}`,
     `- Decisions: ${compactState.decisions.map((decision) => decision.decision).join("; ") || "none captured"}`,
+    `- Facts: ${compactState.facts.map((fact) => `${fact.statement} [${fact.scope}, ${fact.confidence}]`).join("; ") || "none captured"}`,
     `- Preferences: ${compactState.preferences.map((preference) => preference.statement).join("; ") || "none captured"}`,
-    `- Open tasks: ${compactState.openTasks.map((task) => task.description).join("; ") || "none captured"}`,
+    `- Tasks: ${compactState.openTasks.map((task) => `${task.description} [${task.status}]`).join("; ") || "none captured"}`,
     `- Artifacts: ${compactState.artifacts.map((artifact) => artifact.ref).join("; ") || "none captured"}`,
     `- Risks: ${compactState.risks.map((risk) => risk.description).join("; ") || "none captured"}`,
     `- Unresolved questions: ${compactState.unresolvedQuestions.map((question) => question.question).join("; ") || "none captured"}`,

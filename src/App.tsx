@@ -85,6 +85,7 @@ import {
   stopChatGenerationAction,
   togglePinnedChatProjectAction,
   togglePinnedChatThreadAction,
+  updateCompactMemoryAction,
 } from "./modules/chat/thread-controller";
 import type { ComposerAttachment, ThinkingDepth } from "./modules/chat/types";
 import { Panel } from "./components/Panel";
@@ -416,9 +417,11 @@ export function App() {
     activeRuntimeNode,
     activeChatModel,
     strategistRecoveryActive,
+    contextBudget,
     contextUsageRatio,
     contextUsageLabel,
     contextUsageTitle,
+    latestCompactState,
     dictationAvailable,
   } = buildShellViewModel({
     state,
@@ -1088,6 +1091,8 @@ export function App() {
         contextUsageLabel={contextUsageLabel}
         contextUsageRatio={contextUsageRatio}
         contextUsageTitle={contextUsageTitle}
+        contextBudget={contextBudget}
+        compactState={latestCompactState}
         historyOpen={state.uiPreferences.chatHistoryOpen}
         activityLabel={agentActivityLabel}
         recoveryRuntimeStatus={
@@ -1214,6 +1219,14 @@ export function App() {
         onCompactThread={() =>
           compactActiveChatContextAction({
             activeThread,
+            updateRuntimeState,
+            setChatNotice,
+          })
+        }
+        onUpdateCompactMemory={(patch) =>
+          updateCompactMemoryAction({
+            activeThread,
+            patch,
             updateRuntimeState,
             setChatNotice,
           })

@@ -63,9 +63,11 @@ This map defines which folder owns which feature area so contributors do not kee
   - source folder scan and watch-index handling
   - managed library imports into Human Knowledge, External Knowledge, AI Memory, or Mixed Library
   - imported-library manifests and classification-review artifacts
+  - plan-only mixed-library reorganisation artifacts with rollback and audit paths
+  - explicit rejection of destructive move-on-import until audited execution exists
 
 - `src-tauri/src/archive_service/archive_tol_bundles.rs`
-  - Audio2TOL/TOL session discovery
+  - optional Audio2TOL add-on bridge for TOL session discovery
   - raw audio, transcript, analysis, and processing-metadata bundle construction
   - add-on-facing TOL intake queueing without trusted wiki writes
 
@@ -127,15 +129,22 @@ This map defines which folder owns which feature area so contributors do not kee
 - `src/modules/archive/`
   - archive trust surfaces
   - runtime status surface
-  - search and document read surface
+  - `ArchiveSearchPanel` trusted wiki/source search and source queueing surface
+  - `ArchiveSourceScanResults` mapped-source scan result and review queueing surface
+  - `ArchiveAudio2TolIntake` optional Audio2TOL add-on bridge surface; hidden unless `addon.audio2tol` is installed and enabled
+  - `ArchiveDocumentReader` guarded document read surface
+  - `ArchiveRecentActivity` archive activity feed
+  - `ArchiveDiagnostics` runtime paths, permission matrix, and ingest route probe surface
   - `ArchiveReviewDesk` touch-friendly ingest queue, review artifact, approval, and promotion workflow
+  - `ArchiveSourceRegistry` imported-library and mapped-source registry
+  - `ArchiveLibraryImporter` folder/vault import surface
+  - `ArchiveClassificationReviewPanel` host-owned classification and plan-only reorganisation surface
   - permission matrix
   - archive ingest probe controller
   - archive runtime/search/read/queue/approval controller
-  - Audio2TOL intake analysis reference: `docs/architecture/AUDIO2TOL_INTAKE_ANALYSIS.md`
+  - Audio2TOL intake analysis reference for the optional Audio2TOL add-on bridge: `docs/architecture/AUDIO2TOL_INTAKE_ANALYSIS.md`
   - memory domain architecture reference: `docs/architecture/ADR-013-living-archive-memory-domains.md`
   - system architecture memory reference: `docs/architecture/ADR-014-system-architecture-memory.md`
-  - Library Importer surface for folder/vault import into Mixed Library staging or managed Human/External Knowledge domains
 
 - `src/modules/addons/`
   - add-on catalog

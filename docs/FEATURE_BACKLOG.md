@@ -113,8 +113,8 @@ Last updated: 2026-04-26
   - upgraded the Archive workspace from policy-only to runtime + search + reader surfaces
   - split the Archive Review Desk into a module-owned touch-friendly workflow for queue processing, proposed-page review, approval, and trusted wiki promotion
   - documented the real Audio2TOL output shape and TOL bundle requirements in `AUDIO2TOL_INTAKE_ANALYSIS.md`
-  - added host-mediated Audio2TOL bundle detection and intake queuing for raw audio, transcript, protocol analysis, and processing metadata
-  - added a touch-friendly Audio2TOL bundle queue surface in the Archive workspace
+  - added an optional host-mediated Audio2TOL add-on bridge for raw audio, transcript, protocol analysis, and processing metadata bundles
+  - added a touch-friendly Audio2TOL bundle queue surface that appears only when `addon.audio2tol` is installed and enabled
   - added host-mediated source folder scanning with file fingerprinting and new/changed/unchanged detection for mapped raw and derived source roots
   - added Archive workspace controls for source folder scans, changed/new source review, and selected source queueing
 - Added architecture policy on 2026-04-23:
@@ -143,6 +143,11 @@ Last updated: 2026-04-26
   - frontend classification previews consume host-returned proposals instead of generating their own authority
   - imported libraries now write a JSONL source-version ledger next to the import manifest
   - archive host now exposes imported-library registry reads from persisted manifests
+- Hardened Mixed Library safety on 2026-04-26:
+  - disabled host-side `move` import mode until explicit confirmation, audit, and rollback execution exist
+  - removed duplicate frontend-only classification approval in favor of the host-owned classification review panel
+  - restricted classification-review reads to artifacts linked from imported-library manifests
+  - marked reorganisation plans as preview-only and not eligible for execution
 - Added System Architecture Memory foundation on 2026-04-25:
   - `ADR-014` defines host-owned ResonantOS architecture memory available before user knowledge intake
   - archive host now exposes `archive_system_memory` and `archive_refresh_system_memory`
@@ -156,7 +161,7 @@ Last updated: 2026-04-26
   - extracted review artifact generation, approval decisions, and trusted wiki promotion into `src-tauri/src/archive_service/archive_review.rs`
   - kept Tauri command behavior unchanged while reducing the main archive service surface
 - Continue Library Importer:
-  - add user confirmation for move-on-import before files are moved
+  - add a dedicated audited execution flow before move-on-import or source reorganisation can move files
   - upgrade the JSONL source-version ledger into local Git-style source history where appropriate
   - expose imported libraries as first-class cards with rescan/sync controls using the host registry
   - upgrade deterministic host-owned classification artifacts into Strategist-owned model review artifacts
@@ -164,7 +169,7 @@ Last updated: 2026-04-26
 - Scoped add-on archive read/write flow.
 - Replace append-only provenance merge with deeper section-level semantic merge logic.
 - Continue archive host modularization:
-  - completed first split pass for System Architecture Memory, source library/imports, Audio2TOL/TOL bundles, and review/promotion
+  - completed first split pass for System Architecture Memory, source library/imports, optional Audio2TOL add-on bundle bridging, and review/promotion
   - split runtime/config resolution into an archive runtime module
   - split trusted wiki promotion further if promotion logic outgrows the review module
 

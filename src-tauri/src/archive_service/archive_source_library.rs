@@ -466,6 +466,12 @@ pub(super) fn import_archive_library_with_runtime(
 ) -> Result<ArchiveLibraryImportResult, String> {
     let domain = normalize_memory_domain(&request.domain)?;
     let import_mode = normalize_import_mode(&request.import_mode)?;
+    if import_mode == "move" {
+        return Err(
+            "Move-on-import is disabled until ResonantOS has explicit human confirmation, audit, and rollback execution support."
+                .to_string(),
+        );
+    }
     let imported_at = unix_timestamp();
     let source_root = PathBuf::from(request.source_path.trim());
     if !source_root.exists() {
@@ -544,18 +550,6 @@ pub(super) fn import_archive_library_with_runtime(
         let canonical_path = canonical_root.join(&relative);
         if import_mode == "copy" {
             copy_source_file(source_file, &canonical_path)?;
-        } else if import_mode == "move" {
-            if let Some(parent) = canonical_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|error| format!("Failed to create moved source folder: {error}"))?;
-            }
-            fs::rename(source_file, &canonical_path).map_err(|error| {
-                format!(
-                    "Failed to move source file {} to {}: {error}",
-                    source_file.display(),
-                    canonical_path.display()
-                )
-            })?;
         }
 
         let version_source = if import_mode == "reference" {
@@ -869,6 +863,12 @@ pub(crate) fn list_imported_archive_libraries(
     app: &AppHandle,
 ) -> Result<Vec<ArchiveImportedLibrarySummary>, String> {
     let runtime = ArchiveRuntime::resolve(app)?;
+    list_imported_archive_libraries_from_runtime(&runtime)
+}
+
+fn list_imported_archive_libraries_from_runtime(
+    runtime: &ArchiveRuntime,
+) -> Result<Vec<ArchiveImportedLibrarySummary>, String> {
     let mut libraries = Vec::new();
     for (_, domain_root) in runtime.memory_domain_roots() {
         collect_imported_library_manifests(&domain_root.join("metadata"), &mut libraries)?;
@@ -920,6 +920,30 @@ fn resolve_classification_manifest_path(
     if !file_name.ends_with("-classification-review.json") {
         return Err(
             "Only Living Archive classification-review artifacts can be opened here.".to_string(),
+        );
+    }
+    let in_import_metadata_root = runtime.memory_domain_roots().into_iter().any(|(_, root)| {
+        let metadata_root = root.join("metadata");
+        normalized == metadata_root || normalized.starts_with(&metadata_root)
+    });
+    if !in_import_metadata_root {
+        return Err(
+            "Classification review artifacts must live inside an imported-library metadata root."
+                .to_string(),
+        );
+    }
+    let known_manifest = list_imported_archive_libraries_from_runtime(runtime)?
+        .into_iter()
+        .filter_map(|library| library.classification_manifest_path)
+        .any(|path| {
+            PathBuf::from(path)
+                .canonicalize()
+                .is_ok_and(|candidate| candidate == normalized)
+        });
+    if !known_manifest {
+        return Err(
+            "Classification review artifact is not linked from a known imported-library manifest."
+                .to_string(),
         );
     }
     Ok(normalized)
@@ -1087,7 +1111,9 @@ pub(crate) fn write_archive_library_reorganisation_plan(
         "executionPolicy": {
             "filesMovedByThisCommand": 0,
             "futureMoveRequiresExplicitHumanApproval": true,
-            "unclearSourcesRemainInMixedLibrary": true
+            "unclearSourcesRemainInMixedLibrary": true,
+            "planCompleteness": "preview-only",
+            "eligibleForExecution": false
         },
         "summary": {
             "movesPlanned": moves_planned,
@@ -1113,7 +1139,8 @@ pub(crate) fn write_archive_library_reorganisation_plan(
         "rollbackPolicy": {
             "appliesOnlyAfterFutureMoveExecution": true,
             "filesMovedByThisCommand": 0,
-            "restoreFromSourcePath": true
+            "restoreFromSourcePath": true,
+            "planCompleteness": "preview-only"
         },
         "entries": entries.clone(),
     });

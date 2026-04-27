@@ -49,6 +49,7 @@ import {
   latestCompactStateForThread,
   promptMessagesForThread,
   shouldAutoCompactContext,
+  shouldHardStopContext,
 } from "../../core/context-memory";
 import {
   archiveCitationsFromBundle,
@@ -300,6 +301,19 @@ export const executeChatTurn = async ({
       }
       compactState = latestCompactStateForThread(routedState, thread.id);
       providerMessages = promptMessagesForThread(thread, compactState);
+      const compactedBudget = buildContextBudget({
+        thread: { ...thread, messages: providerMessages },
+        composer: "",
+        attachments: [],
+        provider,
+        runtimeNode,
+        modelId: route.model,
+      });
+      if (shouldHardStopContext(compactedBudget)) {
+        throw new Error(
+          "Context remains above the hard-stop threshold after compaction. Start a branched chat or switch to a model with a larger context window before continuing.",
+        );
+      }
     }
 
     const engineerTargetModel =

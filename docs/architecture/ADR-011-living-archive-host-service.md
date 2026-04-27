@@ -30,7 +30,7 @@ The first host-service surface is:
 - imported-library registry reads from persisted manifests
 - mixed-library classification review artifact generation
 - source-version ledger writes for imported libraries
-- Audio2TOL session bundle detection and intake queuing
+- optional Audio2TOL add-on bridge for session bundle detection and intake queuing
 
 The host service does **not** expose generic trusted wiki writes. Trusted page writes are available only through the Strategist-owned ingest path after ADR-012 approval.
 
@@ -87,7 +87,8 @@ Public GitHub trace for this subsystem is currently thin, so these local impleme
   - `concept` to `WIKI/concepts`
   - `synthesis` to `WIKI/syntheses`
 - Existing trusted wiki pages must be backed up before replacement.
-- Audio2TOL intake must preserve source boundaries:
+- TOL is not a base Living Archive feature. TOL-specific detection, bundle building, and UI surfaces may appear only through the Audio2TOL add-on boundary.
+- Audio2TOL intake, when that add-on is installed and enabled, must preserve source boundaries:
   - raw audio remains the source of truth
   - transcript remains a derived artifact
   - protocol analysis remains an interpretation artifact
@@ -182,7 +183,35 @@ The command:
 - writes an import manifest containing canonicality, metadata standard, Obsidian detection, and source hashes
 - returns host-owned classification proposals for Mixed Library imports
 
+`move` import mode is intentionally rejected in the host service until ResonantOS ships a separate execution path with explicit human confirmation, audit logging, and rollback support. The UI may show the future mode as disabled, but the Rust service remains the binding safety boundary.
+
 For `mixed-library`, the command also writes a `library-classification-review` artifact under the library metadata root. This artifact is the authority for first-pass ownership proposals. It explicitly sets `structuralChangesAllowed = false`; any future file move/reorganisation command must require separate human approval, audit logging, and rollback planning.
+
+### `archive_library_classification_review`
+
+Reads a host-owned mixed-library classification review artifact.
+
+The command:
+
+- only opens `library-classification-review` artifacts linked from known imported-library manifests
+- rejects paths outside imported-library metadata roots
+- returns the preview proposals and summary counters
+- does not approve, move, tag, or rewrite source files
+
+### `archive_library_reorganisation_plan`
+
+Writes a plan-only reorganisation artifact from a classification review.
+
+The command:
+
+- writes a proposed source-to-domain movement plan
+- writes a rollback-plan artifact
+- appends an audit-log event
+- explicitly moves zero files
+- marks the plan as `requiresApproval = true`
+- marks current v1 plans as `preview-only` and `eligibleForExecution = false`
+
+Because mixed-library classification currently previews only the first proposal page, this command must not be used as an execution basis. A future execution command must require full-library classification or explicit paged review completion first.
 
 ### `archive_imported_libraries`
 
@@ -194,6 +223,10 @@ The command:
 - derives the registry from disk so the shell can restart without losing imported-library state
 - treats manifests as archive metadata, not trusted wiki pages
 - does not rescan source content or queue ingest requests
+
+### Optional Audio2TOL Add-on Bridge
+
+These commands are an interim host-mediated bridge for the future Audio2TOL add-on. They are not part of the base Living Archive user workflow and the shell must expose them only when `addon.audio2tol` is installed and enabled.
 
 ### `archive_tol_bundle_candidates`
 

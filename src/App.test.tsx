@@ -1556,6 +1556,15 @@ describe("App boot flow", () => {
     expect(screen.getAllByRole("button", { name: "Send message" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: "New chat" }).length).toBeGreaterThan(0);
     expect(screen.getAllByDisplayValue("MiniMax-M2.7").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Context usage/i })[0]);
+    const contextMap = await screen.findByRole("region", { name: "Context memory map" });
+    const composer = screen.getAllByPlaceholderText("Message Augmentor")[0];
+    expect(contextMap).toBeTruthy();
+    expect(Boolean(contextMap.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(screen.getByText("Raw transcript")).toBeTruthy();
+    expect(screen.getByText("Compact memory")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Compact now" })).toBeTruthy();
   });
 
   it("surfaces provider usage in the context tooltip and local generation stats", async () => {
@@ -1601,6 +1610,7 @@ describe("App boot flow", () => {
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: /Context usage/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Compact now" }));
 
     expect(await screen.findByText(/Context compacted\. Preserved/i)).toBeTruthy();
     expect(await screen.findByText(/user intent and rationale/i)).toBeTruthy();
@@ -1633,7 +1643,15 @@ describe("App boot flow", () => {
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: /Context usage/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Compact now" }));
     expect(await screen.findByText(/Context compacted\. Preserved/i)).toBeTruthy();
+    expect(await screen.findByText(/Open this from the chat composer/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Edit memory" }));
+    fireEvent.change(screen.getByLabelText("User why"), {
+      target: { value: "Edited why: preserve the user's intent across compaction." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save memory" }));
+    expect(await screen.findByText(/Context memory updated/i)).toBeTruthy();
 
     fireEvent.change(screen.getAllByPlaceholderText("Message Augmentor")[0], {
       target: { value: "Continue after compacting the chat." },
@@ -1643,7 +1661,7 @@ describe("App boot flow", () => {
     expect(await screen.findByText("This is a live Strategist test reply from MiniMax-M2.7.")).toBeTruthy();
     const providerCall = providerStreamInputs().at(-1);
     expect(providerCall?.systemPrompt).toContain("ResonantOS compacted conversation memory:");
-    expect(providerCall?.systemPrompt).toContain("avoiding AI amnesia");
+    expect(providerCall?.systemPrompt).toContain("Edited why: preserve the user's intent across compaction.");
     expect(providerCall?.messages.map((message) => message.id)).not.toContain("thread-main-desktop:m1");
     expect(providerCall?.messages.map((message) => message.id)).toContain("thread-main-desktop:m12");
     expect(providerCall?.messages.at(-1)?.content).toBe("Continue after compacting the chat.");
@@ -1723,6 +1741,7 @@ describe("App boot flow", () => {
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: /Context usage/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Compact now" }));
     expect(await screen.findByText(/Context compacted\. Preserved/i)).toBeTruthy();
 
     await openChatHistory();
@@ -1879,11 +1898,8 @@ describe("App boot flow", () => {
 
     expect(await screen.findByText("Imported 2 file(s) into RESONANT_OS_BASE. Managed location is now canonical.")).toBeTruthy();
     expect(await screen.findByText("Latest imported library")).toBeTruthy();
-    expect(await screen.findByText("Classification review")).toBeTruthy();
-    expect(await screen.findByText("human-knowledge")).toBeTruthy();
-    expect(await screen.findByText("ownership/human")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Approve Classification Plan" }));
-    expect(await screen.findByText(/Classification plan approved/i)).toBeTruthy();
+    expect(await screen.findByText(/Classification review artifact created/i)).toBeTruthy();
+    expect(screen.getByRole("option", { name: /Move into Living Archive/i }).hasAttribute("disabled")).toBe(true);
     expect(requestArchiveLibraryImportMock).toHaveBeenCalledWith({
       sourcePath: "/Users/augmentor/Documents/RESONANT_OS_BASE",
       domain: "mixed-library",

@@ -67,7 +67,8 @@ export type ConversationTranscriptEventAction =
   | "message-edit-requested"
   | "message-deleted"
   | "generation-interrupted"
-  | "context-compacted";
+  | "context-compacted"
+  | "context-memory-edited";
 export type AddOnProvenanceTier = "bundled-core" | "curated-signed" | "enterprise-signed" | "sideloaded-unverified";
 export type ManifestVerificationState = "verified" | "unverified" | "not-applicable" | "failed";
 export type GrantRecommendationSource = "manifest-request" | "preset-bundle" | "manual";

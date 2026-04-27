@@ -12,6 +12,7 @@ import {
   latestCompactStateForThread,
   promptMessagesForThread,
   shouldAutoCompactContext,
+  shouldHardStopContext,
   usableContextTokens,
 } from "./context-memory";
 
@@ -101,6 +102,34 @@ describe("context memory budget estimation", () => {
 
     expect(budget.compactionThreshold).toBe(Math.round(usableContextTokens(budget) * 0.8));
     expect(shouldAutoCompactContext(budget)).toBe(true);
+  });
+
+  it("flags hard-stop when estimated usage crosses the hard threshold", () => {
+    const state = buildDefaultState([]);
+    const budget = buildContextBudget({
+      thread: {
+        ...state.conversationThreads[0],
+        messages: [
+          {
+            id: "thread-main-desktop:m1",
+            threadId: "thread-main-desktop",
+            channelId: "desktop-main",
+            role: "user",
+            author: "You",
+            createdAt: "2026-04-25T10:00:00.000Z",
+            content: "x".repeat(21_000),
+          },
+        ],
+      },
+      composer: "x".repeat(1_000),
+      attachments: [],
+      provider: state.providers.find((profile) => profile.id === "shared-local"),
+      runtimeNode: state.runtimeNodes.find((node) => node.id === "local-mac-mini"),
+      modelId: "batiai/gemma4-e2b:q4",
+    });
+
+    expect(shouldAutoCompactContext(budget)).toBe(true);
+    expect(shouldHardStopContext(budget)).toBe(true);
   });
 
   it("persists compact state separately and records a compaction transcript event", () => {
@@ -207,7 +236,7 @@ describe("context memory budget estimation", () => {
 });
 
 describe("deterministic compact state generation", () => {
-  it("preserves user intent, why, priorities, tasks, and artifact refs", () => {
+  it("preserves user intent, why, facts, priorities, tasks, and artifact refs", () => {
     const state = buildDefaultState([]);
     const thread = {
       ...state.conversationThreads[0],
@@ -219,7 +248,8 @@ describe("deterministic compact state generation", () => {
           role: "user" as const,
           author: "You",
           createdAt: "2026-04-25T10:00:00.000Z",
-          content: "For me quality is more important than speed because ResonantOS needs to last.",
+          content:
+            "For me quality is more important than speed because ResonantOS needs to last. In my case MiniMax is configured for Augmentor.",
         },
         {
           id: "thread-main-desktop:m2",
@@ -228,7 +258,8 @@ describe("deterministic compact state generation", () => {
           role: "assistant" as const,
           author: "Augmentor",
           createdAt: "2026-04-25T10:01:00.000Z",
-          content: "Decision: implement context compaction as host-owned structured memory.",
+          content:
+            "Decision: implement context compaction as host-owned structured memory. Reference https://example.com/context and commit abc1234.",
         },
         {
           id: "thread-main-desktop:m3",
@@ -237,7 +268,8 @@ describe("deterministic compact state generation", () => {
           role: "user" as const,
           author: "You",
           createdAt: "2026-04-25T10:02:00.000Z",
-          content: "Go ahead and implement the compact state in src/core/context-memory.ts and test it deterministically.",
+          content:
+            "Go ahead and implement the compact state in src/core/context-memory.ts and test it deterministically. The previous implementation was completed and passed.",
         },
       ],
     };
@@ -248,10 +280,18 @@ describe("deterministic compact state generation", () => {
     expect(compactState.userIntent.goal).toContain("Go ahead");
     expect(compactState.userIntent.why).toContain("quality is more important than speed");
     expect(compactState.userIntent.prioritySignals.join(" ")).toContain("quality");
+    expect(compactState.facts.map((fact) => fact.statement).join(" ")).toContain("MiniMax is configured");
+    expect(compactState.facts.find((fact) => fact.statement.includes("MiniMax"))?.scope).toBe("user");
     expect(compactState.decisions[0]?.decision).toContain("host-owned structured memory");
-    expect(compactState.openTasks[0]?.verificationRequired).toContain("deterministic checks before completion");
-    expect(compactState.artifacts[0]?.ref).toBe("src/core/context-memory.ts");
+    expect(compactState.openTasks.some((task) => task.status === "done")).toBe(true);
+    expect(compactState.openTasks.some((task) => task.verificationRequired.includes("deterministic checks before completion"))).toBe(
+      true,
+    );
+    expect(compactState.artifacts.map((artifact) => artifact.ref)).toContain("src/core/context-memory.ts");
+    expect(compactState.artifacts.map((artifact) => artifact.ref)).toContain("https://example.com/context");
+    expect(compactState.artifacts.map((artifact) => artifact.ref)).toContain("abc1234");
     expect(compactState.preservedRecentMessageIds).toEqual(["thread-main-desktop:m2", "thread-main-desktop:m3"]);
     expect(compactState.checksum).toMatch(/^fnv32:/);
+    expect(formatCompactStateForPrompt(compactState)).toContain("Facts:");
   });
 });

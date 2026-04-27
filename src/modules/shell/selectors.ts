@@ -5,6 +5,7 @@ import type {
   AddOnManifest,
   ChannelDefinition,
   ContextBudget,
+  ContextMemoryState,
   ConversationThread,
   ProviderProfile,
   ProviderRuntimeNode,
@@ -81,6 +82,7 @@ export type ShellViewModel = {
   contextUsageRatio: number;
   contextUsageLabel: string;
   contextUsageTitle: string;
+  latestCompactState: ContextMemoryState | null;
   dictationAvailable: boolean;
 };
 
@@ -210,6 +212,7 @@ export const buildShellViewModel = ({
     contextUsageRatio,
     contextUsageLabel,
     contextUsageTitle,
+    latestCompactState,
     dictationAvailable: canUseDictation(),
   };
 };

@@ -4,6 +4,8 @@ This folder is the documentation entrypoint for the current codebase.
 
 ## Read First
 
+- [PROJECT_STATUS.md](./PROJECT_STATUS.md)
+  - current implementation checkpoint, known gaps, guardrails, and recommended next work
 - [architecture/MODULE_MAP.md](./architecture/MODULE_MAP.md)
   - current ownership map for modules and shell composition
 - [architecture/ARCHITECTURE_AUDIT_2026-04-26.md](./architecture/ARCHITECTURE_AUDIT_2026-04-26.md)
@@ -75,6 +77,8 @@ This folder is the documentation entrypoint for the current codebase.
   - `ADR-016`
 - `What should a future compacted/new session reload first?`
   - `working/SESSION_CONTEXT_2026-04-25.md`
+- `What exists now, what is missing, and what should we do next?`
+  - `PROJECT_STATUS`
 - `What is still planned?`
   - `FEATURE_BACKLOG`
 - `What UI/UX experience are we building?`

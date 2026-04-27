@@ -2,7 +2,16 @@
 // UX citation: docs/architecture/ADR-004-chat-rail.md
 
 import { useEffect, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
-import type { ChannelDefinition, ChatProject, ChatRunPhase, ConversationMessage, ConversationThread } from "../../core/contracts";
+import type {
+  ChannelDefinition,
+  ChatProject,
+  ChatRunPhase,
+  ContextBudget,
+  ContextMemoryState,
+  ConversationMessage,
+  ConversationThread,
+} from "../../core/contracts";
+import { ContextMemoryPanel } from "./ContextMemoryPanel";
 import { MessageContent } from "./MessageContent";
 import {
   ArchiveIcon,
@@ -21,6 +30,7 @@ import {
   TrashIcon,
 } from "./icons";
 import type { ComposerAttachment, ThinkingDepth } from "./types";
+import type { CompactMemoryPatch } from "./thread-controller";
 import { formatBytes } from "./utils";
 
 type StrategistChatRailProps = {
@@ -56,6 +66,8 @@ type StrategistChatRailProps = {
   contextUsageLabel: string;
   contextUsageRatio: number;
   contextUsageTitle: string;
+  contextBudget: ContextBudget;
+  compactState: ContextMemoryState | null;
   historyOpen: boolean;
   activityLabel: string;
   recoveryRuntimeStatus?: {
@@ -88,6 +100,7 @@ type StrategistChatRailProps = {
   onSend: () => void;
   onStopGeneration: () => void;
   onCompactThread: () => void;
+  onUpdateCompactMemory: (patch: CompactMemoryPatch) => void;
   onSaveMessageToArchive: (message: ConversationMessage) => void;
   onBranchFromMessage: (message: ConversationMessage) => void;
   onEditUserMessage: (message: ConversationMessage) => void;
@@ -108,6 +121,7 @@ export function StrategistChatRail(props: StrategistChatRailProps) {
   const [agentPicker, setAgentPicker] = useState<{ projectId?: string } | null>(null);
   const [activeRunStartedAt, setActiveRunStartedAt] = useState<number | null>(null);
   const [activityNow, setActivityNow] = useState(Date.now());
+  const [contextPanelOpen, setContextPanelOpen] = useState(false);
 
   useEffect(() => {
     if (!props.chatBusy) {
@@ -686,6 +700,17 @@ export function StrategistChatRail(props: StrategistChatRailProps) {
 
           <div className="composer-card">
         {props.chatNotice && <div className="inline-notice warning">{props.chatNotice}</div>}
+        {contextPanelOpen && (
+          <ContextMemoryPanel
+            budget={props.contextBudget}
+            compactState={props.compactState}
+            usageLabel={props.contextUsageLabel}
+            usageRatio={props.contextUsageRatio}
+            usageTitle={props.contextUsageTitle}
+            onCompactThread={props.onCompactThread}
+            onUpdateCompactMemory={props.onUpdateCompactMemory}
+          />
+        )}
         <textarea
           value={props.composer}
           onChange={(event) => props.onComposerChange(event.target.value)}
@@ -713,8 +738,9 @@ export function StrategistChatRail(props: StrategistChatRailProps) {
               type="button"
               className={`context-pill ${props.contextUsageRatio > 0.72 ? "warning" : ""}`}
               title={props.contextUsageTitle}
-              aria-label={`Context usage ${props.contextUsageLabel}. Compact now.`}
-              onClick={props.onCompactThread}
+              aria-label={`Context usage ${props.contextUsageLabel}. Open context memory map.`}
+              aria-expanded={contextPanelOpen}
+              onClick={() => setContextPanelOpen((current) => !current)}
             >
               <strong>{props.contextUsageLabel}</strong>
             </button>
