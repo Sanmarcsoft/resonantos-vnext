@@ -46,6 +46,8 @@ What the team should review:
 - the current Living Archive import path and guided first-run flow
 - the single private-data root direction in `ADR-022`
 - the alpha handoff audit in `docs/ALPHA_PREVIEW_AUDIT_2026-04-28.md`
+- the internal alpha distribution guide in `docs/ALPHA_DISTRIBUTION.md`
+- the add-on repo/registry model in `ADR-023`
 - the add-on SDK direction, especially manifest authority and capability gates
 - the current boundaries between core services, add-ons, provider runtime nodes, and experimental integrations
 
@@ -157,6 +159,7 @@ Known limits for reviewers:
 
 - ADR-015 defines Delegation Packets, task workspaces, artifact return, add-on catalog direction, and native tool fabric.
 - ADR-018 defines Add-on SDK V0 as the binding internal add-on standard.
+- ADR-023 defines the add-on repository and registry model: core app stays separate from creator-owned add-on repos, curated registry metadata, sideloaded add-ons, and first-party add-on repositories.
 - `src/sdk/addons` now exposes manifest validation, stable capabilities, service protocol constants, and add-on SDK types.
 - Runtime manifest loading validates bundled and sideloaded manifests before they are accepted by the shell.
 - SDK validation now enforces authority consistency: archive scopes require archive capabilities, shared provider profiles require the provider capability, and embedded surfaces require UI embedding.
@@ -165,6 +168,7 @@ Known limits for reviewers:
 - The codebase has an initial add-on/catalog shape.
 - Add-ons remain constrained by explicit capabilities in the architecture.
 - Full signed add-on registry, marketplace, sideload hardening, and service lifecycle are not implemented yet.
+- GitHub Actions now includes `.github/workflows/alpha-build.yml` for internal macOS, Windows, and Linux alpha artifacts.
 
 ### Resonant Browser
 
@@ -177,7 +181,7 @@ Known limits for reviewers:
 
 ### Documentation And Architecture Standards
 
-- ADRs 001-022 exist and define the major architecture rules.
+- ADRs 001-023 exist and define the major architecture rules.
 - `docs/architecture/MODULE_MAP.md` maps module ownership.
 - `docs/FEATURE_BACKLOG.md` tracks larger backlog items.
 - `docs/architecture/ARCHITECTURE_AUDIT_2026-04-26.md` records the modularity and hardening checkpoint.
@@ -281,6 +285,7 @@ Treat this as active current state. If committing, review the full diff first be
 - Add-on service lifecycle manager.
 - Runtime isolation for local services and embedded surfaces.
 - Public SDK packaging, examples, and developer documentation.
+- Extract experimental add-on implementations into creator-owned or first-party add-on repositories before public alpha.
 - True live embedded Chromium viewport with click/type/read-page/download tools.
 - Full embedded Obsidian, OpenCode, OpenClaw terminal/TUI, and Hermes integrations.
 - OpenCode add-on spike:

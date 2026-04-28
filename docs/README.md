@@ -44,6 +44,10 @@ This folder is the documentation entrypoint for the current codebase.
   - Delegation Packets, native tool fabric, initial add-on catalog, and LangGraph/Mangle policy split
 - [architecture/ADR-016-context-memory-compaction.md](./architecture/ADR-016-context-memory-compaction.md)
   - host-owned context compaction, raw transcript preservation, structured compact state, and provider-aware context budgets
+- [architecture/ADR-023-addon-repository-registry-model.md](./architecture/ADR-023-addon-repository-registry-model.md)
+  - add-on repository ownership, registry promotion, curation, sideloading, and alpha add-on policy
+- [ALPHA_DISTRIBUTION.md](./ALPHA_DISTRIBUTION.md)
+  - internal alpha build workflow, platform artifacts, signing status, privacy boundary, and reviewer instructions
 - [working/SESSION_CONTEXT_2026-04-25.md](./working/SESSION_CONTEXT_2026-04-25.md)
   - reloadable working-memory note for future sessions and compaction recovery
 - [FEATURE_BACKLOG.md](./FEATURE_BACKLOG.md)
@@ -79,6 +83,10 @@ This folder is the documentation entrypoint for the current codebase.
   - `ADR-015`
 - `How do long chats avoid amnesia when the context window fills?`
   - `ADR-016`
+- `Where should add-ons live, and how do community add-ons become curated?`
+  - `ADR-023`
+- `How do we build and share the internal alpha on macOS, Windows, and Linux?`
+  - `ALPHA_DISTRIBUTION`
 - `What should a future compacted/new session reload first?`
   - `working/SESSION_CONTEXT_2026-04-25.md`
 - `What exists now, what is missing, and what should we do next?`

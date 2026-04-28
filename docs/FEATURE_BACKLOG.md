@@ -191,6 +191,12 @@ Last updated: 2026-04-28
 
 ## Add-on Platform
 
+- Added add-on repository/registry policy on 2026-04-28:
+  - `ADR-023` separates ResonantOS core, SDK, curated registry metadata, creator-owned add-on repositories, and personal experimental add-on collections
+  - sideloaded add-ons remain untrusted by default
+  - curated add-ons require review, compatibility metadata, signatures or hash pinning, and explicit capability grants
+  - current alpha policy keeps add-ons as catalog concepts rather than trusted default installs
+  - experimental add-on implementations should move out of the core repo before public alpha unless they become first-party supported add-ons
 - Added architecture policy on 2026-04-25:
   - `ADR-015` defines Delegation Packets as the source of truth for delegated tasks
   - `TASK.md` is now an interoperability artifact generated from structured delegation state
@@ -294,6 +300,10 @@ Last updated: 2026-04-28
 
 ## Security and Web3
 
+- Added internal alpha distribution workflow on 2026-04-28:
+  - `.github/workflows/alpha-build.yml` builds native macOS, Windows, and Ubuntu artifacts on GitHub Actions
+  - `docs/ALPHA_DISTRIBUTION.md` documents reviewer instructions, unsigned-build caveats, privacy boundary, and release gates
+  - production distribution still needs code signing, notarization, updater signing, and cross-platform QA
 - Wallet integration architecture.
 - Secure signing flow in Rust.
 - Capability separation for blockchain actions.
