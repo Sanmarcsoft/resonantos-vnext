@@ -8,6 +8,8 @@ This folder is the documentation entrypoint for the current codebase.
   - current implementation checkpoint, known gaps, guardrails, and recommended next work
 - [architecture/MODULE_MAP.md](./architecture/MODULE_MAP.md)
   - current ownership map for modules and shell composition
+- [architecture/VNEXT_SYSTEM_DIAGRAM.md](./architecture/VNEXT_SYSTEM_DIAGRAM.md)
+  - current system diagrams, implemented capability map, under-construction areas, and next engineering sequence
 - [architecture/ARCHITECTURE_AUDIT_2026-04-26.md](./architecture/ARCHITECTURE_AUDIT_2026-04-26.md)
   - current modularity checkpoint, validation snapshot, and next refactor risks
 - [architecture/ADR-001-platform-stack.md](./architecture/ADR-001-platform-stack.md)
@@ -59,6 +61,8 @@ This folder is the documentation entrypoint for the current codebase.
   - `ADR-003`
 - `Which module owns what?`
   - `MODULE_MAP`
+- `How does ResonantOS vNext work end to end, and what is working vs under construction?`
+  - `VNEXT_SYSTEM_DIAGRAM`
 - `How do providers, add-ons, archive, wallets, and IPC work?`
   - `ADR-005` through `ADR-009`
 - `How does recovery mode work?`

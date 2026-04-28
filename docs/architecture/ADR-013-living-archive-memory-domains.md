@@ -103,7 +103,7 @@ The managed Living Archive location should be structured around the memory domai
 Target structure:
 
 ```text
-ResonantOS/
+ResonantOS_User/
   Memory/
     HUMAN_KNOWLEDGE/
       sources/
@@ -147,7 +147,7 @@ ResonantOS/
       audit.jsonl
 ```
 
-Current implementations may resolve this through the configured archive managed root during migration, but the product-level target is `ResonantOS/Memory`. Exact folder names may evolve, but the domain separation is binding.
+Current implementations may resolve this through the configured archive managed root during migration, but the product-level target is `ResonantOS_User/Memory` as defined by `ADR-022`. Exact folder names may evolve, but the domain separation and single portable user-state root are binding.
 
 `AI_MEMORY/system` is reserved for host-owned ResonantOS architecture memory as defined in `ADR-014`. It is available before user knowledge intake and is not user-authored memory.
 
@@ -335,7 +335,8 @@ Obsidian is optional.
 If the Obsidian add-on is installed, it may:
 
 - register an Obsidian vault as a connected library
-- expose managed Human Knowledge or External Knowledge folders in an embedded Obsidian pane
+- expose a read-only vault bridge for selected markdown notes
+- later expose managed Human Knowledge or External Knowledge folders in an embedded Obsidian pane
 - help create tags, wikilinks, and navigation pages after user approval
 
 Obsidian must not be required for Living Archive to work. Normal filesystem folders use the same library import model.
@@ -358,3 +359,4 @@ Obsidian must not be required for Living Archive to work. Normal filesystem fold
 - The Archive UI should be redesigned around connected libraries and memory domains, not raw vault-map roots.
 - `VAULT_MAP.json` should become an internal generated/config artifact, not the primary user interaction model.
 - Backup/export UX should target the managed Living Archive root because it becomes the canonical knowledge base.
+- Living Archive managed memory must migrate into the Portable User State Root defined by `ADR-022`; source-local `_LivingArchive` storage is a transitional implementation detail, not the long-term destination.

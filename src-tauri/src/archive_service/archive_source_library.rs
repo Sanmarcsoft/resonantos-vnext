@@ -1,7 +1,7 @@
 // Intent citation: docs/architecture/ADR-013-living-archive-memory-domains.md
 // Intent citation: docs/architecture/ADR-011-living-archive-host-service.md
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -15,10 +15,13 @@ use super::{
     system_time_label, unix_timestamp, ArchiveClassificationProposal,
     ArchiveImportedLibrarySummary, ArchiveLibraryClassificationReview,
     ArchiveLibraryClassificationReviewRequest, ArchiveLibraryImportRequest,
-    ArchiveLibraryImportResult, ArchiveLibraryImportSourceRecord, ArchiveLibraryReorganisationMove,
-    ArchiveLibraryReorganisationPlan, ArchiveLibraryReorganisationPlanRequest, ArchiveRuntime,
-    ArchiveSourceFolderScanRequest, ArchiveSourceFolderScanResult, ArchiveSourceWatchIndexRecord,
-    ArchiveSourceWatchRecord, VaultMappingFile,
+    ArchiveLibraryImportResult, ArchiveLibraryImportSourceRecord, ArchiveLibraryPreflightCount,
+    ArchiveLibraryPreflightRequest, ArchiveLibraryPreflightResult, ArchiveLibraryPreflightSample,
+    ArchiveLibraryPreflightWarning, ArchiveLibraryRecommendedImportPlan,
+    ArchiveLibraryReorganisationMove, ArchiveLibraryReorganisationPlan,
+    ArchiveLibraryReorganisationPlanRequest, ArchiveRuntime, ArchiveSourceFolderScanRequest,
+    ArchiveSourceFolderScanResult, ArchiveSourceWatchIndexRecord, ArchiveSourceWatchRecord,
+    VaultMappingFile,
 };
 
 fn source_watch_roots(runtime: &ArchiveRuntime) -> Vec<&VaultMappingFile> {
@@ -269,6 +272,353 @@ fn collect_source_files(root: &Path, output: &mut Vec<PathBuf>) -> Result<usize,
     Ok(skipped)
 }
 
+fn count_files_for_skipped_tree(root: &Path) -> Result<usize, String> {
+    if !root.exists() {
+        return Ok(0);
+    }
+    if root.is_file() {
+        return Ok(1);
+    }
+    let mut count = 0usize;
+    for entry in fs::read_dir(root)
+        .map_err(|error| format!("Failed to read skipped folder {}: {error}", root.display()))?
+    {
+        let entry =
+            entry.map_err(|error| format!("Failed to read skipped folder entry: {error}"))?;
+        let path = entry.path();
+        if path.is_dir() {
+            count += count_files_for_skipped_tree(&path)?;
+        } else if path.is_file() {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+fn collect_import_source_files(
+    source_root: &Path,
+    path: &Path,
+    excluded_top_folders: &HashSet<String>,
+    output: &mut Vec<PathBuf>,
+) -> Result<usize, String> {
+    if !path.exists() {
+        return Ok(0);
+    }
+    let mut skipped = 0usize;
+    if path.is_dir() {
+        for entry in fs::read_dir(path)
+            .map_err(|error| format!("Failed to read source folder {}: {error}", path.display()))?
+        {
+            let entry =
+                entry.map_err(|error| format!("Failed to read source folder entry: {error}"))?;
+            let child = entry.path();
+            let file_name = child
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("");
+            if file_name.starts_with('.') || file_name == "_LivingArchive" {
+                skipped += count_files_for_skipped_tree(&child)?.max(1);
+                continue;
+            }
+            if excluded_top_folders.contains(&top_folder_label(source_root, &child)) {
+                skipped += count_files_for_skipped_tree(&child)?.max(1);
+                continue;
+            }
+            skipped +=
+                collect_import_source_files(source_root, &child, excluded_top_folders, output)?;
+        }
+    } else if supported_source_file(path) {
+        output.push(path.to_path_buf());
+    } else {
+        skipped += 1;
+    }
+    Ok(skipped)
+}
+
+fn extension_label(path: &Path) -> String {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
+        .filter(|extension| !extension.is_empty())
+        .unwrap_or_else(|| "<none>".to_string())
+}
+
+fn top_folder_label(source_root: &Path, path: &Path) -> String {
+    let relative = path.strip_prefix(source_root).unwrap_or(path);
+    relative
+        .components()
+        .next()
+        .and_then(|component| component.as_os_str().to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("<root>")
+        .to_string()
+}
+
+fn add_preflight_count(map: &mut HashMap<String, (usize, u64)>, key: String, size_bytes: u64) {
+    let entry = map.entry(key).or_insert((0, 0));
+    entry.0 += 1;
+    entry.1 += size_bytes;
+}
+
+fn sorted_preflight_counts(
+    map: HashMap<String, (usize, u64)>,
+) -> Vec<ArchiveLibraryPreflightCount> {
+    let mut counts = map
+        .into_iter()
+        .map(
+            |(label, (count, size_bytes))| ArchiveLibraryPreflightCount {
+                label,
+                count,
+                size_bytes,
+            },
+        )
+        .collect::<Vec<_>>();
+    counts.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| right.size_bytes.cmp(&left.size_bytes))
+            .then_with(|| left.label.cmp(&right.label))
+    });
+    counts
+}
+
+struct PreflightAccumulator {
+    supported_files: usize,
+    skipped_files: usize,
+    hidden_entries_skipped: usize,
+    generated_archive_entries_skipped: usize,
+    estimated_import_bytes: u64,
+    supported_by_extension: HashMap<String, (usize, u64)>,
+    skipped_by_extension: HashMap<String, (usize, u64)>,
+    supported_by_top_folder: HashMap<String, (usize, u64)>,
+    skipped_by_top_folder: HashMap<String, (usize, u64)>,
+    samples: Vec<ArchiveLibraryPreflightSample>,
+}
+
+impl PreflightAccumulator {
+    fn new() -> Self {
+        Self {
+            supported_files: 0,
+            skipped_files: 0,
+            hidden_entries_skipped: 0,
+            generated_archive_entries_skipped: 0,
+            estimated_import_bytes: 0,
+            supported_by_extension: HashMap::new(),
+            skipped_by_extension: HashMap::new(),
+            supported_by_top_folder: HashMap::new(),
+            skipped_by_top_folder: HashMap::new(),
+            samples: Vec::new(),
+        }
+    }
+
+    fn sample(&mut self, path: &Path, reason: &str) {
+        if self.samples.len() >= 24 {
+            return;
+        }
+        self.samples.push(ArchiveLibraryPreflightSample {
+            path: path.display().to_string(),
+            reason: reason.to_string(),
+        });
+    }
+}
+
+fn preflight_source_path(
+    source_root: &Path,
+    path: &Path,
+    accumulator: &mut PreflightAccumulator,
+) -> Result<(), String> {
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("Failed to read source metadata {}: {error}", path.display()))?;
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path)
+            .map_err(|error| format!("Failed to read source folder {}: {error}", path.display()))?
+        {
+            let entry =
+                entry.map_err(|error| format!("Failed to read source folder entry: {error}"))?;
+            let child = entry.path();
+            let file_name = child
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("");
+            if file_name.starts_with('.') {
+                accumulator.hidden_entries_skipped += 1;
+                accumulator.skipped_files += 1;
+                accumulator.sample(&child, "hidden entry");
+                continue;
+            }
+            if file_name == "_LivingArchive" {
+                accumulator.generated_archive_entries_skipped += 1;
+                accumulator.skipped_files += 1;
+                accumulator.sample(&child, "generated Living Archive folder");
+                continue;
+            }
+            preflight_source_path(source_root, &child, accumulator)?;
+        }
+        return Ok(());
+    }
+    if !metadata.is_file() {
+        accumulator.skipped_files += 1;
+        accumulator.sample(path, "not a regular file");
+        return Ok(());
+    }
+
+    let extension = extension_label(path);
+    let top_folder = top_folder_label(source_root, path);
+    let size_bytes = metadata.len();
+    if supported_source_file(path) {
+        accumulator.supported_files += 1;
+        accumulator.estimated_import_bytes += size_bytes;
+        add_preflight_count(
+            &mut accumulator.supported_by_extension,
+            extension,
+            size_bytes,
+        );
+        add_preflight_count(
+            &mut accumulator.supported_by_top_folder,
+            top_folder,
+            size_bytes,
+        );
+    } else {
+        accumulator.skipped_files += 1;
+        add_preflight_count(
+            &mut accumulator.skipped_by_extension,
+            extension.clone(),
+            size_bytes,
+        );
+        add_preflight_count(
+            &mut accumulator.skipped_by_top_folder,
+            top_folder,
+            size_bytes,
+        );
+        accumulator.sample(path, &format!("unsupported .{extension}"));
+    }
+    Ok(())
+}
+
+fn build_preflight_warnings(
+    supported_files: usize,
+    skipped_files: usize,
+    estimated_import_bytes: u64,
+    skipped_by_top_folder: &[ArchiveLibraryPreflightCount],
+) -> Vec<ArchiveLibraryPreflightWarning> {
+    let mut warnings = Vec::new();
+    for folder in skipped_by_top_folder.iter().take(8) {
+        let normalized = folder.label.to_ascii_lowercase();
+        let noisy = [
+            "node_modules",
+            "venv",
+            ".venv",
+            "__pycache__",
+            "target",
+            "dist",
+            "build",
+            "wordpress",
+            "wp-content",
+        ];
+        if noisy.iter().any(|signal| normalized.contains(signal)) {
+            warnings.push(ArchiveLibraryPreflightWarning {
+                severity: "warning".to_string(),
+                title: format!("Noisy technical folder: {}", folder.label),
+                detail: format!(
+                    "{} skipped file(s) were found under this folder. Consider excluding it unless it contains intentional source knowledge.",
+                    folder.count
+                ),
+            });
+        }
+    }
+    let total = supported_files + skipped_files;
+    if total > 0 && skipped_files > supported_files.saturating_mul(3) {
+        warnings.push(ArchiveLibraryPreflightWarning {
+            severity: "attention".to_string(),
+            title: "Most files will be skipped".to_string(),
+            detail: format!(
+                "{skipped_files} of {total} discovered entries are unsupported or ignored by the Living Archive importer."
+            ),
+        });
+    }
+    if estimated_import_bytes > 1024 * 1024 * 1024 {
+        warnings.push(ArchiveLibraryPreflightWarning {
+            severity: "attention".to_string(),
+            title: "Large managed copy".to_string(),
+            detail: "Copy mode creates a canonical managed copy and a first version snapshot, so storage use is roughly double the supported source size.".to_string(),
+        });
+    }
+    warnings
+}
+
+fn is_auto_excluded_top_folder(label: &str) -> bool {
+    let normalized = label.to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "venv"
+            | ".venv"
+            | "node_modules"
+            | "__pycache__"
+            | "target"
+            | "dist"
+            | "build"
+            | ".git"
+            | "_livingarchive"
+    )
+}
+
+fn is_ambiguous_top_folder(label: &str) -> bool {
+    let normalized = label.to_ascii_lowercase();
+    normalized.contains("wordpress")
+        || normalized.contains("wp posts")
+        || normalized.contains("backup")
+        || normalized.contains("uploads")
+        || normalized.contains("mixed")
+}
+
+fn build_recommended_import_plan(
+    supported_files: usize,
+    skipped_files: usize,
+    supported_by_top_folder: &[ArchiveLibraryPreflightCount],
+    skipped_by_top_folder: &[ArchiveLibraryPreflightCount],
+) -> ArchiveLibraryRecommendedImportPlan {
+    let mut auto_excluded_top_folders = supported_by_top_folder
+        .iter()
+        .map(|folder| folder.label.clone())
+        .filter(|label| is_auto_excluded_top_folder(label))
+        .collect::<Vec<_>>();
+    auto_excluded_top_folders.sort();
+    let mut ambiguous_top_folders = supported_by_top_folder
+        .iter()
+        .chain(skipped_by_top_folder.iter())
+        .map(|folder| folder.label.clone())
+        .filter(|label| is_ambiguous_top_folder(label))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    ambiguous_top_folders.sort();
+    let included_top_folders = supported_by_top_folder
+        .iter()
+        .map(|folder| folder.label.clone())
+        .filter(|label| !auto_excluded_top_folders.contains(label))
+        .collect::<Vec<_>>();
+    let summary = if auto_excluded_top_folders.is_empty() {
+        format!(
+            "Import {supported_files} supported file(s). {skipped_files} unsupported or generated file(s) will stay out of Living Archive memory."
+        )
+    } else {
+        format!(
+            "Import {supported_files} supported file(s), while automatically leaving out obvious technical folders: {}.",
+            auto_excluded_top_folders.join(", ")
+        )
+    };
+
+    ArchiveLibraryRecommendedImportPlan {
+        summary,
+        recommended_action: "import-recommended-plan".to_string(),
+        auto_excluded_top_folders,
+        ambiguous_top_folders,
+        included_top_folders,
+        approval_note: "Augmentor can explain this plan. The user approves one recommended import action; technical exclusions are handled by ResonantOS.".to_string(),
+    }
+}
+
 fn read_source_watch_index(
     runtime: &ArchiveRuntime,
 ) -> Result<HashMap<String, ArchiveSourceWatchIndexRecord>, String> {
@@ -460,6 +810,86 @@ pub(crate) fn import_archive_library(
     import_archive_library_with_runtime(&runtime, request)
 }
 
+pub(crate) fn preflight_archive_library_import(
+    _app: &AppHandle,
+    request: ArchiveLibraryPreflightRequest,
+) -> Result<ArchiveLibraryPreflightResult, String> {
+    let source_root = PathBuf::from(request.source_path.trim());
+    let exists = source_root.exists();
+    let is_directory = source_root.is_dir();
+    if !exists {
+        return Ok(ArchiveLibraryPreflightResult {
+            source_path: source_root.display().to_string(),
+            exists,
+            is_directory,
+            obsidian_vault_detected: false,
+            supported_files: 0,
+            skipped_files: 0,
+            hidden_entries_skipped: 0,
+            generated_archive_entries_skipped: 0,
+            estimated_import_bytes: 0,
+            estimated_managed_storage_bytes: 0,
+            supported_by_extension: Vec::new(),
+            skipped_by_extension: Vec::new(),
+            supported_by_top_folder: Vec::new(),
+            skipped_by_top_folder: Vec::new(),
+            warnings: vec![ArchiveLibraryPreflightWarning {
+                severity: "error".to_string(),
+                title: "Source path does not exist".to_string(),
+                detail: "Choose an existing folder or supported file before importing.".to_string(),
+            }],
+            samples: Vec::new(),
+            recommended_plan: ArchiveLibraryRecommendedImportPlan {
+                summary: "Choose an existing folder before importing.".to_string(),
+                recommended_action: "select-source".to_string(),
+                auto_excluded_top_folders: Vec::new(),
+                ambiguous_top_folders: Vec::new(),
+                included_top_folders: Vec::new(),
+                approval_note: "No import can be planned until the source exists.".to_string(),
+            },
+        });
+    }
+
+    let mut accumulator = PreflightAccumulator::new();
+    preflight_source_path(&source_root, &source_root, &mut accumulator)?;
+    let supported_by_extension = sorted_preflight_counts(accumulator.supported_by_extension);
+    let skipped_by_extension = sorted_preflight_counts(accumulator.skipped_by_extension);
+    let supported_by_top_folder = sorted_preflight_counts(accumulator.supported_by_top_folder);
+    let skipped_by_top_folder = sorted_preflight_counts(accumulator.skipped_by_top_folder);
+    let warnings = build_preflight_warnings(
+        accumulator.supported_files,
+        accumulator.skipped_files,
+        accumulator.estimated_import_bytes,
+        &skipped_by_top_folder,
+    );
+    let recommended_plan = build_recommended_import_plan(
+        accumulator.supported_files,
+        accumulator.skipped_files,
+        &supported_by_top_folder,
+        &skipped_by_top_folder,
+    );
+
+    Ok(ArchiveLibraryPreflightResult {
+        source_path: source_root.display().to_string(),
+        exists,
+        is_directory,
+        obsidian_vault_detected: obsidian_vault_detected(&source_root),
+        supported_files: accumulator.supported_files,
+        skipped_files: accumulator.skipped_files,
+        hidden_entries_skipped: accumulator.hidden_entries_skipped,
+        generated_archive_entries_skipped: accumulator.generated_archive_entries_skipped,
+        estimated_import_bytes: accumulator.estimated_import_bytes,
+        estimated_managed_storage_bytes: accumulator.estimated_import_bytes.saturating_mul(2),
+        supported_by_extension,
+        skipped_by_extension,
+        supported_by_top_folder,
+        skipped_by_top_folder,
+        warnings,
+        samples: accumulator.samples,
+        recommended_plan,
+    })
+}
+
 pub(super) fn import_archive_library_with_runtime(
     runtime: &ArchiveRuntime,
     request: ArchiveLibraryImportRequest,
@@ -524,9 +954,22 @@ pub(super) fn import_archive_library_with_runtime(
     fs::create_dir_all(&metadata_root)
         .map_err(|error| format!("Failed to create library metadata root: {error}"))?;
 
+    let excluded_top_folders = request
+        .excluded_top_folders
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<HashSet<_>>();
     let mut files = Vec::new();
     let skipped_files = if source_root.is_dir() {
-        collect_source_files(&source_root, &mut files)?
+        collect_import_source_files(
+            &source_root,
+            &source_root,
+            &excluded_top_folders,
+            &mut files,
+        )?
     } else if supported_source_file(&source_root) {
         files.push(source_root.clone());
         0
@@ -669,6 +1112,9 @@ pub(super) fn import_archive_library_with_runtime(
         },
     )
     .map_err(|error| format!("Failed to write library source version ledger: {error}"))?;
+    let mut excluded_top_folders_for_manifest =
+        excluded_top_folders.iter().cloned().collect::<Vec<_>>();
+    excluded_top_folders_for_manifest.sort();
     let manifest = json!({
         "importedAt": imported_at,
         "actorId": request.actor_id,
@@ -695,6 +1141,10 @@ pub(super) fn import_archive_library_with_runtime(
             "mixedLibraryRequiresReview": domain == "mixed-library",
             "defaultStandardForNonObsidianSources": "Obsidian frontmatter tags plus wikilinks",
             "allowedLabels": ["human-knowledge", "external-knowledge", "unclear-needs-human-decision"]
+        },
+        "recommendedPlan": {
+            "excludedTopFolders": excluded_top_folders_for_manifest,
+            "source": "preflight-recommended-plan"
         }
     });
     fs::write(
@@ -1184,4 +1634,143 @@ pub(crate) fn write_archive_library_reorganisation_plan(
         blocked_count,
         entries,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+
+    fn test_runtime(root: &Path) -> ArchiveRuntime {
+        ArchiveRuntime {
+            config_path: root.join("ARCHIVE_CONFIG.json"),
+            mode: "adopt".to_string(),
+            vault_root: root.join("vault"),
+            managed_root: root.join("_LivingArchive"),
+            wiki_root: root.join("_LivingArchive").join("WIKI"),
+            data_root: root.join("_LivingArchive").join("DATA"),
+            logs_root: root.join("_LivingArchive").join("logs"),
+            config_root: root.join("_LivingArchive").join("CONFIG"),
+            mapping_file: root
+                .join("_LivingArchive")
+                .join("CONFIG")
+                .join("VAULT_MAP.json"),
+            mappings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn preflight_reports_supported_skipped_and_noisy_folders_without_copying() {
+        let root = std::env::temp_dir().join(format!(
+            "resonantos-library-preflight-test-{}-{}",
+            std::process::id(),
+            unix_timestamp().replace(':', "-")
+        ));
+        let source_root = root.join("source-folder");
+        fs::create_dir_all(source_root.join("notes")).expect("notes folder should be writable");
+        fs::create_dir_all(source_root.join("venv").join("lib"))
+            .expect("venv folder should be writable");
+        fs::write(source_root.join("notes").join("identity.md"), "# Identity")
+            .expect("markdown source should write");
+        fs::write(
+            source_root.join("venv").join("lib").join("runtime.py"),
+            "print('skip')",
+        )
+        .expect("python source should write");
+        fs::write(
+            source_root.join("venv").join("README.txt"),
+            "technical runtime note",
+        )
+        .expect("supported technical source should write");
+        fs::write(source_root.join(".DS_Store"), "hidden").expect("hidden source should write");
+
+        let mut accumulator = PreflightAccumulator::new();
+        preflight_source_path(&source_root, &source_root, &mut accumulator)
+            .expect("preflight scan should work without copying");
+        let skipped_by_top_folder = sorted_preflight_counts(accumulator.skipped_by_top_folder);
+        let warnings = build_preflight_warnings(
+            accumulator.supported_files,
+            accumulator.skipped_files,
+            accumulator.estimated_import_bytes,
+            &skipped_by_top_folder,
+        );
+
+        let supported_by_top_folder = sorted_preflight_counts(accumulator.supported_by_top_folder);
+        let recommended_plan = build_recommended_import_plan(
+            accumulator.supported_files,
+            accumulator.skipped_files,
+            &supported_by_top_folder,
+            &skipped_by_top_folder,
+        );
+
+        assert_eq!(accumulator.supported_files, 2);
+        assert_eq!(accumulator.skipped_files, 2);
+        assert_eq!(accumulator.hidden_entries_skipped, 1);
+        assert!(recommended_plan
+            .auto_excluded_top_folders
+            .contains(&"venv".to_string()));
+        assert!(skipped_by_top_folder
+            .iter()
+            .any(|entry| entry.label == "venv"));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.title.contains("Noisy technical folder")));
+        assert!(
+            !source_root.join("Memory").exists(),
+            "preflight must not create managed archive data"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn import_recommended_plan_excludes_selected_top_folders() {
+        let root = std::env::temp_dir().join(format!(
+            "resonantos-library-recommended-import-test-{}-{}",
+            std::process::id(),
+            unix_timestamp().replace(':', "-")
+        ));
+        let source_root = root.join("source-folder");
+        fs::create_dir_all(source_root.join("notes")).expect("notes folder should be writable");
+        fs::create_dir_all(source_root.join("venv")).expect("venv folder should be writable");
+        fs::write(source_root.join("notes").join("identity.md"), "# Identity")
+            .expect("markdown source should write");
+        fs::write(
+            source_root.join("venv").join("README.txt"),
+            "technical runtime note",
+        )
+        .expect("supported technical source should write");
+        let runtime = test_runtime(&root);
+
+        let result = import_archive_library_with_runtime(
+            &runtime,
+            ArchiveLibraryImportRequest {
+                source_path: source_root.display().to_string(),
+                domain: "human-knowledge".to_string(),
+                import_mode: "copy".to_string(),
+                library_name: Some("Recommended Import".to_string()),
+                actor_id: "strategist.core".to_string(),
+                excluded_top_folders: Some(vec!["venv".to_string()]),
+            },
+        )
+        .expect("recommended import should succeed");
+
+        assert_eq!(result.files_seen, 1);
+        assert_eq!(result.files_imported, 1);
+        assert_eq!(result.skipped_files, 1);
+        assert!(Path::new(&result.canonical_root)
+            .join("notes")
+            .join("identity.md")
+            .exists());
+        assert!(!Path::new(&result.canonical_root)
+            .join("venv")
+            .join("README.txt")
+            .exists());
+        let manifest_raw =
+            fs::read_to_string(&result.manifest_path).expect("manifest should be readable");
+        assert!(manifest_raw.contains("\"excludedTopFolders\": [\n      \"venv\"\n    ]"));
+
+        let _ = fs::remove_dir_all(root);
+    }
 }

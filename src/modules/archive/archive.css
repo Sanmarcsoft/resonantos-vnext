@@ -1,3 +1,145 @@
+.archive-start-panel {
+  border-color: rgba(16, 185, 129, 0.22);
+  background:
+    radial-gradient(circle at top left, rgba(16, 185, 129, 0.14), transparent 30rem),
+    rgba(255, 248, 236, 0.04);
+}
+
+.archive-start-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1.2rem;
+  align-items: center;
+}
+
+.archive-start-copy {
+  position: relative;
+  min-width: 0;
+  padding-left: 1.1rem;
+}
+
+.archive-start-copy h2 {
+  max-width: 20ch;
+  margin: 0.22rem 0 0.55rem;
+  font-size: clamp(1.6rem, 4vw, 2.8rem);
+  line-height: 0.94;
+  letter-spacing: -0.07em;
+}
+
+.archive-start-copy p {
+  max-width: 62ch;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.98rem;
+}
+
+.archive-start-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  justify-content: flex-end;
+}
+
+.archive-start-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.archive-start-summary span {
+  min-height: 34px;
+  padding: 0.5rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(138, 128, 112, 0.14);
+  background: rgba(9, 11, 12, 0.22);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.archive-start-summary span.ready {
+  border-color: rgba(16, 185, 129, 0.22);
+  color: var(--accent);
+}
+
+.archive-start-summary span.warning {
+  border-color: rgba(251, 191, 36, 0.24);
+  color: var(--warning);
+}
+
+.archive-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.45rem;
+  border: 1px solid rgba(138, 128, 112, 0.14);
+  border-radius: 18px;
+  background: rgba(9, 11, 12, 0.72);
+  backdrop-filter: blur(18px);
+  overflow-x: auto;
+}
+
+.archive-tabs button {
+  min-height: 42px;
+  padding: 0.55rem 0.78rem;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.archive-tabs button:hover,
+.archive-tabs button.active {
+  border-color: rgba(16, 185, 129, 0.22);
+  background: rgba(16, 185, 129, 0.08);
+  color: var(--text-primary);
+}
+
+.archive-help-panel {
+  gap: 1rem;
+}
+
+.archive-help-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.archive-help-sections section {
+  min-width: 0;
+  padding: 0.9rem;
+  border-radius: 18px;
+  border: 1px solid rgba(138, 128, 112, 0.14);
+  background: rgba(9, 11, 12, 0.2);
+}
+
+.archive-help-sections h3 {
+  margin: 0 0 0.45rem;
+  font-size: 1rem;
+}
+
+.archive-help-sections p,
+.archive-help-sections ol {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.archive-help-sections ol {
+  display: grid;
+  gap: 0.35rem;
+  padding-left: 1.1rem;
+}
+
 .archive-command-panel {
   border-color: rgba(16, 185, 129, 0.22);
   background:
@@ -595,6 +737,128 @@
   margin-top: 0.45rem;
 }
 
+.library-preflight-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.library-preflight-actions p {
+  margin: 0;
+  min-width: min(100%, 260px);
+  flex: 1;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.library-preflight-report {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+  padding: 0.85rem;
+  border-radius: 16px;
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  background: rgba(245, 158, 11, 0.045);
+}
+
+.library-preflight-warnings {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.library-preflight-warnings .inline-notice p {
+  margin: 0.2rem 0 0;
+}
+
+.library-recommended-plan {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.8rem;
+  border-radius: 15px;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  background: rgba(16, 185, 129, 0.055);
+}
+
+.library-recommended-plan strong {
+  font-size: 0.95rem;
+}
+
+.library-recommended-plan p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.library-recommended-plan .archive-result-metrics {
+  margin-top: 0.5rem;
+}
+
+.library-recommended-plan > button {
+  white-space: nowrap;
+}
+
+.library-preflight-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.library-preflight-list {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.7rem;
+  border-radius: 14px;
+  border: 1px solid rgba(138, 128, 112, 0.14);
+  background: rgba(9, 11, 12, 0.18);
+}
+
+.library-preflight-list > strong {
+  font-size: 0.82rem;
+}
+
+.library-preflight-list ul {
+  display: grid;
+  gap: 0.38rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.library-preflight-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.library-preflight-list li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-preflight-list li small {
+  color: var(--text-muted);
+  font: 0.68rem/1.2 "JetBrains Mono", monospace;
+}
+
+.library-preflight-list p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
 .library-import-form input,
 .library-import-form select {
   min-height: 44px;
@@ -715,6 +979,29 @@
 .archive-review-desk {
   display: grid;
   gap: 1rem;
+}
+
+.archive-focus-target {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  scroll-margin-top: 1rem;
+}
+
+.archive-focus-target.active .archive-review-hero {
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.2), 0 0 34px rgba(16, 185, 129, 0.12);
+}
+
+.archive-focus-cue {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.55rem 0.72rem;
+  border-radius: 999px;
+  border: 1px solid rgba(16, 185, 129, 0.22);
+  background: rgba(16, 185, 129, 0.075);
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
 }
 
 .archive-review-hero {
@@ -1085,4 +1372,31 @@
 .touch-action {
   min-height: 44px;
   min-width: 44px;
+}
+
+@media (max-width: 760px) {
+  .archive-start-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .archive-start-actions {
+    justify-content: stretch;
+  }
+
+  .archive-start-actions button {
+    width: 100%;
+  }
+
+  .archive-help-sections {
+    grid-template-columns: 1fr;
+  }
+
+  .library-recommended-plan {
+    grid-template-columns: 1fr;
+  }
+
+  .library-recommended-plan > button {
+    width: 100%;
+    white-space: normal;
+  }
 }

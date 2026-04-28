@@ -5,6 +5,7 @@ import { useState } from "react";
 import type {
   ArchiveLibraryImportMode,
   ArchiveLibraryImportResult,
+  ArchiveLibraryPreflightResult,
   ArchiveMemoryDomain,
 } from "../../core/contracts";
 import { Panel } from "../../components/Panel";
@@ -12,19 +13,26 @@ import { Panel } from "../../components/Panel";
 type ArchiveLibraryImporterProps = {
   archiveSourceScanBusy: boolean;
   archiveLibraryImportResult: ArchiveLibraryImportResult | null;
+  archiveLibraryPreflightResult: ArchiveLibraryPreflightResult | null;
   onPickLibraryFolder: () => Promise<string | null>;
+  onPreflightLibrary: (sourcePath: string) => void;
+  onAskAugmentorAboutPreflight: (report: ArchiveLibraryPreflightResult) => void;
   onImportLibrary: (input: {
     sourcePath: string;
     domain: ArchiveMemoryDomain;
     importMode: ArchiveLibraryImportMode;
     libraryName?: string;
+    excludedTopFolders?: string[];
   }) => void;
 };
 
 export function ArchiveLibraryImporter({
   archiveSourceScanBusy,
   archiveLibraryImportResult,
+  archiveLibraryPreflightResult,
   onPickLibraryFolder,
+  onPreflightLibrary,
+  onAskAugmentorAboutPreflight,
   onImportLibrary,
 }: ArchiveLibraryImporterProps) {
   const [libraryPath, setLibraryPath] = useState("");
@@ -35,8 +43,15 @@ export function ArchiveLibraryImporter({
     const selected = await onPickLibraryFolder();
     if (selected) {
       setLibraryPath(selected);
+      onPreflightLibrary(selected);
     }
   };
+  const preflightMatchesPath = archiveLibraryPreflightResult?.sourcePath === libraryPath.trim();
+  const canImport =
+    Boolean(libraryPath.trim()) &&
+    preflightMatchesPath &&
+    archiveLibraryPreflightResult?.exists &&
+    archiveLibraryPreflightResult.supportedFiles > 0;
 
   return (
     <Panel
@@ -68,6 +83,7 @@ export function ArchiveLibraryImporter({
             domain: libraryDomain,
             importMode: libraryImportMode,
             libraryName,
+            excludedTopFolders: archiveLibraryPreflightResult?.recommendedPlan.autoExcludedTopFolders ?? [],
           });
         }}
       >
@@ -88,6 +104,17 @@ export function ArchiveLibraryImporter({
             <span>{libraryPath || "Click to choose a folder or Obsidian vault"}</span>
             <strong>Browse...</strong>
           </button>
+          <div className="library-preflight-actions">
+            <button
+              type="button"
+              className="button-secondary touch-action"
+              disabled={archiveSourceScanBusy || !libraryPath.trim()}
+              onClick={() => onPreflightLibrary(libraryPath)}
+            >
+              {archiveSourceScanBusy ? "Analyzing..." : "Analyze Before Import"}
+            </button>
+            <p>Preflight checks what will be copied, skipped, and warned before the archive writes anything.</p>
+          </div>
           <details className="library-manual-path">
             <summary>Advanced: type path manually</summary>
             <input
@@ -97,6 +124,13 @@ export function ArchiveLibraryImporter({
               placeholder="/Users/you/Documents/My Knowledge Folder"
             />
           </details>
+          {archiveLibraryPreflightResult ? (
+            <LibraryPreflightReport
+              report={archiveLibraryPreflightResult}
+              isStale={!preflightMatchesPath}
+              onAskAugmentor={onAskAugmentorAboutPreflight}
+            />
+          ) : null}
         </section>
 
         <section className="library-step-card">
@@ -152,9 +186,16 @@ export function ArchiveLibraryImporter({
               <p>Non-Obsidian folders use Obsidian-compatible frontmatter, tags, and wikilinks by default.</p>
             </div>
           </div>
-          <button type="submit" className="button-secondary touch-action" disabled={archiveSourceScanBusy || !libraryPath.trim()}>
-            {archiveSourceScanBusy ? "Importing..." : "Import Library"}
+          <button type="submit" className="button-secondary touch-action" disabled={archiveSourceScanBusy || !canImport}>
+            {archiveSourceScanBusy ? "Importing..." : "Import Recommended Plan"}
           </button>
+          {!archiveLibraryPreflightResult ? (
+            <div className="inline-notice">Run preflight before importing so skipped files and storage cost are visible.</div>
+          ) : !preflightMatchesPath ? (
+            <div className="inline-notice warning">The folder path changed after preflight. Analyze again before importing.</div>
+          ) : !canImport ? (
+            <div className="inline-notice warning">This source has no supported files to import.</div>
+          ) : null}
         </section>
       </form>
       {archiveLibraryImportResult ? (
@@ -183,5 +224,107 @@ export function ArchiveLibraryImporter({
         </article>
       ) : null}
     </Panel>
+  );
+}
+
+const formatBytes = (bytes: number): string => {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (let index = 1; index < units.length && value >= 1024; index += 1) {
+    value /= 1024;
+    unit = units[index];
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`;
+};
+
+function CountList({ title, counts }: { title: string; counts: ArchiveLibraryPreflightResult["supportedByExtension"] }) {
+  return (
+    <div className="library-preflight-list">
+      <strong>{title}</strong>
+      {counts.length ? (
+        <ul>
+          {counts.slice(0, 8).map((item) => (
+            <li key={item.label}>
+              <span>{item.label}</span>
+              <small>
+                {item.count} · {formatBytes(item.sizeBytes)}
+              </small>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>No entries.</p>
+      )}
+    </div>
+  );
+}
+
+function LibraryPreflightReport({
+  report,
+  isStale,
+  onAskAugmentor,
+}: {
+  report: ArchiveLibraryPreflightResult;
+  isStale: boolean;
+  onAskAugmentor: (report: ArchiveLibraryPreflightResult) => void;
+}) {
+  return (
+    <article className="library-preflight-report">
+      {isStale ? <div className="inline-notice warning">This preflight belongs to a previous path. Analyze again.</div> : null}
+      <div className="archive-result-metrics">
+        <span>{report.supportedFiles} supported</span>
+        <span>{report.skippedFiles} skipped</span>
+        <span>{formatBytes(report.estimatedImportBytes)} source</span>
+        <span>{formatBytes(report.estimatedManagedStorageBytes)} managed estimate</span>
+        {report.obsidianVaultDetected ? <span>Obsidian vault detected</span> : null}
+      </div>
+      {report.warnings.length ? (
+        <div className="library-preflight-warnings">
+          {report.warnings.map((warning) => (
+            <div className={`inline-notice ${warning.severity === "error" ? "warning" : ""}`} key={`${warning.title}:${warning.detail}`}>
+              <strong>{warning.title}</strong>
+              <p>{warning.detail}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div className="library-recommended-plan">
+        <div>
+          <span className="eyebrow">Recommended plan</span>
+          <strong>{report.recommendedPlan.summary}</strong>
+          <p>{report.recommendedPlan.approvalNote}</p>
+          <div className="archive-result-metrics">
+            <span>{report.recommendedPlan.includedTopFolders.length} top folder(s) included</span>
+            <span>{report.recommendedPlan.autoExcludedTopFolders.length} technical folder(s) auto-excluded</span>
+            <span>{report.recommendedPlan.ambiguousTopFolders.length} ambiguous folder(s) flagged</span>
+          </div>
+        </div>
+        <button type="button" className="button-secondary touch-action" disabled={isStale} onClick={() => onAskAugmentor(report)}>
+          Ask Augmentor about this plan
+        </button>
+      </div>
+      <div className="library-preflight-grid">
+        <CountList title="Will import by folder" counts={report.supportedByTopFolder} />
+        <CountList title="Will skip by folder" counts={report.skippedByTopFolder} />
+        <CountList title="Will import by type" counts={report.supportedByExtension} />
+        <CountList title="Will skip by type" counts={report.skippedByExtension} />
+      </div>
+      {report.samples.length ? (
+        <details className="library-manual-path">
+          <summary>Skipped examples</summary>
+          <ul className="mono-list">
+            {report.samples.slice(0, 12).map((sample) => (
+              <li key={`${sample.reason}:${sample.path}`}>
+                {sample.reason} · {sample.path}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </article>
   );
 }

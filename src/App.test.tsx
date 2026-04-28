@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AddOnCategory,
@@ -16,6 +16,8 @@ import { buildDefaultState } from "./core/defaults";
 const manifests: AddOnManifest[] = [
   createManifest("addon.telegram-channel", "Telegram Channel", "channel"),
   createManifest("addon.obsidian", "Obsidian", "knowledge"),
+  createBrowserManifest(),
+  createOpenCodeManifest(),
   createManifest("addon.audio2tol", "Audio2TOL", "tool"),
   createManifest("addon.openclaw", "OpenClaw", "agent"),
 ];
@@ -46,16 +48,45 @@ const {
   requestArchiveBuildTolBundleMock,
   requestArchiveSourceFolderScanMock,
   requestArchiveLibraryImportMock,
+  requestArchiveLibraryPreflightMock,
   requestArchiveImportedLibrariesMock,
   requestArchiveLibraryClassificationReviewMock,
   requestArchiveLibraryReorganisationPlanMock,
   requestArchiveLibraryFolderSelectionMock,
+  requestObsidianVaultFolderSelectionMock,
+  requestObsidianVaultStatusMock,
+  requestObsidianNoteListMock,
+  requestObsidianNoteMock,
+  requestObsidianOpenNoteMock,
+  requestObsidianWriteNoteMock,
+  requestObsidianVaultIndexMock,
+  requestOpenCodeWorkspaceFolderSelectionMock,
+  requestOpenCodeStatusMock,
+  requestOpenCodeStartServiceMock,
+  requestOpenCodeStopServiceMock,
+  requestBrowserEngineStatusMock,
+  requestBrowserInstallEngineMock,
+  requestBrowserOpenUrlMock,
+  requestBrowserStartSessionMock,
+  requestBrowserSessionOpenUrlMock,
+  requestBrowserSessionScreenshotMock,
+  requestBrowserSessionReadPageMock,
+  requestBrowserSessionClickMock,
+  requestBrowserSessionScrollMock,
+  requestBrowserCloseSessionMock,
+  requestBrowserNativeWebviewShowMock,
+  requestBrowserNativeWebviewResizeMock,
+  requestBrowserNativeWebviewHideMock,
+  createDesktopBrowserToolRunnerMock,
+  browserToolRunMock,
   requestLocalRuntimeStatusMock,
   requestEngineerRecoveryTurnMock,
   requestRecoveryRouteCandidatesMock,
   requestProviderDiagnosticsMock,
   requestProviderSmokeTestMock,
-} = vi.hoisted(() => ({
+} = vi.hoisted(() => {
+  const browserToolRunMock = vi.fn();
+  return {
   hydrateStateMock: vi.fn(),
   requestProviderServiceChatCompletionMock: vi.fn(async (_input?: unknown) => "This is a live Strategist test reply from MiniMax-M2.7."),
   requestProviderServiceChatCompletionStreamMock: vi.fn(async (_input, onEvent) => {
@@ -200,6 +231,18 @@ const {
   requestArchiveRuntimeStatusMock: vi.fn(async () => ({
     status: "ready",
     mode: "adopt",
+    portableUserState: {
+      rootPath: "/Users/augmentor/Documents/ResonantOS_User",
+      manifestPath: "/Users/augmentor/Documents/ResonantOS_User/Config/portable-state-manifest.json",
+      memoryRoot: "/Users/augmentor/Documents/ResonantOS_User/Memory",
+      configRoot: "/Users/augmentor/Documents/ResonantOS_User/Config",
+      secretsRoot: "/Users/augmentor/Documents/ResonantOS_User/Secrets",
+      walletsRoot: "/Users/augmentor/Documents/ResonantOS_User/Wallets",
+      logsRoot: "/Users/augmentor/Documents/ResonantOS_User/Logs",
+      backupsRoot: "/Users/augmentor/Documents/ResonantOS_User/Backups",
+      source: "documents-default",
+      initialized: true,
+    },
     configPath: "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/CONFIG/ARCHIVE_CONFIG.json",
     vaultRoot: "/Users/augmentor/Documents/RESONANT_OS_BASE",
     managedRoot: "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive",
@@ -414,6 +457,39 @@ const {
       },
     ] as Array<Record<string, unknown>>,
   })),
+  requestArchiveLibraryPreflightMock: vi.fn(async () => ({
+    sourcePath: "/Users/augmentor/Documents/RESONANT_OS_BASE",
+    exists: true,
+    isDirectory: true,
+    obsidianVaultDetected: false,
+    supportedFiles: 2,
+    skippedFiles: 1,
+    hiddenEntriesSkipped: 0,
+    generatedArchiveEntriesSkipped: 0,
+    estimatedImportBytes: 4096,
+    estimatedManagedStorageBytes: 8192,
+    supportedByExtension: [{ label: "md", count: 2, sizeBytes: 4096 }],
+    skippedByExtension: [{ label: "png", count: 1, sizeBytes: 512 }],
+    supportedByTopFolder: [{ label: "notes", count: 2, sizeBytes: 4096 }],
+    skippedByTopFolder: [{ label: "Wordpress Post Backup", count: 1, sizeBytes: 512 }],
+    warnings: [
+      {
+        severity: "warning",
+        title: "Noisy technical folder: Wordpress Post Backup",
+        detail: "1 skipped file(s) were found under this folder.",
+      },
+    ],
+    samples: [{ path: "/Users/augmentor/Documents/RESONANT_OS_BASE/image.png", reason: "unsupported .png" }],
+    recommendedPlan: {
+      summary: "Import 2 supported file(s). 1 unsupported or generated file(s) will stay out of Living Archive memory.",
+      recommendedAction: "import-recommended-plan",
+      autoExcludedTopFolders: ["venv"],
+      ambiguousTopFolders: ["Wordpress Post Backup"],
+      includedTopFolders: ["notes"],
+      approvalNote:
+        "Augmentor can explain this plan. The user approves one recommended import action; technical exclusions are handled by ResonantOS.",
+    },
+  })),
   requestArchiveImportedLibrariesMock: vi.fn(async () => [] as Array<Record<string, unknown>>),
   requestArchiveLibraryClassificationReviewMock: vi.fn(async () => ({
     artifactType: "library-classification-review",
@@ -478,6 +554,216 @@ const {
     ] as Array<Record<string, unknown>>,
   })),
   requestArchiveLibraryFolderSelectionMock: vi.fn(async () => "/Users/augmentor/Documents/RESONANT_OS_BASE"),
+  requestObsidianVaultFolderSelectionMock: vi.fn(async () => "/Users/augmentor/Documents/ResonantVault"),
+  requestObsidianVaultStatusMock: vi.fn(async () => ({
+    vaultPath: "/Users/augmentor/Documents/ResonantVault",
+    exists: true,
+    isDirectory: true,
+    obsidianConfigDetected: true,
+    markdownFiles: 1,
+    warnings: [] as string[],
+  })),
+  requestObsidianNoteListMock: vi.fn(async () => [
+    {
+      title: "Architecture Note",
+      relativePath: "Architecture Note.md",
+      sizeBytes: 42,
+      modifiedAt: "unix:12",
+    },
+  ]),
+  requestObsidianNoteMock: vi.fn(async () => ({
+    title: "Architecture Note",
+    relativePath: "Architecture Note.md",
+    content: "# Architecture Note\nResonantOS note preview.",
+    sizeBytes: 42,
+    modifiedAt: "unix:12",
+  })),
+  requestObsidianOpenNoteMock: vi.fn(async (_vaultPath: string, notePath: string) => ({
+    openedUrl: "obsidian://open?path=%2FUsers%2Faugmentor%2FDocuments%2FResonantVault%2FArchitecture%20Note.md",
+    absolutePath: "/Users/augmentor/Documents/ResonantVault/Architecture Note.md",
+    notePath,
+  })),
+  requestObsidianWriteNoteMock: vi.fn(async (input: { notePath: string; content: string; expectedModifiedAt?: string }) => ({
+    notePath: input.notePath,
+    title: "Architecture Note",
+    sizeBytes: input.content.length,
+    previousModifiedAt: input.expectedModifiedAt,
+    modifiedAt: "unix:14",
+    versionPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-versions/Architecture Note.1.md",
+    auditPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-audit/1-write-note.json",
+  })),
+  requestObsidianVaultIndexMock: vi.fn(async (_vaultPath: string, query = "") => ({
+    vaultPath: "/Users/augmentor/Documents/ResonantVault",
+    noteCount: 2,
+    query: query || undefined,
+    notes: [
+      {
+        title: "Architecture Note",
+        relativePath: "Architecture Note.md",
+        sizeBytes: 42,
+        modifiedAt: "unix:12",
+        tags: ["#resonance/system"],
+        wikilinks: ["Living Archive"],
+        backlinks: [
+          {
+            sourcePath: "Research Note.md",
+            sourceTitle: "Research Note",
+          },
+        ],
+        excerpt: "Links to [[Living Archive]] #resonance/system",
+      },
+      {
+        title: "Research Note",
+        relativePath: "Research Note.md",
+        sizeBytes: 88,
+        modifiedAt: "unix:13",
+        tags: ["#archive"],
+        wikilinks: ["Architecture Note"],
+        backlinks: [],
+        excerpt: "Research links to [[Architecture Note]].",
+      },
+    ].filter((note) => !query || JSON.stringify(note).toLowerCase().includes(query.toLowerCase())),
+  })),
+  requestOpenCodeWorkspaceFolderSelectionMock: vi.fn(async () => "/Users/augmentor/Documents/ResonantVault"),
+  requestOpenCodeStatusMock: vi.fn(async () => ({
+    installed: false,
+    version: null,
+    binaryPath: null,
+    installHint: "Install OpenCode with npm install -g opencode-ai.",
+    supportsWebUi: true,
+    supportsServerApi: true,
+  })),
+  requestOpenCodeStartServiceMock: vi.fn(async () => ({
+    sessionId: "opencode-main",
+    workspacePath: "/Users/augmentor/Documents/ResonantVault",
+    mode: "web",
+    apiBaseUrl: "http://127.0.0.1:4096",
+    webUrl: "http://127.0.0.1:4096",
+    command: "opencode web --hostname 127.0.0.1 --port 4096",
+    pid: 42,
+    alreadyRunning: false,
+  })),
+  requestOpenCodeStopServiceMock: vi.fn(async () => ({
+    sessionId: "opencode-main",
+    workspacePath: "/Users/augmentor/Documents/ResonantVault",
+    mode: "web",
+    apiBaseUrl: "http://127.0.0.1:4096",
+    webUrl: "http://127.0.0.1:4096",
+    command: "opencode web --hostname 127.0.0.1 --port 4096",
+    pid: 42,
+    alreadyRunning: false,
+  })),
+  requestBrowserEngineStatusMock: vi.fn(async () => ({
+    installed: true,
+    enginePath: "/tmp/chromium",
+    installHint: "Chromium Browser engine is installed.",
+  })),
+  requestBrowserInstallEngineMock: vi.fn(async () => ({
+    installed: true,
+    enginePath: "/tmp/chromium",
+    log: "Chromium Browser engine installed.",
+  })),
+  requestBrowserOpenUrlMock: vi.fn(async (url: string) => ({
+    sessionId: "browser-test-session",
+    requestedUrl: url,
+    finalUrl: url,
+    title: "Example Domain",
+    status: "captured",
+    engine: "chromium-cdp",
+    screenshotDataUrl:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+    audit: [
+      { action: "engine.launched", detail: "test", timestamp: "unix-ms:1" },
+      { action: "page.loaded", detail: url, timestamp: "unix-ms:2" },
+      { action: "evidence.screenshot", detail: "browser-test-session", timestamp: "unix-ms:3" },
+    ],
+  })),
+  requestBrowserStartSessionMock: vi.fn(async (url: string) => ({
+    sessionId: "browser-test-session",
+    requestedUrl: url,
+    finalUrl: url,
+    title: "Example Domain",
+    status: "session-active",
+    engine: "chromium-cdp",
+    screenshotDataUrl:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+    audit: [
+      { action: "engine.launched", detail: "test", timestamp: "unix-ms:1" },
+      { action: "page.loaded", detail: url, timestamp: "unix-ms:2" },
+      { action: "evidence.screenshot", detail: "browser-test-session", timestamp: "unix-ms:3" },
+    ],
+  })),
+  requestBrowserSessionOpenUrlMock: vi.fn(async (_sessionId: string, url: string) => ({
+    sessionId: "browser-test-session",
+    requestedUrl: url,
+    finalUrl: url,
+    title: "Example Domain",
+    status: "session-active",
+    engine: "chromium-cdp",
+    screenshotDataUrl:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+    audit: [{ action: "page.loaded", detail: url, timestamp: "unix-ms:4" }],
+  })),
+  requestBrowserSessionScreenshotMock: vi.fn(async (sessionId: string) => ({
+    sessionId,
+    requestedUrl: "https://example.org",
+    finalUrl: "https://example.org",
+    title: "Example Domain",
+    status: "session-active",
+    engine: "chromium-cdp",
+    screenshotDataUrl:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+    audit: [{ action: "evidence.screenshot", detail: sessionId, timestamp: "unix-ms:5" }],
+  })),
+  requestBrowserSessionReadPageMock: vi.fn(async (sessionId: string) => ({
+    sessionId,
+    finalUrl: "https://example.org",
+    title: "Example Domain",
+    text: "Example Domain text extracted from Chromium.",
+    links: [{ text: "More information", href: "https://iana.org/domains/example" }],
+    audit: [{ action: "page.read", detail: "https://example.org", timestamp: "unix-ms:6" }],
+  })),
+  requestBrowserSessionClickMock: vi.fn(async (sessionId: string) => ({
+    sessionId,
+    finalUrl: "https://example.org/clicked",
+    title: "Clicked Page",
+    screenshotDataUrl:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+    audit: [{ action: "input.click", detail: "10,10", timestamp: "unix-ms:8" }],
+  })),
+  requestBrowserSessionScrollMock: vi.fn(async (sessionId: string) => ({
+    sessionId,
+    finalUrl: "https://example.org",
+    title: "Example Domain",
+    screenshotDataUrl:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+    audit: [{ action: "input.scroll", detail: "0,120", timestamp: "unix-ms:9" }],
+  })),
+  requestBrowserCloseSessionMock: vi.fn(async (sessionId: string) => ({
+    sessionId,
+    closed: true,
+    audit: [{ action: "session.closed", detail: sessionId, timestamp: "unix-ms:7" }],
+  })),
+  requestBrowserNativeWebviewShowMock: vi.fn(async (input: { url: string }) => ({
+    label: "resonant-browser-native",
+    url: input.url,
+    visible: true,
+    status: "created",
+  })),
+  requestBrowserNativeWebviewResizeMock: vi.fn(async () => ({
+    label: "resonant-browser-native",
+    url: null,
+    visible: true,
+    status: "resized",
+  })),
+  requestBrowserNativeWebviewHideMock: vi.fn(async () => ({
+    label: "resonant-browser-native",
+    url: null,
+    visible: false,
+    status: "hidden",
+  })),
+  browserToolRunMock,
+  createDesktopBrowserToolRunnerMock: vi.fn(() => ({ run: browserToolRunMock })),
   requestLocalRuntimeStatusMock: vi.fn(async () => ({
     available: true,
     targetModel: "batiai/gemma4-e2b:q4",
@@ -580,7 +866,8 @@ const {
     checkedAt: "unix:2",
     summary: "Provider smoke test passed.",
   })),
-}));
+  };
+});
 
 vi.mock("./core/runtime", () => ({
   loadBundledManifests: vi.fn(async () => manifests),
@@ -621,10 +908,36 @@ vi.mock("./core/runtime", () => ({
   requestArchiveBuildTolBundle: requestArchiveBuildTolBundleMock,
   requestArchiveSourceFolderScan: requestArchiveSourceFolderScanMock,
   requestArchiveLibraryImport: requestArchiveLibraryImportMock,
+  requestArchiveLibraryPreflight: requestArchiveLibraryPreflightMock,
   requestArchiveImportedLibraries: requestArchiveImportedLibrariesMock,
   requestArchiveLibraryClassificationReview: requestArchiveLibraryClassificationReviewMock,
   requestArchiveLibraryReorganisationPlan: requestArchiveLibraryReorganisationPlanMock,
   requestArchiveLibraryFolderSelection: requestArchiveLibraryFolderSelectionMock,
+  requestObsidianVaultFolderSelection: requestObsidianVaultFolderSelectionMock,
+  requestObsidianVaultStatus: requestObsidianVaultStatusMock,
+  requestObsidianNoteList: requestObsidianNoteListMock,
+  requestObsidianNote: requestObsidianNoteMock,
+  requestObsidianOpenNote: requestObsidianOpenNoteMock,
+  requestObsidianWriteNote: requestObsidianWriteNoteMock,
+  requestObsidianVaultIndex: requestObsidianVaultIndexMock,
+  requestOpenCodeWorkspaceFolderSelection: requestOpenCodeWorkspaceFolderSelectionMock,
+  requestOpenCodeStatus: requestOpenCodeStatusMock,
+  requestOpenCodeStartService: requestOpenCodeStartServiceMock,
+  requestOpenCodeStopService: requestOpenCodeStopServiceMock,
+  requestBrowserEngineStatus: requestBrowserEngineStatusMock,
+  requestBrowserInstallEngine: requestBrowserInstallEngineMock,
+  requestBrowserOpenUrl: requestBrowserOpenUrlMock,
+  requestBrowserStartSession: requestBrowserStartSessionMock,
+  requestBrowserSessionOpenUrl: requestBrowserSessionOpenUrlMock,
+  requestBrowserSessionScreenshot: requestBrowserSessionScreenshotMock,
+  requestBrowserSessionReadPage: requestBrowserSessionReadPageMock,
+  requestBrowserSessionClick: requestBrowserSessionClickMock,
+  requestBrowserSessionScroll: requestBrowserSessionScrollMock,
+  requestBrowserCloseSession: requestBrowserCloseSessionMock,
+  requestBrowserNativeWebviewShow: requestBrowserNativeWebviewShowMock,
+  requestBrowserNativeWebviewResize: requestBrowserNativeWebviewResizeMock,
+  requestBrowserNativeWebviewHide: requestBrowserNativeWebviewHideMock,
+  createDesktopBrowserToolRunner: createDesktopBrowserToolRunnerMock,
   requestRecoveryRouteCandidates: requestRecoveryRouteCandidatesMock,
   requestProviderServiceChatCompletion: requestProviderServiceChatCompletionMock,
   requestProviderServiceChatCompletionStream: requestProviderServiceChatCompletionStreamMock,
@@ -673,6 +986,12 @@ describe("App boot flow", () => {
   });
 
   beforeEach(() => {
+    class ResizeObserverMock {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
     hydrateStateMock.mockReset();
     hydrateStateMock.mockResolvedValue(buildDefaultState(manifests));
     requestProviderServiceChatCompletionMock.mockReset();
@@ -827,6 +1146,18 @@ describe("App boot flow", () => {
     requestArchiveRuntimeStatusMock.mockResolvedValue({
       status: "ready",
       mode: "adopt",
+      portableUserState: {
+        rootPath: "/Users/augmentor/Documents/ResonantOS_User",
+        manifestPath: "/Users/augmentor/Documents/ResonantOS_User/Config/portable-state-manifest.json",
+        memoryRoot: "/Users/augmentor/Documents/ResonantOS_User/Memory",
+        configRoot: "/Users/augmentor/Documents/ResonantOS_User/Config",
+        secretsRoot: "/Users/augmentor/Documents/ResonantOS_User/Secrets",
+        walletsRoot: "/Users/augmentor/Documents/ResonantOS_User/Wallets",
+        logsRoot: "/Users/augmentor/Documents/ResonantOS_User/Logs",
+        backupsRoot: "/Users/augmentor/Documents/ResonantOS_User/Backups",
+        source: "documents-default",
+        initialized: true,
+      },
       configPath: "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/CONFIG/ARCHIVE_CONFIG.json",
       vaultRoot: "/Users/augmentor/Documents/RESONANT_OS_BASE",
       managedRoot: "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive",
@@ -1056,6 +1387,40 @@ describe("App boot flow", () => {
         },
       ] as Array<Record<string, unknown>>,
     });
+    requestArchiveLibraryPreflightMock.mockReset();
+    requestArchiveLibraryPreflightMock.mockResolvedValue({
+      sourcePath: "/Users/augmentor/Documents/RESONANT_OS_BASE",
+      exists: true,
+      isDirectory: true,
+      obsidianVaultDetected: false,
+      supportedFiles: 2,
+      skippedFiles: 1,
+      hiddenEntriesSkipped: 0,
+      generatedArchiveEntriesSkipped: 0,
+      estimatedImportBytes: 4096,
+      estimatedManagedStorageBytes: 8192,
+      supportedByExtension: [{ label: "md", count: 2, sizeBytes: 4096 }],
+      skippedByExtension: [{ label: "png", count: 1, sizeBytes: 512 }],
+      supportedByTopFolder: [{ label: "notes", count: 2, sizeBytes: 4096 }],
+      skippedByTopFolder: [{ label: "Wordpress Post Backup", count: 1, sizeBytes: 512 }],
+      warnings: [
+        {
+          severity: "warning",
+          title: "Noisy technical folder: Wordpress Post Backup",
+          detail: "1 skipped file(s) were found under this folder.",
+        },
+      ],
+      samples: [{ path: "/Users/augmentor/Documents/RESONANT_OS_BASE/image.png", reason: "unsupported .png" }],
+      recommendedPlan: {
+        summary: "Import 2 supported file(s). 1 unsupported or generated file(s) will stay out of Living Archive memory.",
+        recommendedAction: "import-recommended-plan",
+        autoExcludedTopFolders: ["venv"],
+        ambiguousTopFolders: ["Wordpress Post Backup"],
+        includedTopFolders: ["notes"],
+        approvalNote:
+          "Augmentor can explain this plan. The user approves one recommended import action; technical exclusions are handled by ResonantOS.",
+      },
+    });
     requestArchiveImportedLibrariesMock.mockReset();
     requestArchiveImportedLibrariesMock.mockResolvedValue([]);
     requestArchiveLibraryClassificationReviewMock.mockReset();
@@ -1125,6 +1490,270 @@ describe("App boot flow", () => {
     });
     requestArchiveLibraryFolderSelectionMock.mockReset();
     requestArchiveLibraryFolderSelectionMock.mockResolvedValue("/Users/augmentor/Documents/RESONANT_OS_BASE");
+    requestObsidianVaultFolderSelectionMock.mockReset();
+    requestObsidianVaultFolderSelectionMock.mockResolvedValue("/Users/augmentor/Documents/ResonantVault");
+    requestObsidianVaultStatusMock.mockReset();
+    requestObsidianVaultStatusMock.mockResolvedValue({
+      vaultPath: "/Users/augmentor/Documents/ResonantVault",
+      exists: true,
+      isDirectory: true,
+      obsidianConfigDetected: true,
+      markdownFiles: 1,
+      warnings: [],
+    });
+    requestObsidianNoteListMock.mockReset();
+    requestObsidianNoteListMock.mockResolvedValue([
+      {
+        title: "Architecture Note",
+        relativePath: "Architecture Note.md",
+        sizeBytes: 42,
+        modifiedAt: "unix:12",
+      },
+    ]);
+    requestObsidianNoteMock.mockReset();
+    requestObsidianNoteMock.mockResolvedValue({
+      title: "Architecture Note",
+      relativePath: "Architecture Note.md",
+      content: "# Architecture Note\nResonantOS note preview.",
+      sizeBytes: 42,
+      modifiedAt: "unix:12",
+    });
+    requestObsidianOpenNoteMock.mockReset();
+    requestObsidianOpenNoteMock.mockResolvedValue({
+      openedUrl: "obsidian://open?path=%2FUsers%2Faugmentor%2FDocuments%2FResonantVault%2FArchitecture%20Note.md",
+      absolutePath: "/Users/augmentor/Documents/ResonantVault/Architecture Note.md",
+      notePath: "Architecture Note.md",
+    });
+    requestObsidianWriteNoteMock.mockReset();
+    requestObsidianWriteNoteMock.mockImplementation(async (input: { notePath: string; content: string; expectedModifiedAt?: string }) => ({
+      notePath: input.notePath,
+      title: "Architecture Note",
+      sizeBytes: input.content.length,
+      previousModifiedAt: input.expectedModifiedAt,
+      modifiedAt: "unix:14",
+      versionPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-versions/Architecture Note.1.md",
+      auditPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-audit/1-write-note.json",
+    }));
+    requestObsidianVaultIndexMock.mockReset();
+    requestObsidianVaultIndexMock.mockImplementation(async (_vaultPath: string, query = "") => ({
+      vaultPath: "/Users/augmentor/Documents/ResonantVault",
+      noteCount: 2,
+      query: query || undefined,
+      notes: [
+        {
+          title: "Architecture Note",
+          relativePath: "Architecture Note.md",
+          sizeBytes: 42,
+          modifiedAt: "unix:12",
+          tags: ["#resonance/system"],
+          wikilinks: ["Living Archive"],
+          backlinks: [
+            {
+              sourcePath: "Research Note.md",
+              sourceTitle: "Research Note",
+            },
+          ],
+          excerpt: "Links to [[Living Archive]] #resonance/system",
+        },
+        {
+          title: "Research Note",
+          relativePath: "Research Note.md",
+          sizeBytes: 88,
+          modifiedAt: "unix:13",
+          tags: ["#archive"],
+          wikilinks: ["Architecture Note"],
+          backlinks: [],
+          excerpt: "Research links to [[Architecture Note]].",
+        },
+      ].filter((note) => !query || JSON.stringify(note).toLowerCase().includes(query.toLowerCase())),
+    }));
+    requestOpenCodeWorkspaceFolderSelectionMock.mockReset();
+    requestOpenCodeWorkspaceFolderSelectionMock.mockResolvedValue("/Users/augmentor/Documents/ResonantVault");
+    requestOpenCodeStatusMock.mockReset();
+    requestOpenCodeStatusMock.mockResolvedValue({
+      installed: false,
+      version: null,
+      binaryPath: null,
+      installHint: "Install OpenCode with npm install -g opencode-ai.",
+      supportsWebUi: true,
+      supportsServerApi: true,
+    });
+    requestOpenCodeStartServiceMock.mockReset();
+    requestOpenCodeStartServiceMock.mockResolvedValue({
+      sessionId: "opencode-main",
+      workspacePath: "/Users/augmentor/Documents/ResonantVault",
+      mode: "web",
+      apiBaseUrl: "http://127.0.0.1:4096",
+      webUrl: "http://127.0.0.1:4096",
+      command: "opencode web --hostname 127.0.0.1 --port 4096",
+      pid: 42,
+      alreadyRunning: false,
+    });
+    requestOpenCodeStopServiceMock.mockReset();
+    requestOpenCodeStopServiceMock.mockResolvedValue({
+      sessionId: "opencode-main",
+      workspacePath: "/Users/augmentor/Documents/ResonantVault",
+      mode: "web",
+      apiBaseUrl: "http://127.0.0.1:4096",
+      webUrl: "http://127.0.0.1:4096",
+      command: "opencode web --hostname 127.0.0.1 --port 4096",
+      pid: 42,
+      alreadyRunning: false,
+    });
+    requestBrowserEngineStatusMock.mockReset();
+    requestBrowserEngineStatusMock.mockResolvedValue({
+      installed: true,
+      enginePath: "/tmp/chromium",
+      installHint: "Chromium Browser engine is installed.",
+    });
+    requestBrowserInstallEngineMock.mockReset();
+    requestBrowserInstallEngineMock.mockResolvedValue({
+      installed: true,
+      enginePath: "/tmp/chromium",
+      log: "Chromium Browser engine installed.",
+    });
+    requestBrowserOpenUrlMock.mockReset();
+    requestBrowserOpenUrlMock.mockImplementation(async (url: string) => ({
+      sessionId: "browser-test-session",
+      requestedUrl: url,
+      finalUrl: url,
+      title: "Example Domain",
+      status: "captured",
+      engine: "chromium-cdp",
+      screenshotDataUrl:
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      audit: [
+        { action: "engine.launched", detail: "test", timestamp: "unix-ms:1" },
+        { action: "page.loaded", detail: url, timestamp: "unix-ms:2" },
+        { action: "evidence.screenshot", detail: "browser-test-session", timestamp: "unix-ms:3" },
+      ],
+    }));
+    requestBrowserStartSessionMock.mockReset();
+    requestBrowserStartSessionMock.mockImplementation(async (url: string) => ({
+      sessionId: "browser-test-session",
+      requestedUrl: url,
+      finalUrl: url,
+      title: "Example Domain",
+      status: "session-active",
+      engine: "chromium-cdp",
+      screenshotDataUrl:
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      audit: [
+        { action: "engine.launched", detail: "test", timestamp: "unix-ms:1" },
+        { action: "page.loaded", detail: url, timestamp: "unix-ms:2" },
+        { action: "evidence.screenshot", detail: "browser-test-session", timestamp: "unix-ms:3" },
+      ],
+    }));
+    requestBrowserSessionOpenUrlMock.mockReset();
+    requestBrowserSessionOpenUrlMock.mockImplementation(async (_sessionId: string, url: string) => ({
+      sessionId: "browser-test-session",
+      requestedUrl: url,
+      finalUrl: url,
+      title: "Example Domain",
+      status: "session-active",
+      engine: "chromium-cdp",
+      screenshotDataUrl:
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      audit: [{ action: "page.loaded", detail: url, timestamp: "unix-ms:4" }],
+    }));
+    requestBrowserSessionScreenshotMock.mockReset();
+    requestBrowserSessionScreenshotMock.mockResolvedValue({
+      sessionId: "browser-test-session",
+      requestedUrl: "https://example.org",
+      finalUrl: "https://example.org",
+      title: "Example Domain",
+      status: "session-active",
+      engine: "chromium-cdp",
+      screenshotDataUrl:
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      audit: [{ action: "evidence.screenshot", detail: "browser-test-session", timestamp: "unix-ms:5" }],
+    });
+    requestBrowserSessionReadPageMock.mockReset();
+    requestBrowserSessionReadPageMock.mockResolvedValue({
+      sessionId: "browser-test-session",
+      finalUrl: "https://example.org",
+      title: "Example Domain",
+      text: "Example Domain text extracted from Chromium.",
+      links: [{ text: "More information", href: "https://iana.org/domains/example" }],
+      audit: [{ action: "page.read", detail: "https://example.org", timestamp: "unix-ms:6" }],
+    });
+    requestBrowserSessionClickMock.mockReset();
+    requestBrowserSessionClickMock.mockResolvedValue({
+      sessionId: "browser-test-session",
+      finalUrl: "https://example.org/clicked",
+      title: "Clicked Page",
+      screenshotDataUrl:
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      audit: [{ action: "input.click", detail: "10,10", timestamp: "unix-ms:8" }],
+    });
+    requestBrowserSessionScrollMock.mockReset();
+    requestBrowserSessionScrollMock.mockResolvedValue({
+      sessionId: "browser-test-session",
+      finalUrl: "https://example.org",
+      title: "Example Domain",
+      screenshotDataUrl:
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      audit: [{ action: "input.scroll", detail: "0,120", timestamp: "unix-ms:9" }],
+    });
+    requestBrowserCloseSessionMock.mockReset();
+    requestBrowserCloseSessionMock.mockResolvedValue({
+      sessionId: "browser-test-session",
+      closed: true,
+      audit: [{ action: "session.closed", detail: "browser-test-session", timestamp: "unix-ms:7" }],
+    });
+    requestBrowserNativeWebviewShowMock.mockReset();
+    requestBrowserNativeWebviewShowMock.mockImplementation(async (input: { url: string }) => ({
+      label: "resonant-browser-native",
+      url: input.url,
+      visible: true,
+      status: "created",
+    }));
+    requestBrowserNativeWebviewResizeMock.mockReset();
+    requestBrowserNativeWebviewResizeMock.mockResolvedValue({
+      label: "resonant-browser-native",
+      url: null,
+      visible: true,
+      status: "resized",
+    });
+    requestBrowserNativeWebviewHideMock.mockReset();
+    requestBrowserNativeWebviewHideMock.mockResolvedValue({
+      label: "resonant-browser-native",
+      url: null,
+      visible: false,
+      status: "hidden",
+    });
+    createDesktopBrowserToolRunnerMock.mockReset();
+    browserToolRunMock.mockReset();
+    browserToolRunMock.mockImplementation(async (command: { type: string; params?: Record<string, unknown> }) =>
+      command.type === "read_page"
+        ? {
+            sessionId: "browser-host-session",
+            finalUrl: "https://resonantos.com/",
+            title: "ResonantOS",
+            text: "ResonantOS controlled Browser host text.",
+            links: [{ text: "Home", href: "https://resonantos.com/" }],
+            audit: [],
+          }
+        : command.type === "open_url"
+          ? {
+              sessionId: "browser-host-session",
+              finalUrl: String(command.params?.url ?? "https://resonantos.com/"),
+              title: "Synced Browser Page",
+              status: 200,
+              audit: [],
+            }
+          : {
+              ready: true,
+              sessionId: "browser-host-session",
+              engine: "chromium",
+              headless: false,
+              url: "https://resonantos.com/",
+              audit: [],
+            },
+    );
+    createDesktopBrowserToolRunnerMock.mockReturnValue({
+      run: browserToolRunMock,
+    });
     requestLocalRuntimeStatusMock.mockReset();
     requestLocalRuntimeStatusMock.mockResolvedValue({
       available: true,
@@ -1249,6 +1878,303 @@ describe("App boot flow", () => {
 
     expect(screen.getByText("What model are you using?")).toBeTruthy();
     expect(await screen.findByText("This is a live Strategist test reply from MiniMax-M2.7.")).toBeTruthy();
+  });
+
+  it("swaps the main workspace and chat rail while keeping the app dock fixed", async () => {
+    const { container } = render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    expect(container.querySelector(".shell.layout-main-chat")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Move chat beside the launcher" }));
+
+    expect(container.querySelector(".shell.layout-chat-main")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Move chat back to the right" })).toBeTruthy();
+  });
+
+  it("opens the Resonant Browser workspace from Home with a live viewport contract", async () => {
+    const rect = (left: number, top: number, right: number, bottom: number): DOMRect => ({
+      left,
+      top,
+      right,
+      bottom,
+      width: right - left,
+      height: bottom - top,
+      x: left,
+      y: top,
+      toJSON: () => ({}),
+    });
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("browser-native-webview-mount")) {
+        return rect(80, 90, 1080, 700);
+      }
+      if (this.classList.contains("browser-toolbar")) {
+        return rect(80, 40, 1080, 130);
+      }
+      return rect(0, 0, 0, 0);
+    });
+    const state = buildDefaultState(manifests);
+    const browserInstallation = state.installations["addon.browser"];
+    browserInstallation.installed = true;
+    browserInstallation.enabled = true;
+    browserInstallation.status = "enabled";
+    browserInstallation.grantedCapabilities = browserInstallation.grantedCapabilities.map((grant) =>
+      grant.capability === "network" || grant.capability === "ui-embedding" || grant.capability === "browser-control"
+        ? { ...grant, granted: true }
+        : grant,
+    );
+    hydrateStateMock.mockResolvedValueOnce(state);
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Resonant Browser" })).toBeTruthy();
+    expect(document.querySelector('use[href="/icons/vendor-ui.svg#tabler-world"]')).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: /Resonant Browser.*Embedded app/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Workspace" }));
+
+    expect(screen.getByTestId("browser-workspace")).toBeTruthy();
+    expect(await screen.findByLabelText("Browser URL")).toBeTruthy();
+    expect(screen.getByLabelText("Live browser viewport")).toBeTruthy();
+    const browserSurface = screen.getByTitle("Resonant Browser native webview: resonantos.com");
+    expect(browserSurface).toBeTruthy();
+    expect(screen.getByText("Websites load in a host-owned webview, not an iframe.")).toBeTruthy();
+    await waitFor(() =>
+      expect(requestBrowserNativeWebviewShowMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://resonantos.com",
+          navigate: true,
+          bounds: expect.objectContaining({ x: 81, y: 186, width: 998, height: 513 }),
+        }),
+      ),
+    );
+    rectSpy.mockRestore();
+    expect(requestBrowserEngineStatusMock).not.toHaveBeenCalled();
+    expect(requestBrowserStartSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves Browser tabs and active URL when switching workspaces", async () => {
+    const state = buildDefaultState(manifests);
+    const browserInstallation = state.installations["addon.browser"];
+    browserInstallation.installed = true;
+    browserInstallation.enabled = true;
+    browserInstallation.status = "enabled";
+    browserInstallation.grantedCapabilities = browserInstallation.grantedCapabilities.map((grant) =>
+      grant.capability === "network" || grant.capability === "ui-embedding" || grant.capability === "browser-control"
+        ? { ...grant, granted: true }
+        : grant,
+    );
+    hydrateStateMock.mockResolvedValueOnce(state);
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: /Resonant Browser.*Embedded app/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Workspace" }));
+
+    const urlInput = await screen.findByLabelText("Browser URL");
+    fireEvent.change(urlInput, { target: { value: "example.com" } });
+    fireEvent.submit(urlInput.closest("form")!);
+    expect((screen.getByLabelText("Browser URL") as HTMLInputElement).value).toBe("https://example.com");
+    await waitFor(() =>
+      expect(browserToolRunMock).toHaveBeenCalledWith({ type: "open_url", params: { url: "https://example.com" } }),
+    );
+    await waitFor(() =>
+      expect(requestBrowserNativeWebviewShowMock).toHaveBeenCalledWith(
+        expect.objectContaining({ url: "https://example.com", navigate: true }),
+      ),
+    );
+    expect(browserToolRunMock).toHaveBeenCalledWith({ type: "open_url", params: { url: "https://example.com" } });
+    expect((await screen.findAllByText(/Native Browser/i)).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "New tab" }));
+    expect((screen.getByLabelText("Browser URL") as HTMLInputElement).value).toBe("https://resonantos.com");
+
+    fireEvent.click(screen.getByRole("button", { name: "Living Archive" }));
+    expect((await screen.findAllByText("Living Archive")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Resonant Browser" }));
+
+    expect(((await screen.findByLabelText("Browser URL")) as HTMLInputElement).value).toBe("https://resonantos.com");
+    fireEvent.click(screen.getByRole("button", { name: "Open tab example.com" }));
+    expect((screen.getByLabelText("Browser URL") as HTMLInputElement).value).toBe("https://example.com");
+  });
+
+  it("runs a governed Browser host read from the visible Browser toolbar", async () => {
+    const state = buildDefaultState(manifests);
+    const browserInstallation = state.installations["addon.browser"];
+    browserInstallation.installed = true;
+    browserInstallation.enabled = true;
+    browserInstallation.status = "enabled";
+    browserInstallation.grantedCapabilities = browserInstallation.grantedCapabilities.map((grant) =>
+      grant.capability === "network" || grant.capability === "ui-embedding" || grant.capability === "browser-control"
+        ? { ...grant, granted: true }
+        : grant,
+    );
+    hydrateStateMock.mockResolvedValueOnce(state);
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: /Resonant Browser.*Embedded app/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Workspace" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Read active page with Augmentor" }));
+
+    expect((await screen.findAllByText(/Controlled read: ResonantOS/i)).length).toBeGreaterThan(0);
+    expect(createDesktopBrowserToolRunnerMock).toHaveBeenCalledTimes(1);
+    expect(browserToolRunMock).toHaveBeenCalledWith({ type: "health" });
+    expect(browserToolRunMock).toHaveBeenCalledWith({ type: "read_page" });
+  });
+
+  it("grants the Browser controlled access preset from the Add-ons workspace", async () => {
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Add-ons/i })[0]);
+    fireEvent.click(await screen.findByText("Resonant Browser"));
+
+    expect(screen.getByRole("button", { name: "Install and grant controlled browser access" })).toBeTruthy();
+    expect(await screen.findByText("chromium installed")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Install and grant controlled browser access" }));
+
+    expect(await screen.findByRole("button", { name: "Browser access granted" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Chromium installed" })).toBeTruthy();
+    expect(screen.getByText("network granted")).toBeTruthy();
+    expect(screen.getByText("ui embedding granted")).toBeTruthy();
+    expect(screen.getByText("browser control granted")).toBeTruthy();
+  });
+
+  it("sets up Browser from the add-on card even when persisted grants are stale", async () => {
+    const state = buildDefaultState(manifests);
+    state.installations["addon.browser"] = {
+      ...state.installations["addon.browser"],
+      installed: true,
+      enabled: true,
+      status: "enabled",
+      grantedCapabilities: [],
+    };
+    hydrateStateMock.mockResolvedValueOnce(state);
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: /Add-ons/i })[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "Install and grant browser access" }));
+
+    expect(await screen.findByRole("button", { name: "Browser access granted" })).toBeTruthy();
+    expect(screen.getByText("chromium installed")).toBeTruthy();
+    expect(screen.getByText("network granted")).toBeTruthy();
+    expect(screen.getByText("ui embedding granted")).toBeTruthy();
+    expect(screen.getByText("browser control granted")).toBeTruthy();
+  });
+
+  it("sets up Browser directly from the gated Browser workspace", async () => {
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: /Resonant Browser.*Embedded app/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Install and grant browser access" }));
+
+    expect(await screen.findByLabelText("Browser URL")).toBeTruthy();
+    expect(screen.getByLabelText("Live browser viewport")).toBeTruthy();
+  });
+
+  it("opens OpenCode as an optional add-on workspace with scoped launch gates", async () => {
+    const state = buildDefaultState(manifests);
+    const opencodeInstallation = state.installations["addon.opencode"];
+    opencodeInstallation.installed = true;
+    opencodeInstallation.enabled = true;
+    opencodeInstallation.status = "enabled";
+    hydrateStateMock.mockResolvedValueOnce(state);
+    requestOpenCodeStatusMock.mockResolvedValueOnce({
+      installed: false,
+      version: null,
+      binaryPath: null,
+      installHint: "Install OpenCode with npm install -g opencode-ai.",
+      supportsWebUi: true,
+      supportsServerApi: true,
+    });
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: "OpenCode" })[0]);
+
+    expect(await screen.findByTestId("opencode-workspace")).toBeTruthy();
+    expect(screen.getByText("OpenCode UI will appear here after launch.")).toBeTruthy();
+    expect(screen.queryByText("OpenCode not detected")).toBeNull();
+    expect(screen.queryByText("Capability gate")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "OpenCode workspace settings" }));
+    expect(await screen.findByText("OpenCode not detected")).toBeTruthy();
+    expect(screen.getByText(/Before launch:/i)).toBeTruthy();
+
+    requestOpenCodeStatusMock.mockResolvedValueOnce({
+      installed: true,
+      version: "0.0.0-test",
+      binaryPath: "/usr/local/bin/opencode",
+      installHint: "OpenCode is installed.",
+      supportsWebUi: true,
+      supportsServerApi: true,
+    } as unknown as Awaited<ReturnType<typeof requestOpenCodeStatusMock>>);
+    fireEvent.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() => {
+      expect(requestOpenCodeWorkspaceFolderSelectionMock).toHaveBeenCalled();
+    });
+    expect((await screen.findAllByText("/Users/augmentor/Documents/ResonantVault")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("OpenCode 0.0.0-test")).toBeTruthy();
+    await waitFor(() => {
+      expect(requestOpenCodeStartServiceMock).toHaveBeenCalledWith({
+        workspacePath: "/Users/augmentor/Documents/ResonantVault",
+        mode: "web",
+        sessionId: "opencode-main",
+      });
+    });
+    expect(await screen.findByLabelText("OpenCode embedded workspace")).toBeTruthy();
+  });
+
+  it("auto-launches OpenCode when workspace access is already configured", async () => {
+    const state = buildDefaultState(manifests);
+    const opencodeInstallation = state.installations["addon.opencode"];
+    opencodeInstallation.installed = true;
+    opencodeInstallation.enabled = true;
+    opencodeInstallation.status = "enabled";
+    opencodeInstallation.config = {
+      workspacePath: "/Users/augmentor/Documents/ResonantVault",
+    };
+    opencodeInstallation.grantedCapabilities = opencodeInstallation.grantedCapabilities.map((grant) =>
+      grant.capability === "filesystem" || grant.capability === "shell" || grant.capability === "ui-embedding" ? { ...grant, granted: true } : grant,
+    );
+    hydrateStateMock.mockResolvedValueOnce(state);
+    requestOpenCodeStatusMock.mockResolvedValue({
+      installed: true,
+      version: "0.0.0-test",
+      binaryPath: "/usr/local/bin/opencode",
+      installHint: "OpenCode is installed.",
+      supportsWebUi: true,
+      supportsServerApi: true,
+    } as unknown as Awaited<ReturnType<typeof requestOpenCodeStatusMock>>);
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: "OpenCode" })[0]);
+
+    expect(await screen.findByTestId("opencode-workspace")).toBeTruthy();
+    await waitFor(() => {
+      expect(requestOpenCodeStartServiceMock).toHaveBeenCalledWith({
+        workspacePath: "/Users/augmentor/Documents/ResonantVault",
+        mode: "web",
+        sessionId: "opencode-main",
+      });
+    });
+    expect(requestOpenCodeWorkspaceFolderSelectionMock).not.toHaveBeenCalled();
+    expect(await screen.findByLabelText("OpenCode embedded workspace")).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Home" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "OpenCode" })[0]);
+    expect(requestOpenCodeStartServiceMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByLabelText("OpenCode embedded workspace")).toBeTruthy();
   });
 
   it("creates an Engineer delegation workspace from explicit Augmentor delegation", async () => {
@@ -1645,7 +2571,7 @@ describe("App boot flow", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /Context usage/i })[0]);
     fireEvent.click(screen.getByRole("button", { name: "Compact now" }));
     expect(await screen.findByText(/Context compacted\. Preserved/i)).toBeTruthy();
-    expect(await screen.findByText(/Open this from the chat composer/i)).toBeTruthy();
+    expect(await screen.findByText(/Edits change compact memory only/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Edit memory" }));
     fireEvent.change(screen.getByLabelText("User why"), {
       target: { value: "Edited why: preserve the user's intent across compaction." },
@@ -1833,6 +2759,7 @@ describe("App boot flow", () => {
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Advanced section" }));
     fireEvent.click(screen.getByRole("button", { name: "Run Ingest Probe" }));
 
     expect(await screen.findByText(/Probe route healthy/i)).toBeTruthy();
@@ -1869,6 +2796,7 @@ describe("App boot flow", () => {
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Search section" }));
 
     expect(await screen.findByText("Archive online")).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText("Search the Living Archive"), {
@@ -1891,22 +2819,460 @@ describe("App boot flow", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
     fireEvent.click(await screen.findByRole("button", { name: "Choose folder or vault path" }));
     expect(await screen.findByText("/Users/augmentor/Documents/RESONANT_OS_BASE")).toBeTruthy();
+    expect(await screen.findByText("2 supported")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Library name"), {
       target: { value: "RESONANT_OS_BASE" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Import Library" }));
+    fireEvent.click(screen.getByRole("button", { name: "Import Recommended Plan" }));
 
     expect(await screen.findByText("Imported 2 file(s) into RESONANT_OS_BASE. Managed location is now canonical.")).toBeTruthy();
     expect(await screen.findByText("Latest imported library")).toBeTruthy();
     expect(await screen.findByText(/Classification review artifact created/i)).toBeTruthy();
     expect(screen.getByRole("option", { name: /Move into Living Archive/i }).hasAttribute("disabled")).toBe(true);
+    expect(requestArchiveLibraryPreflightMock).toHaveBeenCalledWith("/Users/augmentor/Documents/RESONANT_OS_BASE");
     expect(requestArchiveLibraryImportMock).toHaveBeenCalledWith({
       sourcePath: "/Users/augmentor/Documents/RESONANT_OS_BASE",
       domain: "mixed-library",
       importMode: "copy",
       libraryName: "RESONANT_OS_BASE",
       actorId: "strategist.core",
+      excludedTopFolders: ["venv"],
     });
+  });
+
+  it("opens a new Augmentor session for Living Archive preflight guidance", async () => {
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "Choose folder or vault path" }));
+    expect(await screen.findByText("Import 2 supported file(s). 1 unsupported or generated file(s) will stay out of Living Archive memory.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Ask Augmentor about this plan" }));
+
+    await waitFor(() => {
+      expect(requestProviderServiceChatCompletionStreamMock).toHaveBeenCalled();
+    });
+    const request = requestProviderServiceChatCompletionStreamMock.mock.calls.at(-1)?.[0];
+    expect(request?.messages.at(-1)?.content).toContain("Help me understand this Living Archive import preflight");
+    expect(request?.messages.at(-1)?.content).toContain("Wordpress Post Backup");
+    expect(request?.messages.at(-1)?.content).toContain("Audio2TOL add-on");
+    fireEvent.click(screen.getByRole("button", { name: "Show chat history" }));
+    expect(await screen.findByText("Living Archive import plan")).toBeTruthy();
+  });
+
+  it("connects the Obsidian add-on to a selected vault and previews a note", async () => {
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Add-ons/i })[0]);
+    fireEvent.click(Array.from(document.querySelectorAll(".addon-card")).find((element) => element.textContent?.includes("Obsidian"))!);
+    fireEvent.click(await screen.findByRole("button", { name: "Choose vault" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Obsidian vault path")).toHaveProperty(
+        "value",
+        "/Users/augmentor/Documents/ResonantVault",
+      );
+    });
+    expect(await screen.findByText(/1 markdown note/i)).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button").find((element) => element.textContent?.includes("Architecture Note.md"))!);
+
+    expect(await screen.findByText(/ResonantOS note preview/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open in Obsidian" }));
+    expect(await screen.findByText(/Opened in Obsidian: Architecture Note.md/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Plan archive intake" }));
+
+    await waitFor(() => {
+      expect(requestProviderServiceChatCompletionStreamMock).toHaveBeenCalled();
+    });
+    expect(JSON.stringify(requestProviderServiceChatCompletionStreamMock.mock.calls.at(-1)?.[0])).toContain(
+      "Obsidian note handoff from ResonantOS V1 vault bridge",
+    );
+    expect(JSON.stringify(requestProviderServiceChatCompletionStreamMock.mock.calls.at(-1)?.[0])).toContain(
+      "Create a Living Archive intake plan",
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: "Grant intake access" })[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "Queue for archive review" }));
+    expect(await screen.findByText(/Queue this note for Living Archive review/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm queue" }));
+
+    expect(await screen.findByText(/Queued for review/i)).toBeTruthy();
+    expect(screen.getByText("Intake history")).toBeTruthy();
+    expect(screen.getByText("Architecture Note.md")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open Living Archive Review" }));
+    expect(await screen.findByText("Archive online")).toBeTruthy();
+    expect(await screen.findByText(/Opened from Obsidian intake history/i)).toBeTruthy();
+    expect(screen.getByLabelText("Living Archive review desk")).toBeTruthy();
+    expect(requestArchiveIntakeWriteMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "addon.obsidian",
+        bucket: "obsidian-vault-notes",
+        fileName: expect.stringContaining("architecture-note.md"),
+        content: expect.stringContaining("This is a raw Obsidian note intake artifact."),
+        metadata: expect.objectContaining({
+          origin: "obsidian-addon",
+          notePath: "Architecture Note.md",
+          trustBoundary: "raw-intake-only",
+        }),
+      }),
+    );
+    expect(requestArchiveIngestRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "addon.obsidian",
+        sourceType: "obsidian_note",
+        sourceRole: "vault-note",
+        intent: "review-and-ingest",
+      }),
+    );
+    expect(requestObsidianVaultFolderSelectionMock).toHaveBeenCalled();
+    expect(requestObsidianVaultStatusMock).toHaveBeenCalledWith("/Users/augmentor/Documents/ResonantVault");
+    expect(requestObsidianNoteListMock).toHaveBeenCalledWith("/Users/augmentor/Documents/ResonantVault", 200);
+    expect(requestObsidianNoteMock).toHaveBeenCalledWith("/Users/augmentor/Documents/ResonantVault", "Architecture Note.md");
+    expect(requestObsidianOpenNoteMock).toHaveBeenCalledWith("/Users/augmentor/Documents/ResonantVault", "Architecture Note.md");
+  });
+
+  it("queues scanned Obsidian notes as raw intake only after batch confirmation", async () => {
+    requestObsidianVaultStatusMock.mockResolvedValueOnce({
+      vaultPath: "/Users/augmentor/Documents/ResonantVault",
+      exists: true,
+      isDirectory: true,
+      obsidianConfigDetected: true,
+      markdownFiles: 2,
+      warnings: [],
+    });
+    requestObsidianNoteListMock.mockResolvedValueOnce([
+      {
+        title: "Architecture Note",
+        relativePath: "Architecture Note.md",
+        sizeBytes: 42,
+        modifiedAt: "unix:12",
+      },
+      {
+        title: "Research Note",
+        relativePath: "Research/Research Note.md",
+        sizeBytes: 88,
+        modifiedAt: "unix:13",
+      },
+    ]);
+    requestObsidianNoteMock.mockImplementation(async (...args: unknown[]) => {
+      const notePath = String(args[1] ?? "Architecture Note.md");
+      const researchNote = notePath.includes("Research");
+      return {
+        title: researchNote ? "Research Note" : "Architecture Note",
+        relativePath: notePath,
+        content: researchNote ? "# Research Note\nExternal material." : "# Architecture Note\nHuman material.",
+        sizeBytes: researchNote ? 88 : 42,
+        modifiedAt: researchNote ? "unix:13" : "unix:12",
+      };
+    });
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: /Add-ons/i })[0]);
+    fireEvent.click(Array.from(document.querySelectorAll(".addon-card")).find((element) => element.textContent?.includes("Obsidian"))!);
+    fireEvent.click(await screen.findByRole("button", { name: "Choose vault" }));
+
+    expect(await screen.findByText(/2 markdown note/i)).toBeTruthy();
+    expect(screen.getByText("2 note(s) ready for review queue")).toBeTruthy();
+    expect(screen.getByLabelText("2 new Obsidian note(s)")).toBeTruthy();
+    expect(screen.getByLabelText("0 changed Obsidian note(s)")).toBeTruthy();
+    expect(screen.getByLabelText("0 queued unchanged Obsidian note(s)")).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: "Grant intake access" })[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "Queue scanned notes" }));
+    expect(await screen.findByText("Review notes before queueing")).toBeTruthy();
+    expect(screen.getByLabelText("Obsidian changed note review list")).toBeTruthy();
+    expect(screen.getByText("2 of 2 selected")).toBeTruthy();
+    expect(screen.getByText("Architecture Note.md")).toBeTruthy();
+    expect(screen.getByText("Research/Research Note.md")).toBeTruthy();
+    expect(screen.getAllByText("not queued yet").length).toBe(2);
+    fireEvent.click(screen.getByLabelText("Research Note"));
+    expect(screen.getByText("1 of 2 selected")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Queue reviewed notes" }));
+
+    expect(await screen.findByText(/Queued 1 Obsidian note/i)).toBeTruthy();
+    expect(await screen.findByText("1 note(s) ready for review queue")).toBeTruthy();
+    expect(screen.getByLabelText("1 new Obsidian note(s)")).toBeTruthy();
+    expect(screen.getByLabelText("0 changed Obsidian note(s)")).toBeTruthy();
+    expect(screen.getByLabelText("1 queued unchanged Obsidian note(s)")).toBeTruthy();
+    expect(requestArchiveIntakeWriteMock).toHaveBeenCalledTimes(1);
+    expect(requestArchiveIngestRequestMock).toHaveBeenCalledTimes(1);
+    expect(requestArchiveIntakeWriteMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          notePath: "Research/Research Note.md",
+        }),
+      }),
+    );
+    expect(requestArchiveIntakeWriteMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "addon.obsidian",
+        bucket: "obsidian-vault-notes",
+        content: expect.stringContaining("This is a raw Obsidian note intake artifact."),
+        metadata: expect.objectContaining({
+          origin: "obsidian-addon",
+          trustBoundary: "raw-intake-only",
+        }),
+      }),
+    );
+  });
+
+  it("uses the Obsidian sync index to mark changed and unchanged queued notes", async () => {
+    const state = buildDefaultState(manifests);
+    const obsidianInstallation = state.installations["addon.obsidian"];
+    obsidianInstallation.installed = true;
+    obsidianInstallation.enabled = true;
+    obsidianInstallation.status = "enabled";
+    obsidianInstallation.config = {
+      vaultPath: "/Users/augmentor/Documents/ResonantVault",
+      queuedIntakes: [],
+      queuedNoteIndex: [
+        {
+          title: "Architecture Note",
+          notePath: "Architecture Note.md",
+          sourceModifiedAt: "unix:11",
+          sourceSizeBytes: 42,
+          artifactPath: "/tmp/old-architecture.md",
+          requestFile: "/tmp/old-architecture.json",
+          queuedAt: "unix:10",
+        },
+        {
+          title: "Research Note",
+          notePath: "Research/Research Note.md",
+          sourceModifiedAt: "unix:13",
+          sourceSizeBytes: 88,
+          artifactPath: "/tmp/research.md",
+          requestFile: "/tmp/research.json",
+          queuedAt: "unix:10",
+        },
+      ],
+    };
+    hydrateStateMock.mockResolvedValueOnce(state);
+    requestObsidianVaultStatusMock.mockResolvedValueOnce({
+      vaultPath: "/Users/augmentor/Documents/ResonantVault",
+      exists: true,
+      isDirectory: true,
+      obsidianConfigDetected: true,
+      markdownFiles: 2,
+      warnings: [],
+    });
+    requestObsidianNoteListMock.mockResolvedValueOnce([
+      {
+        title: "Architecture Note",
+        relativePath: "Architecture Note.md",
+        sizeBytes: 42,
+        modifiedAt: "unix:12",
+      },
+      {
+        title: "Research Note",
+        relativePath: "Research/Research Note.md",
+        sizeBytes: 88,
+        modifiedAt: "unix:13",
+      },
+    ]);
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: /Add-ons/i })[0]);
+    fireEvent.click(Array.from(document.querySelectorAll(".addon-card")).find((element) => element.textContent?.includes("Obsidian"))!);
+    fireEvent.click(await screen.findByRole("button", { name: "Scan" }));
+
+    expect(await screen.findByText(/2 markdown note/i)).toBeTruthy();
+    expect(screen.getByText("1 note(s) ready for review queue")).toBeTruthy();
+    expect(screen.getByLabelText("0 new Obsidian note(s)")).toBeTruthy();
+    expect(screen.getByLabelText("1 changed Obsidian note(s)")).toBeTruthy();
+    expect(screen.getByLabelText("1 queued unchanged Obsidian note(s)")).toBeTruthy();
+  });
+
+  it("refreshes edited Obsidian notes without queueing them automatically", async () => {
+    const state = buildDefaultState(manifests);
+    const obsidianInstallation = state.installations["addon.obsidian"];
+    obsidianInstallation.installed = true;
+    obsidianInstallation.enabled = true;
+    obsidianInstallation.status = "enabled";
+    obsidianInstallation.config = {
+      vaultPath: "/Users/augmentor/Documents/ResonantVault",
+      queuedIntakes: [],
+      queuedNoteIndex: [
+        {
+          title: "Architecture Note",
+          notePath: "Architecture Note.md",
+          sourceModifiedAt: "unix:12",
+          sourceSizeBytes: 42,
+          artifactPath: "/tmp/architecture.md",
+          requestFile: "/tmp/architecture.json",
+          queuedAt: "unix:10",
+        },
+      ],
+    };
+    hydrateStateMock.mockResolvedValueOnce(state);
+    requestObsidianVaultStatusMock.mockResolvedValueOnce({
+      vaultPath: "/Users/augmentor/Documents/ResonantVault",
+      exists: true,
+      isDirectory: true,
+      obsidianConfigDetected: true,
+      markdownFiles: 2,
+      warnings: [],
+    });
+    requestObsidianNoteListMock.mockResolvedValueOnce([
+      {
+        title: "Architecture Note",
+        relativePath: "Architecture Note.md",
+        sizeBytes: 52,
+        modifiedAt: "unix:14",
+      },
+      {
+        title: "Fresh Note",
+        relativePath: "Fresh Note.md",
+        sizeBytes: 25,
+        modifiedAt: "unix:14",
+      },
+    ]);
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: /Add-ons/i })[0]);
+    fireEvent.click(Array.from(document.querySelectorAll(".addon-card")).find((element) => element.textContent?.includes("Obsidian"))!);
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh changed notes" }));
+
+    expect(await screen.findByText("Refresh complete: 1 new note(s), 1 changed note(s).")).toBeTruthy();
+    expect(screen.getByLabelText("1 new Obsidian note(s)")).toBeTruthy();
+    expect(screen.getByLabelText("1 changed Obsidian note(s)")).toBeTruthy();
+    expect(screen.getByText("2 note(s) ready for review queue")).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: "Grant intake access" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Queue scanned notes" }));
+    expect(await screen.findByText("Review notes before queueing")).toBeTruthy();
+    expect(screen.getByText("Architecture Note.md")).toBeTruthy();
+    expect(screen.getByText("Fresh Note.md")).toBeTruthy();
+    expect(screen.getByText("modified time and size changed")).toBeTruthy();
+    expect(screen.getByText("not queued yet")).toBeTruthy();
+    expect(requestArchiveIntakeWriteMock).not.toHaveBeenCalled();
+    expect(requestArchiveIngestRequestMock).not.toHaveBeenCalled();
+  });
+
+  it("opens the Obsidian V2 workspace and saves a note through the audited host command", async () => {
+    const state = buildDefaultState(manifests);
+    const obsidianInstallation = state.installations["addon.obsidian"];
+    obsidianInstallation.installed = true;
+    obsidianInstallation.enabled = true;
+    obsidianInstallation.status = "enabled";
+    obsidianInstallation.config = {
+      vaultPath: "/Users/augmentor/Documents/ResonantVault",
+    };
+    obsidianInstallation.grantedCapabilities = obsidianInstallation.grantedCapabilities.map((grant) =>
+      grant.capability === "filesystem" || grant.capability === "ui-embedding" ? { ...grant, granted: true } : grant,
+    );
+    hydrateStateMock.mockResolvedValueOnce(state);
+    requestObsidianNoteMock.mockResolvedValueOnce({
+      title: "Architecture Note",
+      relativePath: "Architecture Note.md",
+      content: "---\ntype: architecture\nstatus: draft\n---\n# Architecture Note\nLinks to [[Living Archive]] #resonance/system",
+      sizeBytes: 116,
+      modifiedAt: "unix:12",
+    });
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    fireEvent.click(await screen.findByRole("button", { name: "Obsidian" }));
+
+    expect(await screen.findByTestId("obsidian-workspace")).toBeTruthy();
+    expect(await screen.findByText("1 note(s)")).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button").find((element) => element.textContent?.includes("Architecture Note.md"))!);
+
+    const editor = await screen.findByLabelText("Obsidian note editor");
+    const metadataPanel = screen.getByLabelText("Obsidian note metadata");
+    expect(within(metadataPanel).getByText("type")).toBeTruthy();
+    expect(within(metadataPanel).getByText("architecture")).toBeTruthy();
+    expect(within(metadataPanel).getByText("#resonance/system")).toBeTruthy();
+    expect(within(metadataPanel).getByText("[[Living Archive]]")).toBeTruthy();
+    expect(screen.getByLabelText("Obsidian workspace status")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show backlinks" }));
+    expect(await screen.findByLabelText("Resonant Notes vault index")).toBeTruthy();
+    expect(screen.getAllByText("Research Note").length).toBeGreaterThan(0);
+    let vaultIndexPanel = await screen.findByLabelText("Resonant Notes vault index");
+    fireEvent.click(within(vaultIndexPanel).getAllByRole("button", { name: /Research Note/i }).at(-1)!);
+    await waitFor(() => {
+      expect(requestObsidianNoteMock).toHaveBeenLastCalledWith("/Users/augmentor/Documents/ResonantVault", "Research Note.md");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Show search" }));
+    expect(await screen.findByText("2 shown from 2 indexed note(s).")).toBeTruthy();
+    vaultIndexPanel = await screen.findByLabelText("Resonant Notes vault index");
+    fireEvent.click(within(vaultIndexPanel).getByRole("button", { name: /Architecture Note.md/i }));
+    await waitFor(() => {
+      expect(requestObsidianNoteMock).toHaveBeenLastCalledWith("/Users/augmentor/Documents/ResonantVault", "Architecture Note.md");
+    });
+
+    fireEvent.change(screen.getByLabelText("Search Obsidian-compatible vault"), {
+      target: { value: "archive" },
+    });
+    await waitFor(() => {
+      expect(requestObsidianVaultIndexMock).toHaveBeenLastCalledWith(
+        "/Users/augmentor/Documents/ResonantVault",
+        "archive",
+        200,
+      );
+    });
+
+    fireEvent.change(editor, {
+      target: {
+        value:
+          "---\ntype: architecture\nstatus: updated\n---\n# Architecture Note\nUpdated inside ResonantOS workspace with [[Augmentor]] #resonance/system.",
+      },
+    });
+    expect(within(metadataPanel).getByText("updated")).toBeTruthy();
+    expect(within(metadataPanel).getByText("[[Augmentor]]")).toBeTruthy();
+    expect(screen.getByText("unsaved")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(requestObsidianWriteNoteMock).toHaveBeenCalledWith({
+        vaultPath: "/Users/augmentor/Documents/ResonantVault",
+        notePath: "Architecture Note.md",
+        content:
+          "---\ntype: architecture\nstatus: updated\n---\n# Architecture Note\nUpdated inside ResonantOS workspace with [[Augmentor]] #resonance/system.",
+        expectedModifiedAt: "unix:12",
+        actorId: "addon.obsidian",
+      }),
+    );
+    expect(await screen.findByText(/Saved with audit:/i)).toBeTruthy();
+    expect(screen.getByText("synced")).toBeTruthy();
+  });
+
+  it("connects the Obsidian workspace from the gate before loading notes", async () => {
+    const state = buildDefaultState(manifests);
+    const obsidianInstallation = state.installations["addon.obsidian"];
+    obsidianInstallation.installed = true;
+    obsidianInstallation.enabled = true;
+    obsidianInstallation.status = "enabled";
+    obsidianInstallation.config = {};
+    obsidianInstallation.grantedCapabilities = obsidianInstallation.grantedCapabilities.map((grant) => ({
+      ...grant,
+      granted: false,
+    }));
+    hydrateStateMock.mockResolvedValueOnce(state);
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    fireEvent.click(await screen.findByRole("button", { name: "Obsidian" }));
+
+    expect(await screen.findByText("Connect a vault before editing inside ResonantOS.")).toBeTruthy();
+    expect(screen.getByText(/Next: grant filesystem access, grant workspace embedding, choose an Obsidian vault or markdown folder/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Connect workspace" }));
+
+    await waitFor(() => {
+      expect(requestObsidianVaultFolderSelectionMock).toHaveBeenCalled();
+    });
+    expect(await screen.findByText("1 note(s)")).toBeTruthy();
+    expect(requestObsidianVaultStatusMock).toHaveBeenCalledWith("/Users/augmentor/Documents/ResonantVault");
+    expect(requestObsidianNoteListMock).toHaveBeenCalledWith("/Users/augmentor/Documents/ResonantVault", 500);
   });
 
   it("opens a host-owned mixed library classification review from the source registry", async () => {
@@ -1942,6 +3308,7 @@ describe("App boot flow", () => {
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Sources section" }));
     fireEvent.click(await screen.findByRole("button", { name: "Review Classification" }));
 
     expect(await screen.findByText("Approve Classification Intent")).toBeTruthy();
@@ -2027,6 +3394,7 @@ describe("App boot flow", () => {
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Search section" }));
     fireEvent.change(screen.getByPlaceholderText("Search the Living Archive"), {
       target: { value: "transcript" },
     });
@@ -2036,6 +3404,7 @@ describe("App boot flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Queue ingest" }));
 
     expect(await screen.findByText("Queued TOL Transcript 1 for Living Archive ingest review.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Open Review/ }));
     expect(await screen.findByRole("button", { name: "Process Request" })).toBeTruthy();
     expect(requestArchiveIngestRequestMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2103,6 +3472,7 @@ describe("App boot flow", () => {
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Sources section" }));
     expect((await screen.findAllByText(/03_TOL\/TOL Analysis/)).length).toBeGreaterThan(0);
     fireEvent.change(await screen.findByLabelText("Select source folder"), {
       target: { value: "03_TOL/TOL Analysis" },
@@ -2156,6 +3526,7 @@ describe("App boot flow", () => {
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Sources section" }));
     fireEvent.click(await screen.findByRole("button", { name: "Detect TOL Bundles" }));
 
     expect(await screen.findByText("2026-04-21-1003")).toBeTruthy();
@@ -2210,6 +3581,7 @@ describe("App boot flow", () => {
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Review section" }));
     fireEvent.click(await screen.findByRole("button", { name: "Refresh Queue" }));
     expect(await screen.findByText("Approved concept promotion ready.")).toBeTruthy();
     expect(await screen.findByText("Proposed knowledge pages")).toBeTruthy();
@@ -2283,6 +3655,30 @@ describe("App boot flow", () => {
 });
 
 function createManifest(id: string, name: string, category: AddOnCategory): AddOnManifest {
+  const requestedCapabilities =
+    id === "addon.obsidian"
+      ? [
+          {
+            capability: "filesystem" as const,
+            granted: false,
+            scope: "shared" as const,
+            revocationBehavior: "hard-stop" as const,
+          },
+          {
+            capability: "archive-intake-write" as const,
+            granted: false,
+            scope: "intake-only" as const,
+            revocationBehavior: "hard-stop" as const,
+          },
+          {
+            capability: "ui-embedding" as const,
+            granted: false,
+            scope: "system" as const,
+            revocationBehavior: "hide-surface" as const,
+          },
+        ]
+      : [];
+
   return {
     id,
     name,
@@ -2292,7 +3688,7 @@ function createManifest(id: string, name: string, category: AddOnCategory): AddO
     description: `${name} manifest`,
     runtimeType: "local-service",
     surfaces: [],
-    requestedCapabilities: [],
+    requestedCapabilities,
     providerRequirements: {
       sharedProfiles: [],
       supportsPrivateCredentials: false,
@@ -2310,6 +3706,114 @@ function createManifest(id: string, name: string, category: AddOnCategory): AddO
     compatibility: {
       shellVersion: "^0.1.0",
       platforms: ["macOS"],
+    },
+  };
+}
+
+function createBrowserManifest(): AddOnManifest {
+  return {
+    ...createManifest("addon.browser", "Resonant Browser", "tool"),
+    sdkVersion: "0.1.0",
+    description: "Controlled Chromium browser engine for visual research and future AI-controlled sessions.",
+    runtimeType: "local-service",
+    surfaces: [
+      {
+        id: "browser-pane",
+        type: "embedded-pane",
+        label: "Browser",
+        description: "Open controlled browser sessions inside the ResonantOS workspace.",
+      },
+    ],
+    requestedCapabilities: [
+      {
+        capability: "network",
+        granted: false,
+        scope: "shared",
+        revocationBehavior: "hard-stop",
+      },
+      {
+        capability: "ui-embedding",
+        granted: false,
+        scope: "system",
+        revocationBehavior: "hide-surface",
+      },
+      {
+        capability: "browser-control",
+        granted: false,
+        scope: "system",
+        revocationBehavior: "hard-stop",
+      },
+      {
+        capability: "archive-intake-write",
+        granted: false,
+        scope: "intake-only",
+        revocationBehavior: "degrade",
+      },
+    ],
+    delegation: {
+      acceptsTasks: true,
+      taskTypes: ["research", "browser-inspection"],
+      artifactReturnTypes: ["summary", "markdown", "log", "citation-bundle", "diagnostic-report"],
+      defaultTargetRuntime: "local-service",
+      requiresHumanApprovalBeforeExecution: false,
+    },
+    service: {
+      protocol: "host-command",
+      entrypoint: "browser_start_session",
+      healthCommand: "browser_engine_status",
+    },
+    tools: [
+      {
+        name: "browser.open_url",
+        description: "Open a URL in Chromium and return evidence.",
+        requiredCapabilities: ["network", "browser-control"],
+        inputSchema: {},
+        outputSchema: {},
+        audit: { logRequest: true, logResult: true, artifactTypes: ["log", "citation-bundle"] },
+      },
+    ],
+  };
+}
+
+function createOpenCodeManifest(): AddOnManifest {
+  return {
+    ...createManifest("addon.opencode", "OpenCode", "tool"),
+    sdkVersion: "0.1.0",
+    description: "Open-source coding workspace add-on hosted as a scoped optional local service.",
+    runtimeType: "embedded-module",
+    surfaces: [
+      {
+        id: "opencode-workspace",
+        type: "embedded-pane",
+        label: "OpenCode Workspace",
+        description: "Open OpenCode's own web UI inside the ResonantOS workspace.",
+      },
+    ],
+    requestedCapabilities: [
+      {
+        capability: "filesystem",
+        granted: false,
+        scope: "workspace",
+        revocationBehavior: "hard-stop",
+      },
+      {
+        capability: "shell",
+        granted: false,
+        scope: "workspace",
+        revocationBehavior: "degrade",
+      },
+      {
+        capability: "ui-embedding",
+        granted: false,
+        scope: "system",
+        revocationBehavior: "hide-surface",
+      },
+    ],
+    service: {
+      protocol: "host-command",
+      entrypoint: "opencode_start_service",
+      healthCommand: "opencode_status",
+      shutdownCommand: "opencode_stop_service",
     },
   };
 }

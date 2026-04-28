@@ -19,6 +19,9 @@
   display: grid;
   grid-template-columns: 76px minmax(0, 1fr) var(--chat-rail-width, 460px);
   grid-template-rows: 38px minmax(0, 1fr);
+  grid-template-areas:
+    "topbar topbar topbar"
+    "dock main chat";
   height: 100%;
   width: 100%;
   min-width: 0;
@@ -29,8 +32,19 @@
   grid-template-columns: 76px minmax(0, 1fr) 60px;
 }
 
+.shell.layout-chat-main {
+  grid-template-columns: 76px var(--chat-rail-width, 460px) minmax(0, 1fr);
+  grid-template-areas:
+    "topbar topbar topbar"
+    "dock chat main";
+}
+
+.shell.layout-chat-main.chat-closed {
+  grid-template-columns: 76px 60px minmax(0, 1fr);
+}
+
 .system-topbar {
-  grid-column: 1 / -1;
+  grid-area: topbar;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -160,7 +174,7 @@
 }
 
 .sidebar {
-  grid-row: 2;
+  grid-area: dock;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -208,12 +222,14 @@
 .service-card,
 .workspace-card,
 .archive-action-card,
-.channel-card,
-.agent-card,
-.addon-card,
-.detail-card,
-.embedded-pane-mock,
-.bundle-card,
+	.channel-card,
+	.agent-card,
+	.addon-card,
+	.detail-card,
+	.obsidian-addon-panel,
+	.obsidian-note-list,
+	.obsidian-note-preview,
+	.bundle-card,
 .provider-card,
 .setting-note,
 .status-badge {
@@ -256,11 +272,10 @@
 .metric-tile span,
 .status-badge span,
 .policy-block .eyebrow,
-.detail-card .eyebrow,
-.bundle-card .eyebrow,
-.pane-body .eyebrow,
-.pane-header span,
-.setting-note span {
+	.detail-card .eyebrow,
+	.bundle-card .eyebrow,
+	.obsidian-addon-panel .eyebrow,
+	.setting-note span {
   color: var(--text-muted);
   font-size: 0.72rem;
   font-weight: 700;
@@ -358,7 +373,7 @@
 }
 
 .main-shell {
-  grid-row: 2;
+  grid-area: main;
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
@@ -559,10 +574,11 @@
 .workspace-card,
 .archive-action-card,
 .channel-card,
-.agent-card,
-.addon-card,
-.detail-card,
-.bundle-card,
+	.agent-card,
+	.addon-card,
+	.detail-card,
+	.obsidian-addon-panel,
+	.bundle-card,
 .provider-card,
 .setting-note {
   padding: 0.85rem;

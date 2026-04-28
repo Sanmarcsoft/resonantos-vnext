@@ -1,6 +1,6 @@
 # ResonantOS vNext Feature Backlog
 
-Last updated: 2026-04-26
+Last updated: 2026-04-28
 
 ## Core Shell
 
@@ -148,6 +148,22 @@ Last updated: 2026-04-26
   - removed duplicate frontend-only classification approval in favor of the host-owned classification review panel
   - restricted classification-review reads to artifacts linked from imported-library manifests
   - marked reorganisation plans as preview-only and not eligible for execution
+- Added portable state architecture policy on 2026-04-28:
+  - `ADR-022` defines the Portable User State Root as the single user-owned private data package
+  - Living Archive managed memory must migrate into `ResonantOS_User/Memory`
+  - source-local `_LivingArchive` storage is now a transitional implementation detail
+  - imports should preflight supported/skipped files, noisy folders, and estimated storage cost before copying
+  - first Rust host resolver now initializes `ResonantOS_User` and routes new Living Archive managed memory through the portable memory root
+- Added import preflight on 2026-04-28:
+  - host command analyzes folders without copying or moving files
+  - UI shows supported/skipped counts, top folders, file types, skipped examples, noisy-folder warnings, Obsidian detection, and managed storage estimate
+  - import is blocked until the analyzed path matches the current selected path and contains supported files
+  - preflight now returns a recommended import plan with automatic technical-folder exclusions, ambiguous-folder flags, and one primary import action
+  - the preflight report now has an `Ask Augmentor about this plan` action that opens a new Augmentor chat session and sends the current plan context as the starting prompt
+- Simplified Living Archive workspace UX on 2026-04-28:
+  - default page is now a guided Start screen with one clear import action
+  - Review, Sources, Search, Help, and Advanced are separate tabs so users do not see every subsystem at once
+  - explanatory material moved into Help; Start should remain low-friction and action-oriented
 - Added System Architecture Memory foundation on 2026-04-25:
   - `ADR-014` defines host-owned ResonantOS architecture memory available before user knowledge intake
   - archive host now exposes `archive_system_memory` and `archive_refresh_system_memory`
@@ -203,20 +219,73 @@ Last updated: 2026-04-26
 - Added first Delegation Monitor UI on 2026-04-25:
   - new left-nav Delegation workspace lists host-owned task workspaces
   - users can start an Engineer task from the center workspace without typing the command phrase
+  - execution remains mediated through the existing Engineer flow
+- Added Obsidian V1 vault bridge on 2026-04-27:
+  - `addon.obsidian` now presents a real vault bridge panel instead of a mock embedded pane
+  - the user can choose an Obsidian vault or markdown folder through the native folder picker
+  - Rust host commands validate the selected root, list markdown notes, and read selected notes through scoped read-only access
+  - selected notes can be opened in the user's Obsidian app through a validated `obsidian://open` handoff
+  - selected notes can be handed to Augmentor for summary, tag/wikilink suggestions, or review-safe Living Archive intake planning
+  - with explicit `archive-intake-write` grant and confirmation, selected notes can be copied into raw intake and queued for Living Archive review
+  - scanned notes can also be batch-queued into raw intake with a V1 cap and explicit confirmation
+  - users can manually refresh changed notes after editing in Obsidian; the add-on reports new/changed notes without queueing them automatically
+  - changed/new notes are listed in a selectable review panel before batch queueing so users can choose exactly what enters raw intake and see why each note is proposed
+  - the add-on now keeps a local sync index so scanned notes show new, changed, or queued-unchanged status before automatic sync exists
+  - recent Obsidian intake requests are shown in the add-on panel with a direct deep-link to the Living Archive review desk
+  - Obsidian remains optional and cannot write trusted Living Archive knowledge pages
+  - Obsidian V1 code is split into controller, section components, and model/helper modules before adding more behavior
+  - `ADR-019` defines the next phase as a ResonantOS-hosted Obsidian-compatible workspace, not fragile native Obsidian window embedding
+  - full embedded Obsidian-compatible editing remains the next add-on milestone
   - the monitor exposes packet, task, result, verification, artifacts, and audit paths
   - Augmentor remains the delegation manager; the monitor is only the supervision/control surface
 - Added Delegation Monitor review mode on 2026-04-25:
   - selected workspaces load `result.md` and `verification.json`
   - verification state is shown directly in the monitor
   - follow-up controls route back through Augmentor instead of silently promoting worker output
+- Revised Resonant Browser direction on 2026-04-27:
+  - updated `docs/architecture/ADR-017-resonant-browser-addon.md` to require a live internal Chromium-class browser
+  - explicitly rejected the screenshot/CDP prototype as the Browser UI foundation
+  - kept the bundled Browser manifest, grants, and delegation metadata as the add-on contract shell
+  - replaced the screenshot UI with a live Tauri child WebView so the user can actually browse inside the center workspace
+  - kept the final Chromium-class AI-control engine as a separate implementation step
+- Hardened Add-on SDK V0 validation on 2026-04-27:
+  - archive read scopes now require `archive-read`
+  - archive intake write scopes now require `archive-intake-write`
+  - shared provider profiles now require `providers`
+  - embedded add-ons and `embedded-pane` surfaces now require `ui-embedding`
+  - Obsidian V1 no longer requests `ui-embedding` because it is a shell `ui-module` vault bridge, not an embedded app surface
 - Build add-on launcher UX from `docs/product/UX-001-resonantos-app-shell.md`.
 - Continue Delegation Monitor with artifact previews and explicit archive-intake review requests for approved results.
 - Add center-workspace app opening state for installed add-ons.
+- Build Obsidian V2 from `docs/architecture/ADR-019-obsidian-addon-embedded-workspace.md`:
+  - `docs/architecture/ADR-020-resonant-notes-clean-room-workspace.md` defines the clean-room Resonant Notes direction
+  - central vault workspace now has a first shell with note list, editor, preview toggle, dirty-state, and audited save
+  - workspace connect gate now grants required access and opens the native vault picker before loading notes
+  - explicit save/audit command now starts with conservative `obsidian_write_note`
+  - read-only frontmatter, tag, and wikilink metadata panel is implemented
+  - clean-room vault index now exposes search, outgoing wikilinks, tags, and backlinks
+  - search results and backlinks now navigate to notes through the guarded workspace open path
+  - workspace UI now follows the Obsidian reference with a compact tab strip, left ribbon, one active sidebar view, central document surface, and bottom status bar
+  - search and backlinks now live behind ribbon-selected sidebar modes so the page does not render every knowledge panel at once
+  - graph view and richer editor controls remain next
+  - Augmentor actions over selected note/text
 - Add workspace renderers for add-on runtime types:
   - embedded app
   - terminal/TUI app
   - agent workspace
   - channel/background service status
+- OpenCode add-on hosted-service path:
+  - ADR-021 keeps OpenCode optional and outside the default ResonantOS core
+  - first host commands probe, launch, and stop OpenCode through `opencode_status`, `opencode_start_service`, and `opencode_stop_service`
+  - center workspace embeds OpenCode's own web UI after the user grants scoped filesystem, shell, and UI embedding
+  - workspace chrome must stay minimal: OpenCode's UI owns the page, and setup/status details live behind a compact settings control
+  - next work is SDK/API task dispatch, diff capture, and safe versioning before pointing it at a real Obsidian vault
+- Build the live Browser add-on host:
+  - choose Electron BrowserView/WebContentsView or CEF child-view host
+  - fill the ResonantOS center workspace with a live Chromium-class browser surface
+  - implement tabs, address bar, back/forward, reload, scroll, click, type, and 100% page scale
+  - attach Augmentor browser tools to the same live session the user sees
+  - add page read/extract, evidence capture, audit log, and archive-intake artifact export after the live surface exists
 - Runtime lifecycle manager.
 - Capability grant UX.
 - SDK documentation.

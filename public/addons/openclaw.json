@@ -16,6 +16,12 @@
   ],
   "requestedCapabilities": [
     {
+      "capability": "providers",
+      "granted": false,
+      "scope": "shared",
+      "revocationBehavior": "degrade"
+    },
+    {
       "capability": "archive-read",
       "granted": false,
       "scope": "workspace",

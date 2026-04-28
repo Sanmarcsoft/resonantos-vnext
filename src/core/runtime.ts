@@ -22,17 +22,37 @@ import type {
   ArchiveLibraryReorganisationPlan,
   ArchiveLibraryImportMode,
   ArchiveLibraryImportResult,
+  ArchiveLibraryPreflightResult,
   ArchiveMemoryDomain,
   ArchiveRuntimeStatus,
   ArchiveSearchResult,
   ArchiveSourceFolderScanResult,
   ArchiveSystemMemoryRefreshResult,
   ArchiveSystemMemoryStatus,
+  BrowserEngineInstallResult,
+  BrowserEngineStatus,
+  BrowserNativeWebviewBounds,
+  BrowserNativeWebviewResult,
+  BrowserCloseSessionResult,
+  BrowserInteractionResult,
+  BrowserOpenUrlResult,
+  BrowserReadPageResult,
+  BrowserToolCommand,
+  BrowserViewportInput,
   ConversationMessage,
   DelegationPacket,
   EngineerRecoveryTurnResult,
   FinishTaskWorkspaceResult,
   LocalRuntimeStatus,
+  ObsidianNotePayload,
+  ObsidianNoteSummary,
+  ObsidianOpenNoteResult,
+  ObsidianVaultIndex,
+  ObsidianWriteNoteResult,
+  ObsidianVaultStatus,
+  OpenCodeLaunchMode,
+  OpenCodeServiceResult,
+  OpenCodeStatus,
   ProviderDiagnosticReport,
   ProviderProfile,
   ProviderSmokeTestResult,
@@ -40,10 +60,15 @@ import type {
   ResonantShellState,
   TaskWorkspace,
   TaskWorkspacePayload,
+  TerminalPtySessionResult,
+  TerminalRunCommandResult,
 } from "./contracts";
+import type { BrowserToolResult } from "./browser-tools";
 import { buildDefaultState } from "./defaults";
 import { renderDelegationTaskMarkdown, validateDelegationPacket } from "./delegation";
 import { createInstallationSnapshot } from "./policies";
+import { assertValidAddOnManifest } from "../sdk/addons";
+import { createBrowserToolRunner } from "./browser-tools";
 
 const STORAGE_KEY = "resonantos-vnext.runtime-state";
 
@@ -63,7 +88,7 @@ export const loadBundledManifests = async (): Promise<AddOnManifest[]> => {
       if (!manifestResponse.ok) {
         throw new Error(`Failed to load add-on manifest ${file}`);
       }
-      return (await manifestResponse.json()) as AddOnManifest;
+      return assertValidAddOnManifest(await manifestResponse.json(), { source: "bundled", label: file });
     }),
   );
   return manifests;
@@ -71,14 +96,20 @@ export const loadBundledManifests = async (): Promise<AddOnManifest[]> => {
 
 export const loadSideloadedManifests = async (): Promise<AddOnManifest[]> => {
   if (hasTauri()) {
-    return (await invoke("list_sideloaded_addons")) as AddOnManifest[];
+    const manifests = (await invoke("list_sideloaded_addons")) as unknown[];
+    return manifests.map((manifest, index) =>
+      assertValidAddOnManifest(manifest, { source: "sideload", label: `sideloaded add-on ${index + 1}` }),
+    );
   }
   return [];
 };
 
 export const sideloadManifest = async (manifestPath: string): Promise<AddOnManifest> => {
   if (hasTauri()) {
-    return (await invoke("sideload_addon_manifest", { manifestPath })) as AddOnManifest;
+    return assertValidAddOnManifest(await invoke("sideload_addon_manifest", { manifestPath }), {
+      source: "sideload",
+      label: manifestPath,
+    });
   }
   throw new Error("Sideloading add-ons is available only in the desktop shell.");
 };
@@ -232,11 +263,19 @@ export const requestArchiveLibraryImport = async (input: {
   importMode: ArchiveLibraryImportMode;
   libraryName?: string;
   actorId: string;
+  excludedTopFolders?: string[];
 }): Promise<ArchiveLibraryImportResult> => {
   if (hasTauri()) {
     return (await invoke("archive_import_library", { request: input })) as ArchiveLibraryImportResult;
   }
   throw new Error("Living Archive library import is available only in the desktop shell.");
+};
+
+export const requestArchiveLibraryPreflight = async (sourcePath: string): Promise<ArchiveLibraryPreflightResult> => {
+  if (hasTauri()) {
+    return (await invoke("archive_preflight_library_import", { request: { sourcePath } })) as ArchiveLibraryPreflightResult;
+  }
+  throw new Error("Living Archive library preflight is available only in the desktop shell.");
 };
 
 export const requestArchiveImportedLibraries = async (): Promise<ArchiveImportedLibrarySummary[]> => {
@@ -293,6 +332,309 @@ export const requestArchiveLibraryFolderSelection = async (): Promise<string | n
     return typeof selected === "string" ? selected : null;
   }
   throw new Error("Native folder selection is available only in the desktop shell.");
+};
+
+export const requestObsidianVaultFolderSelection = async (): Promise<string | null> => {
+  if (hasTauri()) {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "Choose an Obsidian vault or markdown folder",
+    });
+    return typeof selected === "string" ? selected : null;
+  }
+  throw new Error("Native vault selection is available only in the desktop shell.");
+};
+
+export const requestObsidianVaultStatus = async (vaultPath: string): Promise<ObsidianVaultStatus> => {
+  if (hasTauri()) {
+    return (await invoke("obsidian_vault_status", { request: { vaultPath } })) as ObsidianVaultStatus;
+  }
+  throw new Error("Obsidian vault status is available only in the desktop shell.");
+};
+
+export const requestObsidianNoteList = async (vaultPath: string, limit = 200): Promise<ObsidianNoteSummary[]> => {
+  if (hasTauri()) {
+    return (await invoke("obsidian_list_notes", { request: { vaultPath, limit } })) as ObsidianNoteSummary[];
+  }
+  throw new Error("Obsidian note listing is available only in the desktop shell.");
+};
+
+export const requestObsidianNote = async (vaultPath: string, notePath: string): Promise<ObsidianNotePayload> => {
+  if (hasTauri()) {
+    return (await invoke("obsidian_read_note", { request: { vaultPath, notePath } })) as ObsidianNotePayload;
+  }
+  throw new Error("Obsidian note reads are available only in the desktop shell.");
+};
+
+export const requestObsidianOpenNote = async (vaultPath: string, notePath: string): Promise<ObsidianOpenNoteResult> => {
+  if (hasTauri()) {
+    return (await invoke("obsidian_open_note", { request: { vaultPath, notePath } })) as ObsidianOpenNoteResult;
+  }
+  throw new Error("Opening Obsidian notes is available only in the desktop shell.");
+};
+
+export const requestObsidianWriteNote = async (input: {
+  vaultPath: string;
+  notePath: string;
+  content: string;
+  expectedModifiedAt?: string;
+  actorId?: string;
+}): Promise<ObsidianWriteNoteResult> => {
+  if (hasTauri()) {
+    return (await invoke("obsidian_write_note", { request: input })) as ObsidianWriteNoteResult;
+  }
+  throw new Error("Obsidian note writes are available only in the desktop shell.");
+};
+
+export const requestObsidianVaultIndex = async (vaultPath: string, query = "", limit = 200): Promise<ObsidianVaultIndex> => {
+  if (hasTauri()) {
+    return (await invoke("obsidian_vault_index", { request: { vaultPath, query, limit } })) as ObsidianVaultIndex;
+  }
+  throw new Error("Obsidian vault indexing is available only in the desktop shell.");
+};
+
+export const requestOpenCodeWorkspaceFolderSelection = async (): Promise<string | null> => {
+  if (hasTauri()) {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "Choose a scoped OpenCode workspace folder",
+    });
+    return typeof selected === "string" ? selected : null;
+  }
+  throw new Error("Native OpenCode workspace selection is available only in the desktop shell.");
+};
+
+export const requestOpenCodeStatus = async (): Promise<OpenCodeStatus> => {
+  if (hasTauri()) {
+    return (await invoke("opencode_status")) as OpenCodeStatus;
+  }
+  return {
+    installed: false,
+    installHint: "OpenCode status is available only in the desktop shell.",
+    supportsWebUi: true,
+    supportsServerApi: true,
+  };
+};
+
+export const requestOpenCodeStartService = async (input: {
+  workspacePath: string;
+  port?: number;
+  mode?: OpenCodeLaunchMode;
+  sessionId?: string;
+}): Promise<OpenCodeServiceResult> => {
+  if (hasTauri()) {
+    return (await invoke("opencode_start_service", { request: input })) as OpenCodeServiceResult;
+  }
+  throw new Error("OpenCode service launch is available only in the desktop shell.");
+};
+
+export const requestOpenCodeStopService = async (sessionId?: string): Promise<OpenCodeServiceResult> => {
+  if (hasTauri()) {
+    return (await invoke("opencode_stop_service", { request: { sessionId } })) as OpenCodeServiceResult;
+  }
+  throw new Error("OpenCode service shutdown is available only in the desktop shell.");
+};
+
+export const requestBrowserOpenUrl = async (url: string, viewport?: BrowserViewportInput): Promise<BrowserOpenUrlResult> => {
+  if (hasTauri()) {
+    return (await invoke("browser_open_url", { request: { url, ...viewport } })) as BrowserOpenUrlResult;
+  }
+  throw new Error("Chromium Browser engine is available only in the desktop shell.");
+};
+
+export const requestBrowserEngineStatus = async (): Promise<BrowserEngineStatus> => {
+  if (hasTauri()) {
+    return (await invoke("browser_engine_status")) as BrowserEngineStatus;
+  }
+  throw new Error("Chromium Browser engine status is available only in the desktop shell.");
+};
+
+export const requestBrowserInstallEngine = async (): Promise<BrowserEngineInstallResult> => {
+  if (hasTauri()) {
+    return (await invoke("browser_install_engine")) as BrowserEngineInstallResult;
+  }
+  throw new Error("Chromium Browser engine install is available only in the desktop shell.");
+};
+
+export const requestBrowserNativeWebviewShow = async (input: {
+  url: string;
+  bounds: BrowserNativeWebviewBounds;
+  navigate: boolean;
+}): Promise<BrowserNativeWebviewResult> => {
+  if (hasTauri()) {
+    return (await invoke("browser_native_webview_show", {
+      request: { url: input.url, ...input.bounds, navigate: input.navigate },
+    })) as BrowserNativeWebviewResult;
+  }
+  throw new Error("Native Browser webview is available only in the desktop shell.");
+};
+
+export const requestBrowserNativeWebviewResize = async (bounds: BrowserNativeWebviewBounds): Promise<BrowserNativeWebviewResult> => {
+  if (hasTauri()) {
+    return (await invoke("browser_native_webview_resize", { request: bounds })) as BrowserNativeWebviewResult;
+  }
+  throw new Error("Native Browser webview resize is available only in the desktop shell.");
+};
+
+export const requestBrowserNativeWebviewHide = async (): Promise<BrowserNativeWebviewResult> => {
+  if (hasTauri()) {
+    return (await invoke("browser_native_webview_hide")) as BrowserNativeWebviewResult;
+  }
+  throw new Error("Native Browser webview hide is available only in the desktop shell.");
+};
+
+export const requestBrowserStartSession = async (url: string, viewport?: BrowserViewportInput): Promise<BrowserOpenUrlResult> => {
+  if (hasTauri()) {
+    return (await invoke("browser_start_session", { request: { url, ...viewport } })) as BrowserOpenUrlResult;
+  }
+  throw new Error("Chromium Browser engine is available only in the desktop shell.");
+};
+
+export const requestBrowserSessionOpenUrl = async (sessionId: string, url: string, viewport?: BrowserViewportInput): Promise<BrowserOpenUrlResult> => {
+  if (hasTauri()) {
+    return (await invoke("browser_session_open_url", { request: { sessionId, url, ...viewport } })) as BrowserOpenUrlResult;
+  }
+  throw new Error("Chromium Browser engine is available only in the desktop shell.");
+};
+
+export const requestBrowserSessionScreenshot = async (sessionId: string, viewport?: BrowserViewportInput): Promise<BrowserOpenUrlResult> => {
+  if (hasTauri()) {
+    return (await invoke("browser_session_screenshot", { request: { sessionId, ...viewport } })) as BrowserOpenUrlResult;
+  }
+  throw new Error("Chromium Browser engine is available only in the desktop shell.");
+};
+
+export const requestBrowserSessionReadPage = async (sessionId: string): Promise<BrowserReadPageResult> => {
+  if (hasTauri()) {
+    return (await invoke("browser_session_read_page", { request: { sessionId } })) as BrowserReadPageResult;
+  }
+  throw new Error("Chromium Browser engine is available only in the desktop shell.");
+};
+
+export const requestBrowserSessionClick = async (
+  sessionId: string,
+  x: number,
+  y: number,
+  viewport?: BrowserViewportInput,
+): Promise<BrowserInteractionResult> => {
+  if (hasTauri()) {
+    return (await invoke("browser_session_click", { request: { sessionId, x, y, ...viewport } })) as BrowserInteractionResult;
+  }
+  throw new Error("Chromium Browser click control is available only in the desktop shell.");
+};
+
+export const requestBrowserSessionScroll = async (
+  sessionId: string,
+  deltaX: number,
+  deltaY: number,
+  viewport?: BrowserViewportInput,
+): Promise<BrowserInteractionResult> => {
+  if (hasTauri()) {
+    return (await invoke("browser_session_scroll", { request: { sessionId, deltaX, deltaY, ...viewport } })) as BrowserInteractionResult;
+  }
+  throw new Error("Chromium Browser scroll control is available only in the desktop shell.");
+};
+
+export const requestBrowserCloseSession = async (sessionId: string): Promise<BrowserCloseSessionResult> => {
+  if (hasTauri()) {
+    return (await invoke("browser_close_session", { request: { sessionId } })) as BrowserCloseSessionResult;
+  }
+  throw new Error("Chromium Browser engine is available only in the desktop shell.");
+};
+
+export const requestBrowserHostCommand = async (command: BrowserToolCommand): Promise<BrowserToolResult> => {
+  if (hasTauri()) {
+    const { type, params, humanApproved } = command;
+    const method =
+      type === "start"
+        ? "browser.start"
+        : type === "open_url"
+          ? "browser.open_url"
+          : type === "read_page"
+            ? "browser.read_page"
+            : type === "click"
+              ? "browser.click"
+              : type === "type"
+                ? "browser.type"
+                : type === "capture_evidence"
+                  ? "browser.capture_evidence"
+                  : type === "close"
+                    ? "browser.close_session"
+                    : "browser.health";
+    return (await invoke("browser_host_command", {
+      request: { method, params: params ?? {}, humanApproved: Boolean(humanApproved) },
+    })) as BrowserToolResult;
+  }
+  throw new Error("Governed Browser host commands are available only in the desktop shell.");
+};
+
+export const createDesktopBrowserToolRunner = (input: {
+  manifest: AddOnManifest | undefined;
+  installation: ResonantShellState["installations"][string] | undefined;
+}) =>
+  createBrowserToolRunner({
+    manifest: input.manifest,
+    installation: input.installation,
+    transport: {
+      call: async (method, params, options) =>
+        (await invoke("browser_host_command", {
+          request: { method, params, humanApproved: Boolean(options?.humanApproved) },
+        })) as BrowserToolResult,
+    },
+  });
+
+export const requestTerminalStatus = async (): Promise<string> => {
+  if (hasTauri()) {
+    return (await invoke("terminal_status")) as string;
+  }
+  throw new Error("Terminal is available only in the desktop shell.");
+};
+
+export const requestTerminalRunCommand = async (input: {
+  command: string;
+  cwd?: string;
+}): Promise<TerminalRunCommandResult> => {
+  if (hasTauri()) {
+    return (await invoke("terminal_run_command", { request: input })) as TerminalRunCommandResult;
+  }
+  throw new Error("Terminal is available only in the desktop shell.");
+};
+
+export const requestTerminalStartPty = async (input: {
+  sessionId: string;
+  cwd?: string;
+  shell?: string;
+  cols?: number;
+  rows?: number;
+}): Promise<TerminalPtySessionResult> => {
+  if (hasTauri()) {
+    return (await invoke("terminal_start_pty", { request: input })) as TerminalPtySessionResult;
+  }
+  throw new Error("Interactive Terminal is available only in the desktop shell.");
+};
+
+export const requestTerminalWritePty = async (input: { sessionId: string; data: string }): Promise<void> => {
+  if (hasTauri()) {
+    await invoke("terminal_write_pty", { request: input });
+    return;
+  }
+  throw new Error("Interactive Terminal is available only in the desktop shell.");
+};
+
+export const requestTerminalResizePty = async (input: { sessionId: string; cols: number; rows: number }): Promise<void> => {
+  if (hasTauri()) {
+    await invoke("terminal_resize_pty", { request: input });
+    return;
+  }
+  throw new Error("Interactive Terminal is available only in the desktop shell.");
+};
+
+export const requestTerminalStopPty = async (sessionId: string): Promise<void> => {
+  if (hasTauri()) {
+    await invoke("terminal_stop_pty", { sessionId });
+  }
 };
 
 export const requestArchiveSearch = async (query: string, limit = 12): Promise<ArchiveSearchResult> => {
@@ -787,9 +1129,18 @@ export const normalizeState = (state: ResonantShellState, base: ResonantShellSta
       pinnedChatProjectIds: state.uiPreferences?.pinnedChatProjectIds ?? base.uiPreferences.pinnedChatProjectIds,
       leftSidebarOpen: state.uiPreferences?.leftSidebarOpen ?? base.uiPreferences.leftSidebarOpen,
       chatSidebarOpen: state.uiPreferences?.chatSidebarOpen ?? base.uiPreferences.chatSidebarOpen,
+      workspaceLayout: state.uiPreferences?.workspaceLayout ?? base.uiPreferences.workspaceLayout,
       chatSidebarWidth: state.uiPreferences?.chatSidebarWidth ?? base.uiPreferences.chatSidebarWidth,
       chatHistoryOpen: state.uiPreferences?.chatHistoryOpen ?? base.uiPreferences.chatHistoryOpen,
       windowZoom: state.uiPreferences?.windowZoom ?? base.uiPreferences.windowZoom,
+      browserWorkspace: {
+        ...base.uiPreferences.browserWorkspace,
+        ...(state.uiPreferences?.browserWorkspace ?? {}),
+        controlledSession: {
+          ...base.uiPreferences.browserWorkspace.controlledSession,
+          ...(state.uiPreferences?.browserWorkspace?.controlledSession ?? {}),
+        },
+      },
     },
     coreServices: mergeById(state.coreServices, base.coreServices),
     providers: normalizeProviders(state.providers, base.providers),

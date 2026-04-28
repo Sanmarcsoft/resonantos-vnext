@@ -49,6 +49,9 @@
       <path d="m8 10 2.3 2L8 14" />
       <path d="M12.5 14h4" />
     </symbol>
+    <symbol id="ros-opencode" viewBox="0 0 16 16">
+      <path fill-rule="evenodd" clip-rule="evenodd" d="M13 14H3V2h10v12ZM10.5 4.4h-5v7.2h5V4.4Z" />
+    </symbol>
     <symbol id="ros-browser" viewBox="0 0 24 24">
       <path d="M4.5 6.5h15v11h-15z" />
       <path d="M4.5 9.5h15" />

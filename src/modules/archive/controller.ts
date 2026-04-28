@@ -12,6 +12,7 @@ import type {
   ArchiveLibraryClassificationReview,
   ArchiveLibraryImportMode,
   ArchiveLibraryImportResult,
+  ArchiveLibraryPreflightResult,
   ArchiveLibraryReorganisationPlan,
   ArchiveMemoryDomain,
   ArchiveQueuedIngestRequest,
@@ -38,6 +39,7 @@ import {
   requestArchiveLibraryFolderSelection,
   requestArchiveLibraryClassificationReview,
   requestArchiveLibraryImport,
+  requestArchiveLibraryPreflight,
   requestArchiveLibraryReorganisationPlan,
   requestArchiveProcessIngestRequest,
   requestArchivePromoteReviewArtifact,
@@ -143,10 +145,19 @@ type ArchiveLibraryImportControllerInput = {
   domain: ArchiveMemoryDomain;
   importMode: ArchiveLibraryImportMode;
   libraryName?: string;
+  excludedTopFolders?: string[];
   setChatNotice: Dispatch<SetStateAction<string | null>>;
   setArchiveSourceScanBusy: Dispatch<SetStateAction<boolean>>;
   setArchiveLibraryImportResult: Dispatch<SetStateAction<ArchiveLibraryImportResult | null>>;
   setArchiveImportedLibraries?: Dispatch<SetStateAction<ArchiveImportedLibrarySummary[]>>;
+  errorMessageOf: (error: unknown, fallback: string) => string;
+};
+
+type ArchiveLibraryPreflightControllerInput = {
+  sourcePath: string;
+  setChatNotice: Dispatch<SetStateAction<string | null>>;
+  setArchiveSourceScanBusy: Dispatch<SetStateAction<boolean>>;
+  setArchiveLibraryPreflightResult: Dispatch<SetStateAction<ArchiveLibraryPreflightResult | null>>;
   errorMessageOf: (error: unknown, fallback: string) => string;
 };
 
@@ -414,6 +425,7 @@ export const importArchiveLibrary = async ({
   domain,
   importMode,
   libraryName,
+  excludedTopFolders,
   setChatNotice,
   setArchiveSourceScanBusy,
   setArchiveLibraryImportResult,
@@ -428,6 +440,7 @@ export const importArchiveLibrary = async ({
       domain,
       importMode,
       libraryName,
+      excludedTopFolders,
       actorId: "strategist.core",
     });
     setArchiveLibraryImportResult(result);
@@ -439,6 +452,28 @@ export const importArchiveLibrary = async ({
     );
   } catch (error) {
     setChatNotice(errorMessageOf(error, "Failed to import library into Living Archive."));
+  } finally {
+    setArchiveSourceScanBusy(false);
+  }
+};
+
+export const preflightArchiveLibrary = async ({
+  sourcePath,
+  setChatNotice,
+  setArchiveSourceScanBusy,
+  setArchiveLibraryPreflightResult,
+  errorMessageOf,
+}: ArchiveLibraryPreflightControllerInput): Promise<void> => {
+  setArchiveSourceScanBusy(true);
+  setChatNotice(null);
+  try {
+    const result = await requestArchiveLibraryPreflight(sourcePath);
+    setArchiveLibraryPreflightResult(result);
+    setChatNotice(
+      `Preflight complete: ${result.supportedFiles} supported file(s), ${result.skippedFiles} skipped.`,
+    );
+  } catch (error) {
+    setChatNotice(errorMessageOf(error, "Failed to preflight Living Archive library import."));
   } finally {
     setArchiveSourceScanBusy(false);
   }

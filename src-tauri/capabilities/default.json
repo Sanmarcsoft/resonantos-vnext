@@ -3,5 +3,8 @@
   "identifier": "main-desktop",
   "description": "Main ResonantOS desktop shell permissions. Dialog open is required for user-selected Living Archive folders.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": [
+    "core:default",
+    "dialog:allow-open"
+  ]
 }

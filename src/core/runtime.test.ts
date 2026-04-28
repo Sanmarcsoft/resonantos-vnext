@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { ResonantShellState } from "./contracts";
+import type { AddOnManifest, ResonantShellState } from "./contracts";
 import { buildDefaultState } from "./defaults";
-import { normalizeState } from "./runtime";
+import { normalizeState, rebaseStateOnManifests } from "./runtime";
 
 describe("runtime state migration", () => {
   it("migrates legacy recovery state onto the Resonant Engineer Agent and Gemma local runtime", () => {
@@ -105,6 +105,21 @@ describe("runtime state migration", () => {
     expect(normalized.uiPreferences.pinnedChatThreadIds).toContain("thread-fork-custom");
   });
 
+  it("adds the default workspace layout to older persisted UI preferences", () => {
+    const base = buildDefaultState([]);
+    const legacy = {
+      ...base,
+      uiPreferences: {
+        ...base.uiPreferences,
+        workspaceLayout: undefined,
+      },
+    } as unknown as ResonantShellState;
+
+    const normalized = normalizeState(legacy, base);
+
+    expect(normalized.uiPreferences.workspaceLayout).toBe("main-chat");
+  });
+
   it("preserves the transcript ledger during state normalization", () => {
     const base = buildDefaultState([]);
     const persisted = {
@@ -169,5 +184,57 @@ describe("runtime state migration", () => {
 
     expect(normalized.contextMemoryStates).toHaveLength(1);
     expect(normalized.contextMemoryStates[0]?.userIntent.why).toBe("Avoid amnesia.");
+  });
+
+  it("rebases stale add-on installations onto new manifest capabilities", () => {
+    const browserManifest: AddOnManifest = {
+      id: "addon.browser",
+      name: "Resonant Browser",
+      version: "0.1.0",
+      author: "test",
+      category: "tool",
+      description: "Browser",
+      runtimeType: "embedded-module",
+      surfaces: [],
+      requestedCapabilities: [
+        { capability: "network", granted: false, scope: "shared", revocationBehavior: "hard-stop" },
+        { capability: "ui-embedding", granted: false, scope: "system", revocationBehavior: "hide-surface" },
+      ],
+      providerRequirements: { sharedProfiles: [], supportsPrivateCredentials: false },
+      archiveIntegration: { readScopes: [], intakeWriteScopes: [], canRequestIngest: false, canWriteKnowledgePages: false },
+      health: { strategy: "none" },
+      installHooks: {},
+      compatibility: { shellVersion: "^0.1.0", platforms: ["macOS"] },
+      grantPresets: [
+        {
+          id: "browser-visible-session",
+          label: "Visible browser session",
+          description: "Visible browser access.",
+          grants: [],
+        },
+      ],
+    };
+    const base = buildDefaultState([browserManifest]);
+    const stale = {
+      ...base,
+      installations: {
+        ...base.installations,
+        "addon.browser": {
+          ...base.installations["addon.browser"],
+          installed: true,
+          enabled: true,
+          status: "enabled",
+          grantedCapabilities: [],
+        },
+      },
+    } satisfies ResonantShellState;
+
+    const rebased = rebaseStateOnManifests(stale, [browserManifest], []);
+
+    expect(rebased.installations["addon.browser"].grantedCapabilities.map((grant) => grant.capability)).toEqual([
+      "network",
+      "ui-embedding",
+    ]);
+    expect(rebased.installations["addon.browser"].recommendedGrantPresetIds).toContain("browser-visible-session");
   });
 });

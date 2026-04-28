@@ -1,7 +1,10 @@
 // Intent citation: docs/architecture/ADR-002-modular-codebase.md
 
-import type { AddOnInstallation, AddOnManifest, CapabilityGrant } from "../../core/contracts";
+import { useEffect, useState } from "react";
+import type { AddOnInstallation, AddOnManifest, BrowserEngineStatus, CapabilityGrant } from "../../core/contracts";
 import { Panel } from "../../components/Panel";
+import { requestBrowserEngineStatus, requestBrowserInstallEngine } from "../../core/runtime";
+import { ObsidianAddonPanel } from "./ObsidianAddonPanel";
 
 type AddOnsWorkspaceProps = {
   search: string;
@@ -16,11 +19,44 @@ type AddOnsWorkspaceProps = {
   onSelectManifest: (manifestId: string) => void;
   onToggleAddonInstall: (manifest: AddOnManifest) => void;
   onToggleGrant: (manifestId: string, capability: CapabilityGrant["capability"]) => void;
+  onGrantCapabilities: (
+    manifestId: string,
+    capabilities: CapabilityGrant["capability"][],
+    requestedCapabilities: CapabilityGrant[],
+  ) => void;
+  onGrantTerminalWorkspaceAccess: (manifest: AddOnManifest) => void;
+  onUpdateAddonConfig: (manifestId: string, config: Record<string, unknown>) => void;
+  onAskAugmentor: (message: string) => Promise<void>;
+  onOpenArchiveReview: () => void;
 };
 
 const prettyCapability = (grant: CapabilityGrant): string => grant.capability.replaceAll("-", " ");
 const installationLabel = (installation: AddOnInstallation): string =>
   installation.enabled ? "enabled" : installation.installed ? "installed" : "available";
+const hasGrant = (installation: AddOnInstallation | null, capability: CapabilityGrant["capability"]): boolean =>
+  Boolean(installation?.grantedCapabilities.some((grant) => grant.capability === capability && grant.granted));
+const isBrowserVisibleReady = (installation: AddOnInstallation | null): boolean =>
+  Boolean(
+    installation?.enabled &&
+      hasGrant(installation, "network") &&
+      hasGrant(installation, "ui-embedding") &&
+      hasGrant(installation, "browser-control"),
+  );
+const isTerminalVisibleReady = (installation: AddOnInstallation | null): boolean =>
+  Boolean(installation?.enabled && hasGrant(installation, "shell") && hasGrant(installation, "ui-embedding"));
+
+const addonPrimaryActionLabel = (manifest: AddOnManifest, installation: AddOnInstallation | null): string => {
+  if (manifest.id === "addon.browser" && !isBrowserVisibleReady(installation)) {
+    return "Install and grant browser access";
+  }
+  if (manifest.id === "addon.terminal" && !isTerminalVisibleReady(installation)) {
+    return "Install and grant terminal access";
+  }
+  if (!installation?.installed) {
+    return "Install";
+  }
+  return installation.enabled ? "Disable" : "Enable";
+};
 
 export function AddOnsWorkspace(props: AddOnsWorkspaceProps) {
   return (
@@ -71,8 +107,25 @@ export function AddOnsWorkspace(props: AddOnsWorkspaceProps) {
                   </span>
                 </div>
                 <p>{manifest.description}</p>
-                <button type="button" className="button-secondary" onClick={() => props.onToggleAddonInstall(manifest)}>
-                  {!effectiveInstallation?.installed ? "Install" : effectiveInstallation.enabled ? "Disable" : "Enable"}
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (manifest.id === "addon.browser" && !isBrowserVisibleReady(effectiveInstallation)) {
+                      props.onSelectManifest(manifest.id);
+                      props.onGrantCapabilities(manifest.id, ["network", "ui-embedding", "browser-control"], manifest.requestedCapabilities);
+                      return;
+                    }
+                    if (manifest.id === "addon.terminal" && !isTerminalVisibleReady(effectiveInstallation)) {
+                      props.onSelectManifest(manifest.id);
+                      props.onGrantTerminalWorkspaceAccess(manifest);
+                      return;
+                    }
+                    props.onToggleAddonInstall(manifest);
+                  }}
+                >
+                  {addonPrimaryActionLabel(manifest, effectiveInstallation)}
                 </button>
               </article>
             );
@@ -143,31 +196,32 @@ export function AddOnsWorkspace(props: AddOnsWorkspaceProps) {
           </div>
 
           {props.selectedManifest.id === "addon.obsidian" && (
-            <div className="embedded-pane-mock">
-              <div className="pane-header">
-                <strong>Obsidian Embedded Pane</strong>
-                <span>Vault surface inside ResonantOS</span>
-              </div>
-              <div className="pane-body">
-                <aside>
-                  <span className="eyebrow">Vault</span>
-                  <ul>
-                    <li>00_THE_CONSTITUTION</li>
-                    <li>02_PROTOCOL_LIBRARY</li>
-                    <li>03_TOL</li>
-                    <li>_LivingArchive</li>
-                  </ul>
-                </aside>
-                <article>
-                  <span className="eyebrow">Linked note</span>
-                  <h3>ResonantOS Architecture</h3>
-                  <p>
-                    Embedded pane target for v1. Living Archive remains core; Obsidian is the user-facing vault add-on
-                    surface.
-                  </p>
-                </article>
-              </div>
-            </div>
+            <ObsidianAddonPanel
+              installation={props.selectedInstallation}
+              onConfigChange={(config) => props.onUpdateAddonConfig(props.selectedManifest!.id, config)}
+              onAskAugmentor={props.onAskAugmentor}
+              onGrantArchiveIntake={() =>
+                props.onGrantCapabilities(
+                  props.selectedManifest!.id,
+                  ["archive-intake-write"],
+                  props.selectedManifest!.requestedCapabilities,
+                )
+              }
+              onOpenArchiveReview={props.onOpenArchiveReview}
+            />
+          )}
+
+          {props.selectedManifest.id === "addon.browser" && (
+            <BrowserAddonSetupPanel
+              installation={props.selectedInstallation}
+              onGrantVisibleAccess={() =>
+                props.onGrantCapabilities(
+                  props.selectedManifest!.id,
+                  ["network", "ui-embedding", "browser-control"],
+                  props.selectedManifest!.requestedCapabilities,
+                )
+              }
+            />
           )}
 
           {props.selectedManifest.id === "addon.audio2tol" && (
@@ -185,5 +239,113 @@ export function AddOnsWorkspace(props: AddOnsWorkspaceProps) {
         </Panel>
       )}
     </>
+  );
+}
+
+function BrowserAddonSetupPanel({
+  installation,
+  onGrantVisibleAccess,
+}: {
+  installation: AddOnInstallation;
+  onGrantVisibleAccess: () => void;
+}) {
+  const [engineStatus, setEngineStatus] = useState<BrowserEngineStatus | null>(null);
+  const [engineBusy, setEngineBusy] = useState(false);
+  const [engineError, setEngineError] = useState("");
+  const [engineLog, setEngineLog] = useState("");
+  const networkGranted = installation.grantedCapabilities.some((grant) => grant.capability === "network" && grant.granted);
+  const embeddingGranted = installation.grantedCapabilities.some((grant) => grant.capability === "ui-embedding" && grant.granted);
+  const browserControlGranted = installation.grantedCapabilities.some((grant) => grant.capability === "browser-control" && grant.granted);
+  const ready = installation.enabled && networkGranted && embeddingGranted && browserControlGranted;
+  const installerReady = installation.enabled && networkGranted && browserControlGranted;
+
+  useEffect(() => {
+    let cancelled = false;
+    requestBrowserEngineStatus()
+      .then((status) => {
+        if (!cancelled) {
+          setEngineStatus(status);
+          setEngineError("");
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setEngineError(error instanceof Error ? error.message : "Could not inspect Chromium engine.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const installEngine = async () => {
+    setEngineBusy(true);
+    setEngineError("");
+    setEngineLog("");
+    try {
+      const result = await requestBrowserInstallEngine();
+      setEngineLog(result.log);
+      setEngineStatus({
+        installed: result.installed,
+        enginePath: result.enginePath,
+        installHint: result.installed ? "Chromium engine is installed." : "Chromium engine installation did not complete.",
+      });
+      if (!result.installed) {
+        setEngineError("Chromium engine installation did not complete.");
+      }
+    } catch (error) {
+      setEngineError(error instanceof Error ? error.message : "Chromium engine install failed.");
+    } finally {
+      setEngineBusy(false);
+    }
+  };
+
+  return (
+    <div className="browser-addon-panel">
+      <div>
+        <span className="eyebrow">Browser setup</span>
+        <h3>Controlled Chromium access</h3>
+        <p>
+          Install Browser and grant network, UI embedding, and browser control to launch Chromium through the
+          ResonantOS host boundary.
+        </p>
+      </div>
+      <div className="browser-addon-grant-box">
+        <span className={`tone tone-${networkGranted ? "active" : "neutral"}`}>network {networkGranted ? "granted" : "needed"}</span>
+        <span className={`tone tone-${embeddingGranted ? "active" : "neutral"}`}>
+          ui embedding {embeddingGranted ? "granted" : "needed"}
+        </span>
+        <span className={`tone tone-${browserControlGranted ? "active" : "neutral"}`}>
+          browser control {browserControlGranted ? "granted" : "needed"}
+        </span>
+        <span className={`tone tone-${engineStatus?.installed ? "active" : "neutral"}`}>
+          chromium {engineStatus?.installed ? "installed" : "needed"}
+        </span>
+        <button type="button" className="button-primary touch-action" onClick={onGrantVisibleAccess} disabled={ready}>
+          {ready ? "Browser access granted" : "Install and grant controlled browser access"}
+        </button>
+        <button
+          type="button"
+          className="button-secondary touch-action"
+          onClick={installEngine}
+          disabled={engineBusy || Boolean(engineStatus?.installed) || !installerReady}
+        >
+          {engineBusy
+            ? "Installing Chromium..."
+            : engineStatus?.installed
+              ? "Chromium installed"
+              : installerReady
+                ? "Install Chromium Engine"
+                : "Grant Browser access first"}
+        </button>
+      </div>
+      {engineStatus?.enginePath ? <p className="muted-copy">Engine path: {engineStatus.enginePath}</p> : null}
+      {engineError ? (
+        <p className="form-error" role="alert">
+          {engineError}
+        </p>
+      ) : null}
+      {engineLog ? <pre className="browser-addon-install-log">{engineLog.slice(-1600)}</pre> : null}
+    </div>
   );
 }

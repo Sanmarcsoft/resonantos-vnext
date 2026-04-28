@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "author": "Resonant Alpha",
   "category": "tool",
-  "description": "Open-source coding workspace add-on for delegated code tasks under ResonantOS capability and verification gates.",
+  "description": "Open-source coding workspace add-on. ResonantOS launches OpenCode as an optional scoped local service, embeds OpenCode's own web UI, and uses the server/API layer for governance and audit.",
   "runtimeType": "embedded-module",
   "surfaces": [
     {
@@ -34,6 +34,18 @@
       "revocationBehavior": "degrade"
     },
     {
+      "capability": "archive-read",
+      "granted": false,
+      "scope": "shared",
+      "revocationBehavior": "degrade"
+    },
+    {
+      "capability": "archive-intake-write",
+      "granted": false,
+      "scope": "intake-only",
+      "revocationBehavior": "degrade"
+    },
+    {
       "capability": "ui-embedding",
       "granted": false,
       "scope": "system",
@@ -53,7 +65,14 @@
     "canWriteKnowledgePages": false
   },
   "health": {
-    "strategy": "workspace-process"
+    "strategy": "workspace-process",
+    "command": "opencode_status"
+  },
+  "service": {
+    "protocol": "host-command",
+    "entrypoint": "opencode_start_service",
+    "healthCommand": "opencode_status",
+    "shutdownCommand": "opencode_stop_service"
   },
   "delegation": {
     "acceptsTasks": true,
@@ -79,6 +98,21 @@
       "displayName": "OpenCode",
       "trustTier": "addon",
       "workspaceBehavior": "delegated"
+    }
+  ],
+  "tools": [
+    {
+      "name": "opencode.launch_workspace",
+      "description": "Start an OpenCode web/server session for a scoped workspace path.",
+      "requiredCapabilities": ["filesystem", "shell", "ui-embedding"],
+      "inputSchema": {},
+      "outputSchema": {},
+      "audit": {
+        "logRequest": true,
+        "logResult": true,
+        "artifactTypes": ["log", "diagnostic-report"]
+      },
+      "requiresHumanApproval": true
     }
   ]
 }

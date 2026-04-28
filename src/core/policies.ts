@@ -317,7 +317,23 @@ export const createInstallationSnapshot = (
   source: AddOnInstallation["source"],
 ): AddOnInstallation => {
   if (current) {
-    return current;
+    const existingGrants = new Map(current.grantedCapabilities.map((grant) => [grant.capability, grant]));
+    const grantedCapabilities = manifest.requestedCapabilities.map((grant) => ({
+      ...grant,
+      granted: existingGrants.get(grant.capability)?.granted ?? false,
+    }));
+    return {
+      ...current,
+      source,
+      provenanceTier: manifest.provenance?.tier ?? current.provenanceTier,
+      verificationState: manifest.provenance?.verificationState ?? current.verificationState,
+      grantedCapabilities,
+      recommendedGrantPresetIds: (manifest.grantPresets ?? []).map((preset) => preset.id),
+      grantRecommendationSource: manifest.grantPresets?.length ? "preset-bundle" : current.grantRecommendationSource,
+      privateProviderProfileIds: current.privateProviderProfileIds ?? [],
+      config: current.config ?? {},
+      notes: current.notes ?? [],
+    };
   }
   return {
     addonId: manifest.id,
@@ -331,6 +347,7 @@ export const createInstallationSnapshot = (
     recommendedGrantPresetIds: (manifest.grantPresets ?? []).map((preset) => preset.id),
     grantRecommendationSource: manifest.grantPresets?.length ? "preset-bundle" : "manifest-request",
     privateProviderProfileIds: [],
+    config: {},
     notes: ["Not installed yet."],
   };
 };

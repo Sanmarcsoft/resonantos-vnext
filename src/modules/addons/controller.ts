@@ -91,3 +91,45 @@ export const toggleAddonCapabilityGrant = (
     return draft;
   });
 };
+
+export const grantAddonCapabilities = (
+  manifestId: string,
+  capabilities: CapabilityGrant["capability"][],
+  requestedCapabilities: CapabilityGrant[],
+  updateRuntimeState: (updater: (current: ResonantShellState) => ResonantShellState) => void,
+): void => {
+  updateRuntimeState((draft) => {
+    const installation = draft.installations[manifestId] as AddOnInstallation | undefined;
+    if (!installation) {
+      return draft;
+    }
+    installation.installed = true;
+    installation.enabled = true;
+    const existingGrants = new Map(installation.grantedCapabilities.map((grant) => [grant.capability, grant]));
+    const missingRequestedGrants = requestedCapabilities.filter((grant) => !existingGrants.has(grant.capability));
+    installation.grantedCapabilities = [...installation.grantedCapabilities, ...missingRequestedGrants].map((grant) =>
+      capabilities.includes(grant.capability) ? { ...grant, granted: true } : grant,
+    );
+    installation.status = "enabled";
+    installation.notes = [`Installed, enabled, and granted ${capabilities.join(", ")} through reviewed setup.`];
+    return draft;
+  });
+};
+
+export const updateAddonConfig = (
+  manifestId: string,
+  config: Record<string, unknown>,
+  updateRuntimeState: (updater: (current: ResonantShellState) => ResonantShellState) => void,
+): void => {
+  updateRuntimeState((draft) => {
+    const installation = draft.installations[manifestId];
+    if (!installation) {
+      return draft;
+    }
+    installation.config = {
+      ...(installation.config ?? {}),
+      ...config,
+    };
+    return draft;
+  });
+};

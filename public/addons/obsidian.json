@@ -4,14 +4,20 @@
   "version": "0.1.0",
   "author": "Resonant Alpha",
   "category": "knowledge",
-  "description": "Embeds an Obsidian-oriented pane so the user can work with their vault inside ResonantOS.",
-  "runtimeType": "embedded-module",
+  "description": "Connects an Obsidian vault or markdown folder so ResonantOS can inspect notes now and later open an Obsidian-compatible workspace inside the shell.",
+  "runtimeType": "ui-module",
   "surfaces": [
     {
-      "id": "obsidian-pane",
+      "id": "obsidian-vault-bridge",
+      "type": "panel",
+      "label": "Vault Bridge",
+      "description": "Select, scan, and preview markdown notes from a user-approved vault."
+    },
+    {
+      "id": "obsidian-workspace",
       "type": "embedded-pane",
-      "label": "Vault Pane",
-      "description": "Render the user's Obsidian vault as a shell pane."
+      "label": "Obsidian Workspace",
+      "description": "Planned V2 ResonantOS-hosted markdown workspace for operating an Obsidian-compatible vault."
     }
   ],
   "requestedCapabilities": [
@@ -22,31 +28,65 @@
       "revocationBehavior": "hard-stop"
     },
     {
-      "capability": "ui-embedding",
-      "granted": false,
-      "scope": "system",
-      "revocationBehavior": "hide-surface"
-    },
-    {
       "capability": "archive-read",
       "granted": false,
       "scope": "shared",
       "revocationBehavior": "degrade"
+    },
+    {
+      "capability": "archive-intake-write",
+      "granted": false,
+      "scope": "intake-only",
+      "revocationBehavior": "hard-stop"
+    },
+    {
+      "capability": "ui-embedding",
+      "granted": false,
+      "scope": "system",
+      "revocationBehavior": "hide-surface"
     }
   ],
   "providerRequirements": {
-    "sharedProfiles": ["shared-local"],
+    "sharedProfiles": [],
     "supportsPrivateCredentials": false
   },
   "archiveIntegration": {
     "readScopes": ["living-archive/context", "vault"],
-    "intakeWriteScopes": [],
-    "canRequestIngest": false,
+    "intakeWriteScopes": ["obsidian-vault-notes"],
+    "canRequestIngest": true,
     "canWriteKnowledgePages": false
   },
   "health": {
-    "strategy": "embedded-pane-ready"
+    "strategy": "vault-bridge-ready"
   },
+  "tools": [
+    {
+      "name": "obsidian.write_note",
+      "description": "Write an existing markdown note through the host with stale-save protection, pre-write version snapshot, and audit record.",
+      "requiredCapabilities": ["filesystem"],
+      "inputSchema": {},
+      "outputSchema": {},
+      "audit": {
+        "logRequest": true,
+        "logResult": true,
+        "artifactTypes": ["log"]
+      },
+      "requiresHumanApproval": true
+    },
+    {
+      "name": "obsidian.vault_index",
+      "description": "Build a clean-room Obsidian-compatible index of markdown notes, tags, wikilinks, backlinks, and search matches.",
+      "requiredCapabilities": ["filesystem"],
+      "inputSchema": {},
+      "outputSchema": {},
+      "audit": {
+        "logRequest": true,
+        "logResult": false,
+        "artifactTypes": ["log"]
+      },
+      "requiresHumanApproval": false
+    }
+  ],
   "delegation": {
     "acceptsTasks": true,
     "taskTypes": ["knowledge-organization", "archive-prep"],
@@ -63,6 +103,6 @@
   },
   "compatibility": {
     "shellVersion": "^0.1.0",
-    "platforms": ["macOS"]
+    "platforms": ["macOS", "windows", "linux"]
   }
 }

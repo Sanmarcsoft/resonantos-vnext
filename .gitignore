@@ -33,6 +33,7 @@ yarn-error.log*
 .DS_Store
 .vite/
 coverage/
+tmp/
 
 # IDE/editor local state
 .idea/

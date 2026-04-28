@@ -2,7 +2,7 @@
 // Intent citation: docs/product/UX-001-resonantos-app-shell.md
 
 import { useState } from "react";
-import type { AddOnManifest, InstallationStatus, ResonantShellState } from "../../core/contracts";
+import type { AddOnInstallation, AddOnManifest, InstallationStatus, ResonantShellState } from "../../core/contracts";
 import { resolveArchiveIngestRoute, resolveRoutineRoute, routedProviderLabel } from "../../core/provider-service";
 
 type AppRuntimeSurface = "terminal-app" | "embedded-app" | "agent-workspace" | "channel-service" | "system-workspace";
@@ -16,6 +16,7 @@ type LauncherApp = {
   runtimeSurface: AppRuntimeSurface;
   primaryAction: string;
   manifest?: AddOnManifest;
+  installation?: AddOnInstallation;
 };
 
 export function OverviewWorkspace({
@@ -26,6 +27,9 @@ export function OverviewWorkspace({
   onOpenArchive,
   onOpenDelegation,
   onOpenAddons,
+  onOpenBrowser,
+  onOpenOpenCode,
+  onGrantBrowserVisibleAccess,
   onOpenSettings,
 }: {
   state: ResonantShellState;
@@ -35,6 +39,9 @@ export function OverviewWorkspace({
   onOpenArchive: () => void;
   onOpenDelegation: () => void;
   onOpenAddons: () => void;
+  onOpenBrowser: () => void;
+  onOpenOpenCode: () => void;
+  onGrantBrowserVisibleAccess: () => void;
   onOpenSettings: () => void;
 }) {
   const launcherApps = buildLauncherApps(state, manifests);
@@ -102,6 +109,9 @@ export function OverviewWorkspace({
               onOpenArchive={onOpenArchive}
               onOpenDelegation={onOpenDelegation}
               onOpenAddons={onOpenAddons}
+              onOpenBrowser={onOpenBrowser}
+              onOpenOpenCode={onOpenOpenCode}
+              onGrantBrowserVisibleAccess={onGrantBrowserVisibleAccess}
               onOpenSettings={onOpenSettings}
             />
           ) : null}
@@ -133,12 +143,18 @@ function ActiveAppSurface({
   onOpenArchive,
   onOpenDelegation,
   onOpenAddons,
+  onOpenBrowser,
+  onOpenOpenCode,
+  onGrantBrowserVisibleAccess,
   onOpenSettings,
 }: {
   app: LauncherApp;
   onOpenArchive: () => void;
   onOpenDelegation: () => void;
   onOpenAddons: () => void;
+  onOpenBrowser: () => void;
+  onOpenOpenCode: () => void;
+  onGrantBrowserVisibleAccess: () => void;
   onOpenSettings: () => void;
 }) {
   const isTerminal = app.runtimeSurface === "terminal-app";
@@ -150,6 +166,10 @@ function ActiveAppSurface({
         ? onOpenDelegation
       : app.id === "core.settings"
         ? onOpenSettings
+        : app.id === "addon.browser" && (app.status === "enabled" || app.status === "installed")
+          ? onOpenBrowser
+        : app.id === "addon.opencode" && (app.status === "enabled" || app.status === "installed")
+          ? onOpenOpenCode
         : app.status === "available" || app.status === "planned"
           ? onOpenAddons
           : undefined;
@@ -166,7 +186,9 @@ function ActiveAppSurface({
       </div>
 
       <div className={`workspace-preview ${isTerminal ? "terminal" : isEmbedded ? "embedded" : "system"}`}>
-        {isTerminal ? (
+        {app.id === "addon.browser" ? (
+          <BrowserPreview app={app} onGrantVisibleAccess={onGrantBrowserVisibleAccess} />
+        ) : isTerminal ? (
           <TerminalPreview app={app} />
         ) : isEmbedded ? (
           <EmbeddedPreview app={app} />
@@ -184,6 +206,21 @@ function ActiveAppSurface({
         </button>
       </div>
     </>
+  );
+}
+
+function BrowserPreview({ app, onGrantVisibleAccess }: { app: LauncherApp; onGrantVisibleAccess: () => void }) {
+  const ready = app.status === "enabled" || app.status === "installed";
+  return (
+    <div className="embedded-preview-body browser-preview-body">
+      <strong>Live browser workspace</strong>
+      <p>Open the workspace to load https://resonantos.com in the center column.</p>
+      {!ready ? (
+        <button type="button" className="button-secondary touch-action" onClick={onGrantVisibleAccess}>
+          Install and grant browser access
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -248,6 +285,7 @@ function buildLauncherApps(state: ResonantShellState, manifests: AddOnManifest[]
       runtimeSurface: runtimeSurfaceForManifest(manifest),
       primaryAction: installedStatus === "enabled" || installedStatus === "installed" ? "Open Workspace" : "Install / Configure",
       manifest,
+      installation,
     } satisfies LauncherApp;
   });
 
@@ -281,6 +319,9 @@ function buildLauncherApps(state: ResonantShellState, manifests: AddOnManifest[]
     },
   ];
 
+  const plannedManifestIds = new Set(manifestApps.map((app) => app.id));
+  const visiblePlannedApps = plannedApps.filter((app) => !plannedManifestIds.has(app.id));
+
   return [
     {
       id: "core.living-archive",
@@ -301,7 +342,7 @@ function buildLauncherApps(state: ResonantShellState, manifests: AddOnManifest[]
       primaryAction: "Open Delegation",
     },
     ...manifestApps,
-    ...plannedApps,
+    ...visiblePlannedApps,
     {
       id: "core.settings",
       name: "Settings",

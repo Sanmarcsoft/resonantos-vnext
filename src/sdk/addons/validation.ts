@@ -1,0 +1,453 @@
+// Intent citation: docs/architecture/ADR-018-addon-sdk-v0.md
+
+import type {
+  AddOnCategory,
+  AddOnManifest,
+  AddOnRuntimeType,
+  AddOnSurfaceType,
+  Capability,
+  CapabilityScope,
+  DelegationArtifactType,
+  RevocationBehavior,
+  RuntimeIsolationBoundary,
+} from "../../core/contracts";
+import {
+  ADDON_CAPABILITIES,
+  ADDON_SERVICE_PROTOCOLS,
+  type AddOnManifestSource,
+  type AddOnManifestValidationResult,
+  type AddOnValidationIssue,
+} from "./contracts";
+
+const runtimeTypes: readonly AddOnRuntimeType[] = ["ui-module", "embedded-module", "local-service", "agent-addon", "channel-addon"];
+const categories: readonly AddOnCategory[] = ["agent", "channel", "memory", "security", "knowledge", "tool", "integration"];
+const surfaceTypes: readonly AddOnSurfaceType[] = [
+  "page",
+  "panel",
+  "embedded-pane",
+  "modal",
+  "tool-action",
+  "background-task-monitor",
+  "channel",
+];
+const scopes: readonly CapabilityScope[] = ["none", "self", "workspace", "shared", "system", "intake-only"];
+const revocationBehaviors: readonly RevocationBehavior[] = ["hard-stop", "degrade", "hide-surface"];
+const isolationBoundaries: readonly RuntimeIsolationBoundary[] = [
+  "shell-ui",
+  "embedded-surface",
+  "host-mediated-service",
+  "host-mediated-agent",
+  "host-mediated-channel",
+];
+const artifactTypes: readonly DelegationArtifactType[] = [
+  "summary",
+  "markdown",
+  "diff",
+  "file-list",
+  "log",
+  "citation-bundle",
+  "diagnostic-report",
+  "verification-report",
+  "archive-intake-bundle",
+];
+
+const addonIdPattern = /^addon\.[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*$/;
+const semanticVersionPattern = /^\d+\.\d+\.\d+(?:[-+][a-z0-9.-]+)?$/i;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isString = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
+
+const pushIssue = (
+  issues: AddOnValidationIssue[],
+  severity: AddOnValidationIssue["severity"],
+  code: string,
+  path: string,
+  message: string,
+) => {
+  issues.push({ severity, code, path, message });
+};
+
+const validateString = (
+  issues: AddOnValidationIssue[],
+  manifest: Record<string, unknown>,
+  field: string,
+) => {
+  if (!isString(manifest[field])) {
+    pushIssue(issues, "error", "required-string", field, `${field} must be a non-empty string.`);
+  }
+};
+
+const validateStringValue = (
+  issues: AddOnValidationIssue[],
+  value: unknown,
+  path: string,
+) => {
+  if (!isString(value)) {
+    pushIssue(issues, "error", "required-string", path, `${path} must be a non-empty string.`);
+  }
+};
+
+const validateStringArray = (
+  issues: AddOnValidationIssue[],
+  value: unknown,
+  path: string,
+) => {
+  if (!Array.isArray(value) || value.some((item) => !isString(item))) {
+    pushIssue(issues, "error", "string-array", path, `${path} must be an array of non-empty strings.`);
+  }
+};
+
+const validateEnum = <T extends string>(
+  issues: AddOnValidationIssue[],
+  value: unknown,
+  allowed: readonly T[],
+  path: string,
+) => {
+  if (!allowed.includes(value as T)) {
+    pushIssue(issues, "error", "unknown-enum", path, `${path} has an unsupported value.`);
+  }
+};
+
+export const validateAddOnManifest = (
+  candidate: unknown,
+  options: { source?: AddOnManifestSource } = {},
+): AddOnManifestValidationResult => {
+  const source = options.source ?? "bundled";
+  const issues: AddOnValidationIssue[] = [];
+
+  if (!isRecord(candidate)) {
+    return {
+      valid: false,
+      issues: [
+        {
+          severity: "error",
+          code: "manifest-object",
+          path: "$",
+          message: "Add-on manifest must be a JSON object.",
+        },
+      ],
+    };
+  }
+
+  for (const field of ["id", "name", "version", "author", "category", "description", "runtimeType"]) {
+    validateString(issues, candidate, field);
+  }
+
+  const manifestId = isString(candidate.id) ? candidate.id : undefined;
+  if (manifestId && !addonIdPattern.test(manifestId)) {
+    pushIssue(issues, "error", "invalid-addon-id", "id", "Add-on id must use the addon.namespace-name form.");
+  }
+  if (isString(candidate.version) && !semanticVersionPattern.test(candidate.version)) {
+    pushIssue(issues, "error", "invalid-version", "version", "Add-on version must be semantic version-like, for example 0.1.0.");
+  }
+  validateEnum(issues, candidate.category, categories, "category");
+  validateEnum(issues, candidate.runtimeType, runtimeTypes, "runtimeType");
+
+  const manifestSurfaceTypes = new Set<AddOnSurfaceType>();
+  if (!Array.isArray(candidate.surfaces)) {
+    pushIssue(issues, "error", "surfaces-array", "surfaces", "surfaces must be an array.");
+  } else {
+    const surfaceIds = new Set<string>();
+    candidate.surfaces.forEach((surface, index) => {
+      const path = `surfaces[${index}]`;
+      if (!isRecord(surface)) {
+        pushIssue(issues, "error", "surface-object", path, "Surface must be an object.");
+        return;
+      }
+      validateStringValue(issues, surface.id, `${path}.id`);
+      validateStringValue(issues, surface.label, `${path}.label`);
+      validateStringValue(issues, surface.description, `${path}.description`);
+      validateEnum(issues, surface.type, surfaceTypes, `${path}.type`);
+      if (surfaceTypes.includes(surface.type as AddOnSurfaceType)) {
+        manifestSurfaceTypes.add(surface.type as AddOnSurfaceType);
+      }
+      if (isString(surface.id)) {
+        if (surfaceIds.has(surface.id)) {
+          pushIssue(issues, "error", "duplicate-surface", `${path}.id`, "Surface ids must be unique inside a manifest.");
+        }
+        surfaceIds.add(surface.id);
+      }
+    });
+  }
+
+  const requestedCapabilities = Array.isArray(candidate.requestedCapabilities) ? candidate.requestedCapabilities : [];
+  if (!Array.isArray(candidate.requestedCapabilities)) {
+    pushIssue(issues, "error", "capabilities-array", "requestedCapabilities", "requestedCapabilities must be an array.");
+  }
+  const requestedCapabilitySet = new Set<Capability>();
+  requestedCapabilities.forEach((grant, index) => {
+    const path = `requestedCapabilities[${index}]`;
+    if (!isRecord(grant)) {
+      pushIssue(issues, "error", "capability-object", path, "Capability grant must be an object.");
+      return;
+    }
+    validateEnum(issues, grant.capability, ADDON_CAPABILITIES, `${path}.capability`);
+    validateEnum(issues, grant.scope, scopes, `${path}.scope`);
+    validateEnum(issues, grant.revocationBehavior, revocationBehaviors, `${path}.revocationBehavior`);
+    if (typeof grant.granted !== "boolean") {
+      pushIssue(issues, "error", "capability-granted-boolean", `${path}.granted`, "Capability granted must be boolean.");
+    }
+    if (ADDON_CAPABILITIES.includes(grant.capability as Capability)) {
+      const capability = grant.capability as Capability;
+      if (requestedCapabilitySet.has(capability)) {
+        pushIssue(issues, "error", "duplicate-capability", `${path}.capability`, "Requested capabilities must be unique.");
+      }
+      requestedCapabilitySet.add(capability);
+    }
+  });
+
+  if (
+    (candidate.runtimeType === "embedded-module" || manifestSurfaceTypes.has("embedded-pane")) &&
+    !requestedCapabilitySet.has("ui-embedding")
+  ) {
+    pushIssue(
+      issues,
+      "error",
+      "embedded-surface-requires-ui-embedding",
+      "requestedCapabilities",
+      "Embedded add-ons and embedded-pane surfaces must request ui-embedding.",
+    );
+  }
+  if (candidate.runtimeType === "ui-module" && !manifestSurfaceTypes.has("embedded-pane") && requestedCapabilitySet.has("ui-embedding")) {
+    pushIssue(
+      issues,
+      "warning",
+      "ui-module-ui-embedding-unnecessary",
+      "requestedCapabilities",
+      "UI module panels run inside the ResonantOS shell and should not request ui-embedding unless they expose an embedded-pane surface.",
+    );
+  }
+
+  if (Array.isArray(candidate.grantPresets)) {
+    const presetIds = new Set<string>();
+    candidate.grantPresets.forEach((preset, presetIndex) => {
+      const presetPath = `grantPresets[${presetIndex}]`;
+      if (!isRecord(preset)) {
+        pushIssue(issues, "error", "grant-preset-object", presetPath, "Grant preset must be an object.");
+        return;
+      }
+      validateStringValue(issues, preset.id, `${presetPath}.id`);
+      validateStringValue(issues, preset.label, `${presetPath}.label`);
+      validateStringValue(issues, preset.description, `${presetPath}.description`);
+      if (isString(preset.id)) {
+        if (presetIds.has(preset.id)) {
+          pushIssue(issues, "error", "duplicate-preset", `${presetPath}.id`, "Grant preset ids must be unique.");
+        }
+        presetIds.add(preset.id);
+      }
+      if (!Array.isArray(preset.grants)) {
+        pushIssue(issues, "error", "grant-preset-grants-array", `${presetPath}.grants`, "Preset grants must be an array.");
+        return;
+      }
+      preset.grants.forEach((grant, grantIndex) => {
+        const grantPath = `${presetPath}.grants[${grantIndex}]`;
+        if (!isRecord(grant)) {
+          pushIssue(issues, "error", "grant-preset-grant-object", grantPath, "Preset grant must be an object.");
+          return;
+        }
+        validateEnum(issues, grant.capability, ADDON_CAPABILITIES, `${grantPath}.capability`);
+        if (ADDON_CAPABILITIES.includes(grant.capability as Capability) && !requestedCapabilitySet.has(grant.capability as Capability)) {
+          pushIssue(
+            issues,
+            "error",
+            "preset-grants-unrequested-capability",
+            `${grantPath}.capability`,
+            "Grant presets may only grant capabilities declared in requestedCapabilities.",
+          );
+        }
+      });
+    });
+  }
+
+  if (!isRecord(candidate.providerRequirements)) {
+    pushIssue(issues, "error", "provider-requirements-object", "providerRequirements", "providerRequirements must be an object.");
+  } else {
+    validateStringArray(issues, candidate.providerRequirements.sharedProfiles, "providerRequirements.sharedProfiles");
+    if (
+      Array.isArray(candidate.providerRequirements.sharedProfiles) &&
+      candidate.providerRequirements.sharedProfiles.length > 0 &&
+      !requestedCapabilitySet.has("providers")
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "provider-profile-requires-capability",
+        "requestedCapabilities",
+        "Add-ons declaring shared provider profiles must request providers.",
+      );
+    }
+    if (typeof candidate.providerRequirements.supportsPrivateCredentials !== "boolean") {
+      pushIssue(
+        issues,
+        "error",
+        "private-credentials-boolean",
+        "providerRequirements.supportsPrivateCredentials",
+        "supportsPrivateCredentials must be boolean.",
+      );
+    }
+  }
+
+  if (!isRecord(candidate.archiveIntegration)) {
+    pushIssue(issues, "error", "archive-integration-object", "archiveIntegration", "archiveIntegration must be an object.");
+  } else {
+    validateStringArray(issues, candidate.archiveIntegration.readScopes, "archiveIntegration.readScopes");
+    validateStringArray(issues, candidate.archiveIntegration.intakeWriteScopes, "archiveIntegration.intakeWriteScopes");
+    if (
+      Array.isArray(candidate.archiveIntegration.readScopes) &&
+      candidate.archiveIntegration.readScopes.length > 0 &&
+      !requestedCapabilitySet.has("archive-read")
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "archive-read-scope-requires-capability",
+        "requestedCapabilities",
+        "Add-ons declaring archive read scopes must request archive-read.",
+      );
+    }
+    if (
+      Array.isArray(candidate.archiveIntegration.intakeWriteScopes) &&
+      candidate.archiveIntegration.intakeWriteScopes.length > 0 &&
+      !requestedCapabilitySet.has("archive-intake-write")
+    ) {
+      pushIssue(
+        issues,
+        "error",
+        "archive-intake-scope-requires-capability",
+        "requestedCapabilities",
+        "Add-ons declaring archive intake write scopes must request archive-intake-write.",
+      );
+    }
+    if (candidate.archiveIntegration.canWriteKnowledgePages === true) {
+      pushIssue(
+        issues,
+        "error",
+        "addon-knowledge-write-forbidden",
+        "archiveIntegration.canWriteKnowledgePages",
+        "Add-ons cannot claim trusted Living Archive knowledge-page write authority.",
+      );
+    }
+  }
+
+  if (!isRecord(candidate.health) || !isString(candidate.health.strategy)) {
+    pushIssue(issues, "error", "health-strategy", "health.strategy", "health.strategy must be a non-empty string.");
+  }
+
+  if (!isRecord(candidate.installHooks)) {
+    pushIssue(issues, "error", "install-hooks-object", "installHooks", "installHooks must be an object.");
+  }
+
+  if (!isRecord(candidate.compatibility)) {
+    pushIssue(issues, "error", "compatibility-object", "compatibility", "compatibility must be an object.");
+  } else {
+    validateStringValue(issues, candidate.compatibility.shellVersion, "compatibility.shellVersion");
+    validateStringArray(issues, candidate.compatibility.platforms, "compatibility.platforms");
+  }
+
+  if (isRecord(candidate.runtimeIsolation)) {
+    validateEnum(issues, candidate.runtimeIsolation.boundary, isolationBoundaries, "runtimeIsolation.boundary");
+    if (typeof candidate.runtimeIsolation.supportsDegradedMode !== "boolean") {
+      pushIssue(issues, "error", "runtime-isolation-boolean", "runtimeIsolation.supportsDegradedMode", "supportsDegradedMode must be boolean.");
+    }
+    if (typeof candidate.runtimeIsolation.requiresReviewedGrant !== "boolean") {
+      pushIssue(issues, "error", "runtime-isolation-boolean", "runtimeIsolation.requiresReviewedGrant", "requiresReviewedGrant must be boolean.");
+    }
+  }
+
+  if (isRecord(candidate.service)) {
+    validateEnum(issues, candidate.service.protocol, ADDON_SERVICE_PROTOCOLS, "service.protocol");
+    validateStringValue(issues, candidate.service.entrypoint, "service.entrypoint");
+  } else if (candidate.runtimeType === "local-service") {
+    pushIssue(
+      issues,
+      "warning",
+      "local-service-entrypoint-missing",
+      "service",
+      "Local-service add-ons should declare a service entrypoint before they can be executed by the host.",
+    );
+  }
+
+  if (Array.isArray(candidate.tools)) {
+    const toolNames = new Set<string>();
+    candidate.tools.forEach((tool, index) => {
+      const path = `tools[${index}]`;
+      if (!isRecord(tool)) {
+        pushIssue(issues, "error", "tool-object", path, "Tool definition must be an object.");
+        return;
+      }
+      validateStringValue(issues, tool.name, `${path}.name`);
+      validateStringValue(issues, tool.description, `${path}.description`);
+      if (isString(tool.name)) {
+        if (toolNames.has(tool.name)) {
+          pushIssue(issues, "error", "duplicate-tool", `${path}.name`, "Tool names must be unique.");
+        }
+        toolNames.add(tool.name);
+      }
+      if (!Array.isArray(tool.requiredCapabilities)) {
+        pushIssue(issues, "error", "tool-capabilities-array", `${path}.requiredCapabilities`, "Tool requiredCapabilities must be an array.");
+      } else {
+        tool.requiredCapabilities.forEach((capability, capabilityIndex) => {
+          validateEnum(issues, capability, ADDON_CAPABILITIES, `${path}.requiredCapabilities[${capabilityIndex}]`);
+          if (ADDON_CAPABILITIES.includes(capability as Capability) && !requestedCapabilitySet.has(capability as Capability)) {
+            pushIssue(
+              issues,
+              "error",
+              "tool-uses-unrequested-capability",
+              `${path}.requiredCapabilities[${capabilityIndex}]`,
+              "Tool capabilities must be declared in requestedCapabilities.",
+            );
+          }
+        });
+      }
+      if (!isRecord(tool.inputSchema)) {
+        pushIssue(issues, "error", "tool-input-schema", `${path}.inputSchema`, "Tool inputSchema must be an object.");
+      }
+      if (!isRecord(tool.outputSchema)) {
+        pushIssue(issues, "error", "tool-output-schema", `${path}.outputSchema`, "Tool outputSchema must be an object.");
+      }
+      if (!isRecord(tool.audit)) {
+        pushIssue(issues, "error", "tool-audit", `${path}.audit`, "Tool audit must be an object.");
+      } else if (Array.isArray(tool.audit.artifactTypes)) {
+        tool.audit.artifactTypes.forEach((artifactType, artifactIndex) => {
+          validateEnum(issues, artifactType, artifactTypes, `${path}.audit.artifactTypes[${artifactIndex}]`);
+        });
+      } else {
+        pushIssue(issues, "error", "tool-audit-artifacts", `${path}.audit.artifactTypes`, "Tool audit artifactTypes must be an array.");
+      }
+    });
+  }
+
+  if (source === "sideload" && isRecord(candidate.provenance) && candidate.provenance.tier !== "sideloaded-unverified") {
+    pushIssue(
+      issues,
+      "warning",
+      "sideload-provenance-overridden",
+      "provenance.tier",
+      "Sideloaded add-ons are treated as sideloaded-unverified until host verification succeeds.",
+    );
+  }
+
+  return {
+    valid: issues.every((issue) => issue.severity !== "error"),
+    manifestId,
+    issues,
+  };
+};
+
+export const assertValidAddOnManifest = (
+  candidate: unknown,
+  options: { source?: AddOnManifestSource; label?: string } = {},
+): AddOnManifest => {
+  const result = validateAddOnManifest(candidate, options);
+  if (!result.valid) {
+    const label = options.label ?? result.manifestId ?? "add-on manifest";
+    const details = result.issues
+      .filter((issue) => issue.severity === "error")
+      .map((issue) => `${issue.path}: ${issue.message}`)
+      .join("; ");
+    throw new Error(`Invalid ${label}: ${details}`);
+  }
+  return candidate as AddOnManifest;
+};

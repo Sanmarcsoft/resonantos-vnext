@@ -9,6 +9,7 @@ export type Capability =
   | "shell"
   | "network"
   | "ui-embedding"
+  | "browser-control"
   | "agent-delegation"
   | "notifications"
   | "device-integration";
@@ -16,6 +17,7 @@ export type Capability =
 export type CapabilityScope = "none" | "self" | "workspace" | "shared" | "system" | "intake-only";
 export type RevocationBehavior = "hard-stop" | "degrade" | "hide-surface";
 export type AddOnRuntimeType = "ui-module" | "embedded-module" | "local-service" | "agent-addon" | "channel-addon";
+export type AddOnServiceProtocol = "stdio-json-rpc" | "http-json" | "websocket-json" | "host-command";
 export type AddOnSurfaceType =
   | "page"
   | "panel"
@@ -174,7 +176,29 @@ export interface AddOnDelegationContract {
   notes?: string[];
 }
 
+export interface AddOnToolDefinition {
+  name: string;
+  description: string;
+  requiredCapabilities: Capability[];
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
+  audit: {
+    logRequest: boolean;
+    logResult: boolean;
+    artifactTypes: DelegationArtifactType[];
+  };
+  requiresHumanApproval?: boolean;
+}
+
+export interface AddOnLocalServiceDefinition {
+  protocol: AddOnServiceProtocol;
+  entrypoint: string;
+  healthCommand?: string;
+  shutdownCommand?: string;
+}
+
 export interface AddOnManifest {
+  sdkVersion?: string;
   id: string;
   name: string;
   version: string;
@@ -206,6 +230,8 @@ export interface AddOnManifest {
     strategy: string;
     endpoint?: string;
   };
+  service?: AddOnLocalServiceDefinition;
+  tools?: AddOnToolDefinition[];
   delegation?: AddOnDelegationContract;
   installHooks: {
     onInstall?: string;
@@ -485,6 +511,18 @@ export interface ArchiveActivityEntry {
 export interface ArchiveRuntimeStatus {
   status: "ready" | "attention" | "missing";
   mode: string;
+  portableUserState: {
+    rootPath: string;
+    manifestPath: string;
+    memoryRoot: string;
+    configRoot: string;
+    secretsRoot: string;
+    walletsRoot: string;
+    logsRoot: string;
+    backupsRoot: string;
+    source: string;
+    initialized: boolean;
+  };
   configPath: string;
   vaultRoot: string;
   managedRoot: string;
@@ -568,6 +606,52 @@ export interface ArchiveLibraryImportSourceRecord {
   title: string;
   hash: string;
   sizeBytes: number;
+}
+
+export interface ArchiveLibraryPreflightCount {
+  label: string;
+  count: number;
+  sizeBytes: number;
+}
+
+export interface ArchiveLibraryPreflightSample {
+  path: string;
+  reason: string;
+}
+
+export interface ArchiveLibraryPreflightWarning {
+  severity: "attention" | "warning" | "error" | string;
+  title: string;
+  detail: string;
+}
+
+export interface ArchiveLibraryRecommendedImportPlan {
+  summary: string;
+  recommendedAction: string;
+  autoExcludedTopFolders: string[];
+  ambiguousTopFolders: string[];
+  includedTopFolders: string[];
+  approvalNote: string;
+}
+
+export interface ArchiveLibraryPreflightResult {
+  sourcePath: string;
+  exists: boolean;
+  isDirectory: boolean;
+  obsidianVaultDetected: boolean;
+  supportedFiles: number;
+  skippedFiles: number;
+  hiddenEntriesSkipped: number;
+  generatedArchiveEntriesSkipped: number;
+  estimatedImportBytes: number;
+  estimatedManagedStorageBytes: number;
+  supportedByExtension: ArchiveLibraryPreflightCount[];
+  skippedByExtension: ArchiveLibraryPreflightCount[];
+  supportedByTopFolder: ArchiveLibraryPreflightCount[];
+  skippedByTopFolder: ArchiveLibraryPreflightCount[];
+  warnings: ArchiveLibraryPreflightWarning[];
+  samples: ArchiveLibraryPreflightSample[];
+  recommendedPlan: ArchiveLibraryRecommendedImportPlan;
 }
 
 export type ArchiveClassificationTarget = "human-knowledge" | "external-knowledge" | "unclear";
@@ -1079,7 +1163,244 @@ export interface AddOnInstallation {
   recommendedGrantPresetIds: string[];
   grantRecommendationSource?: GrantRecommendationSource;
   privateProviderProfileIds: string[];
+  config?: Record<string, unknown>;
   notes: string[];
+}
+
+export interface ObsidianVaultStatus {
+  vaultPath: string;
+  exists: boolean;
+  isDirectory: boolean;
+  obsidianConfigDetected: boolean;
+  markdownFiles: number;
+  warnings: string[];
+}
+
+export interface ObsidianNoteSummary {
+  title: string;
+  relativePath: string;
+  sizeBytes: number;
+  modifiedAt?: string;
+}
+
+export interface ObsidianNotePayload {
+  title: string;
+  relativePath: string;
+  content: string;
+  sizeBytes: number;
+  modifiedAt?: string;
+}
+
+export interface ObsidianOpenNoteResult {
+  openedUrl: string;
+  absolutePath: string;
+  notePath: string;
+}
+
+export interface ObsidianWriteNoteResult {
+  notePath: string;
+  title: string;
+  sizeBytes: number;
+  previousModifiedAt?: string;
+  modifiedAt?: string;
+  versionPath: string;
+  auditPath: string;
+}
+
+export interface ObsidianBacklink {
+  sourcePath: string;
+  sourceTitle: string;
+}
+
+export interface ObsidianIndexedNote {
+  title: string;
+  relativePath: string;
+  sizeBytes: number;
+  modifiedAt?: string;
+  tags: string[];
+  wikilinks: string[];
+  backlinks: ObsidianBacklink[];
+  excerpt: string;
+}
+
+export interface ObsidianVaultIndex {
+  vaultPath: string;
+  noteCount: number;
+  query?: string;
+  notes: ObsidianIndexedNote[];
+}
+
+export interface BrowserAuditEvent {
+  action: string;
+  detail: string;
+  timestamp: string;
+}
+
+export interface BrowserOpenUrlResult {
+  sessionId: string;
+  requestedUrl: string;
+  finalUrl: string;
+  title: string;
+  status: string;
+  engine: string;
+  screenshotDataUrl: string;
+  audit: BrowserAuditEvent[];
+}
+
+export interface BrowserViewportInput {
+  viewportWidth?: number;
+  viewportHeight?: number;
+}
+
+export interface BrowserEngineStatus {
+  installed: boolean;
+  enginePath?: string;
+  installHint: string;
+}
+
+export interface BrowserEngineInstallResult {
+  installed: boolean;
+  enginePath?: string;
+  log: string;
+}
+
+export interface BrowserNativeWebviewBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface BrowserNativeWebviewResult {
+  label: string;
+  url?: string | null;
+  visible: boolean;
+  status: string;
+}
+
+export interface BrowserPageLink {
+  text: string;
+  href: string;
+}
+
+export interface BrowserReadPageResult {
+  sessionId: string;
+  finalUrl: string;
+  title: string;
+  text: string;
+  links: BrowserPageLink[];
+  audit: BrowserAuditEvent[];
+}
+
+export interface BrowserInteractionResult {
+  sessionId: string;
+  finalUrl: string;
+  title: string;
+  screenshotDataUrl: string;
+  audit: BrowserAuditEvent[];
+}
+
+export interface BrowserCloseSessionResult {
+  sessionId: string;
+  closed: boolean;
+  audit: BrowserAuditEvent[];
+}
+
+export interface BrowserHostAuditEvent {
+  at: string;
+  event: string;
+  sessionId: string | null;
+  details: Record<string, unknown>;
+}
+
+export interface BrowserHostHealthResult {
+  ready: boolean;
+  sessionId: string | null;
+  engine: "chromium";
+  headless: boolean;
+  url: string | null;
+  audit: BrowserHostAuditEvent[];
+}
+
+export interface BrowserHostOpenUrlResult {
+  sessionId: string;
+  finalUrl: string;
+  title: string;
+  status: number | null;
+  audit: BrowserHostAuditEvent[];
+}
+
+export interface BrowserHostReadPageResult {
+  sessionId: string;
+  finalUrl: string;
+  title: string;
+  text: string;
+  links: BrowserPageLink[];
+  audit: BrowserHostAuditEvent[];
+}
+
+export interface BrowserHostActionResult {
+  sessionId: string;
+  finalUrl: string;
+  title: string;
+  audit: BrowserHostAuditEvent[];
+}
+
+export interface BrowserHostEvidenceResult {
+  sessionId: string;
+  evidenceRef: string;
+  audit: BrowserHostAuditEvent[];
+}
+
+export interface BrowserToolCommand {
+  type: "start" | "open_url" | "read_page" | "click" | "type" | "capture_evidence" | "close" | "health";
+  params?: Record<string, unknown>;
+  humanApproved?: boolean;
+}
+
+export interface BrowserWorkspaceTabState {
+  id: string;
+  label: string;
+  url: string;
+  history: string[];
+  historyIndex: number;
+}
+
+export interface BrowserControlledSessionState {
+  sessionId: string | null;
+  status: "idle" | "starting" | "ready" | "error";
+  url: string | null;
+  title: string | null;
+  error: string | null;
+  lastSyncedAt: string | null;
+}
+
+export interface BrowserWorkspaceState {
+  activeTabId: string;
+  tabs: BrowserWorkspaceTabState[];
+  controlledSession: BrowserControlledSessionState;
+}
+
+export type OpenCodeLaunchMode = "web" | "serve";
+
+export interface OpenCodeStatus {
+  installed: boolean;
+  version?: string | null;
+  binaryPath?: string | null;
+  installHint: string;
+  supportsWebUi: boolean;
+  supportsServerApi: boolean;
+}
+
+export interface OpenCodeServiceResult {
+  sessionId: string;
+  workspacePath: string;
+  mode: OpenCodeLaunchMode;
+  apiBaseUrl: string;
+  webUrl: string;
+  command: string;
+  pid?: number | null;
+  alreadyRunning: boolean;
 }
 
 export interface StrategistIdentity {
@@ -1279,16 +1600,45 @@ export interface RecoverySession {
 }
 
 export interface UiPreferences {
-  activeSection: "overview" | "strategist" | "archive" | "delegation" | "addons" | "settings";
+  activeSection:
+    | "overview"
+    | "strategist"
+    | "archive"
+    | "delegation"
+    | "addons"
+    | "obsidian"
+    | "browser"
+    | "opencode"
+    | "terminal"
+    | "settings";
   activeChatThreadId: string;
   pinnedChatThreadIds: string[];
   pinnedChatProjectIds: string[];
   leftSidebarOpen: boolean;
   chatSidebarOpen: boolean;
+  workspaceLayout: "main-chat" | "chat-main";
   chatHistoryOpen: boolean;
   chatSidebarWidth: number;
   windowZoom: number;
+  browserWorkspace: BrowserWorkspaceState;
   theme: "resonant-dark";
+}
+
+export interface TerminalRunCommandResult {
+  command: string;
+  cwd: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  durationMs: number;
+}
+
+export interface TerminalPtySessionResult {
+  sessionId: string;
+  cwd: string;
+  shell: string;
+  created: boolean;
 }
 
 export interface ResonantShellState {

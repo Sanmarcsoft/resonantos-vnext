@@ -24,6 +24,14 @@
     grid-template-columns: 76px minmax(0, 1fr) 56px;
   }
 
+  .shell.layout-chat-main {
+    grid-template-columns: 76px minmax(360px, var(--chat-rail-width, 520px)) minmax(0, 1fr);
+  }
+
+  .shell.layout-chat-main.chat-closed {
+    grid-template-columns: 76px 56px minmax(0, 1fr);
+  }
+
   .nav-item small {
     display: none;
   }
@@ -46,6 +54,7 @@
 	  .library-importer-intro,
 	  .library-import-form,
 	  .library-field-grid,
+	  .library-preflight-grid,
 	  .home-hero-panel,
 	  .app-workbench-grid,
   .delegation-grid,
@@ -70,6 +79,9 @@
   .shell,
   .shell.chat-closed {
     grid-template-columns: 76px minmax(0, 1fr) 0;
+    grid-template-areas:
+      "topbar topbar topbar"
+      "dock main chat";
   }
 
   .main-shell {
@@ -105,6 +117,7 @@
 	  .library-importer-intro,
 	  .library-import-form,
 	  .library-field-grid,
+	  .library-preflight-grid,
 	  .home-hero-panel,
 	  .app-workbench-grid,
 	  .classification-review-head,
@@ -113,9 +126,9 @@
   .archive-review-steps,
   .archive-review-signal-grid,
   .archive-proposed-page-grid,
-  .form-grid,
-  .pane-body,
-  .settings-shell {
+	  .form-grid,
+	  .obsidian-vault-pane,
+	  .settings-shell {
     grid-template-columns: 1fr;
   }
 
@@ -176,6 +189,7 @@
 	  .library-importer-intro,
 	  .library-import-form,
 	  .library-field-grid,
+	  .library-preflight-grid,
 	  .home-hero-panel,
 	  .app-workbench-grid,
 	  .classification-review-head,
@@ -207,9 +221,14 @@
   .channel-header,
   .addon-headline,
   .provider-head,
-  .agent-heading,
-  .pane-header,
-	  .archive-command-actions,
+	  .agent-heading,
+	  .obsidian-addon-hero,
+		  .browser-addon-panel,
+			  .browser-addon-grant-box,
+			  .obsidian-vault-controls,
+			  .obsidian-note-actions,
+			  .obsidian-intake-history-head,
+			  .archive-command-actions,
   .source-registry-actions,
   .source-root-card,
   .imported-library-head,

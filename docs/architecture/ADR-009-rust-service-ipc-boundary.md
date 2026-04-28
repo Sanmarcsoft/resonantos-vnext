@@ -60,6 +60,7 @@ The UI should not infer privileged behavior from side effects.
 - Secrets are stored and resolved on the Rust side.
 - Browser/UI state may hold user-entered drafts temporarily, but not the trusted source of truth.
 - Secret-bearing operations must not require the UI to manipulate raw secret values after submission.
+- Portable encrypted vaults and user-state root resolution are Rust-side service responsibilities as defined in `ADR-022`.
 
 ## Process Orchestration Boundaries
 
@@ -83,3 +84,4 @@ These states must be visible to the UI without the UI inventing its own interpre
 - Future privileged work should start by designing a Rust service contract before adding UI.
 - `src/core/` types should evolve toward service-level contracts that mirror Rust-side capabilities.
 - The shell should gradually replace direct runtime helpers with explicit service-oriented adapters.
+- Provider secrets, wallet vaults, and private memory paths must be mediated through the Portable User State Root and secure vault boundary before production wallet/provider hardening.

@@ -1,5 +1,5 @@
 .chat-sidebar {
-  grid-row: 2;
+  grid-area: chat;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -11,6 +11,11 @@
   height: 100%;
   overflow: hidden;
   min-width: 0;
+}
+
+.shell.layout-chat-main .chat-sidebar {
+  border-right: 1px solid var(--border);
+  border-left: 0;
 }
 
 .chat-sidebar.closed {
@@ -28,6 +33,11 @@
   width: 10px;
   cursor: col-resize;
   touch-action: none;
+}
+
+.shell.layout-chat-main .chat-resize-handle {
+  right: -5px;
+  left: auto;
 }
 
 .chat-resize-handle::before {

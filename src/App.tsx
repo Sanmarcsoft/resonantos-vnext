@@ -16,6 +16,7 @@ import type {
   ArchiveReviewDecisionResult,
   ArchiveLibraryImportResult,
   ArchiveLibraryImportMode,
+  ArchiveLibraryPreflightResult,
   ArchiveMemoryDomain,
   ArchiveSourceFolderScanResult,
   ArchiveSourceWatchRecord,
@@ -25,6 +26,7 @@ import type {
   ArchiveRuntimeStatus,
   ArchiveSearchResult,
   ChatRunPhase,
+  ConversationThread,
   LocalRuntimeStatus,
   ProviderDiagnosticReport,
   ProviderSmokeTestResult,
@@ -32,11 +34,20 @@ import type {
   ResonantShellState,
 } from "./core/contracts";
 import { routedProviderLabel } from "./core/provider-service";
-import { persistState } from "./core/runtime";
+import {
+  createDesktopBrowserToolRunner,
+  persistState,
+  requestBrowserNativeWebviewHide,
+  requestBrowserNativeWebviewResize,
+  requestBrowserNativeWebviewShow,
+  requestObsidianVaultFolderSelection,
+} from "./core/runtime";
 import {
   executeSideloadManifest,
+  grantAddonCapabilities,
   toggleAddonCapabilityGrant,
   toggleAddonInstallation,
+  updateAddonConfig,
 } from "./modules/addons/controller";
 import {
   executeArchiveIngestProbe,
@@ -52,12 +63,14 @@ import {
   loadArchiveReviewQueue,
   loadArchiveRuntimeStatus,
   pickArchiveLibraryFolder,
+  preflightArchiveLibrary,
   processArchiveQueuedRequest,
   promoteArchiveReviewArtifact,
   queueArchiveSourceForIngest,
   queueWatchedArchiveSourceForIngest,
   scanArchiveSourceFolders,
 } from "./modules/archive/controller";
+import { buildArchivePreflightAugmentorPrompt } from "./modules/archive/archive-augmentor-handoff";
 import {
   attachComposerFiles,
   BrowserSpeechRecognition,
@@ -67,6 +80,7 @@ import {
 import { saveChatMessageToArchiveIntake } from "./modules/chat/archive-intake-controller";
 import { executeChatTurn } from "./modules/chat/controller";
 import { StrategistChatRail } from "./modules/chat/StrategistChatRail";
+import { appendTranscriptEvent } from "./core/context-memory";
 import {
   branchChatFromMessageAction,
   branchChatProjectAction,
@@ -91,6 +105,10 @@ import type { ComposerAttachment, ThinkingDepth } from "./modules/chat/types";
 import { Panel } from "./components/Panel";
 import { ArchiveWorkspace } from "./modules/archive/ArchiveWorkspace";
 import { AddOnsWorkspace } from "./modules/addons/AddOnsWorkspace";
+import { BrowserWorkspace } from "./modules/browser/BrowserWorkspace";
+import { ObsidianWorkspace } from "./modules/obsidian/ObsidianWorkspace";
+import { OpenCodeWorkspace } from "./modules/opencode/OpenCodeWorkspace";
+import { TerminalWorkspace } from "./modules/terminal/TerminalWorkspace";
 import { DelegationWorkspace } from "./modules/delegation/DelegationWorkspace";
 import { OverviewWorkspace } from "./modules/overview/OverviewWorkspace";
 import { promoteRecoveryRoute, RECOVERY_RUNBOOK_PROMPT, setRecoveryMode } from "./modules/recovery/controller";
@@ -117,7 +135,39 @@ type LoadState =
   | { phase: "error"; message: string };
 
 type Section = ResonantShellState["uiPreferences"]["activeSection"];
-type DockIconId = "home" | "archive" | "delegation" | "addons" | "agent" | "settings";
+type DockIconId =
+  | "home"
+  | "archive"
+  | "delegation"
+  | "addons"
+  | "browser"
+  | "opencode"
+  | "terminal"
+  | "agent"
+  | "settings";
+type VendorIconId =
+  | "apps"
+  | "archive"
+  | "database"
+  | "home"
+  | "layout-sidebar-left-expand"
+  | "layout-sidebar-right-collapse"
+  | "robot"
+  | "route-alt-left"
+  | "settings"
+  | "world";
+
+const dockIconMap: Record<DockIconId, VendorIconId> = {
+  home: "home",
+  archive: "database",
+  delegation: "route-alt-left",
+  addons: "apps",
+  browser: "world",
+  opencode: "settings",
+  terminal: "settings",
+  agent: "robot",
+  settings: "settings",
+};
 
 const navItems: Array<{ id: Section; label: string; eyebrow: string; icon: DockIconId; pinned?: boolean }> = [
   { id: "overview", label: "Home", eyebrow: "apps", icon: "home", pinned: true },
@@ -144,9 +194,11 @@ const errorMessageOf = (error: unknown, fallback: string): string =>
 
 export function App() {
   const [loadState, setLoadState] = useState<LoadState>({ phase: "loading" });
+  const currentReadyStateRef = useRef<ResonantShellState | null>(null);
   const [search, setSearch] = useState("");
   const [sideloadPath, setSideloadPath] = useState("");
   const [selectedAddonId, setSelectedAddonId] = useState<string>("");
+  const [archiveFocusTarget, setArchiveFocusTarget] = useState<"review" | null>(null);
   const [composer, setComposer] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const [chatRunPhase, setChatRunPhase] = useState<ChatRunPhase>("idle");
@@ -195,6 +247,7 @@ export function App() {
   const [archiveClassificationReview, setArchiveClassificationReview] = useState<ArchiveLibraryClassificationReview | null>(null);
   const [archiveReorganisationPlan, setArchiveReorganisationPlan] = useState<ArchiveLibraryReorganisationPlan | null>(null);
   const [archiveLibraryImportResult, setArchiveLibraryImportResult] = useState<ArchiveLibraryImportResult | null>(null);
+  const [archiveLibraryPreflightResult, setArchiveLibraryPreflightResult] = useState<ArchiveLibraryPreflightResult | null>(null);
   const [archiveProbeBusy, setArchiveProbeBusy] = useState(false);
   const [archiveProbeResult, setArchiveProbeResult] = useState<{
     probe: ArchiveIngestProbeResult;
@@ -389,14 +442,16 @@ export function App() {
   }
 
   const { state, bundled, sideloaded } = loadState;
+  currentReadyStateRef.current = state;
   const cloneState = (current: ResonantShellState): ResonantShellState =>
     JSON.parse(JSON.stringify(current)) as ResonantShellState;
   const commitReadyState = (nextState: ResonantShellState, nextSideloaded = sideloaded) => {
+    currentReadyStateRef.current = nextState;
     setLoadState({ phase: "ready", state: nextState, bundled, sideloaded: nextSideloaded });
     void persistState(nextState);
   };
   const updateRuntimeState = (updater: (current: ResonantShellState) => ResonantShellState) => {
-    const nextState = updater(cloneState(state));
+    const nextState = updater(cloneState(currentReadyStateRef.current ?? state));
     commitReadyState(nextState);
   };
   const {
@@ -436,6 +491,9 @@ export function App() {
 
   const setSection = (section: Section) => {
     startTransition(() => {
+      if (section !== "archive") {
+        setArchiveFocusTarget(null);
+      }
       updateRuntimeState((draft) => {
         draft.uiPreferences.activeSection = section;
         return draft;
@@ -443,9 +501,22 @@ export function App() {
     });
   };
 
+  const openArchiveReview = () => {
+    setArchiveFocusTarget("review");
+    setSection("archive");
+  };
+
   const toggleChatSidebar = () => {
     updateRuntimeState((draft) => {
       draft.uiPreferences.chatSidebarOpen = !draft.uiPreferences.chatSidebarOpen;
+      return draft;
+    });
+  };
+
+  const toggleWorkspaceLayout = () => {
+    updateRuntimeState((draft) => {
+      draft.uiPreferences.workspaceLayout = draft.uiPreferences.workspaceLayout === "chat-main" ? "main-chat" : "chat-main";
+      draft.uiPreferences.chatSidebarOpen = true;
       return draft;
     });
   };
@@ -470,9 +541,10 @@ export function App() {
     event.preventDefault();
     const startX = event.clientX;
     const startWidth = loadState.state.uiPreferences.chatSidebarWidth;
+    const resizeDirection = loadState.state.uiPreferences.workspaceLayout === "chat-main" ? 1 : -1;
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
-      const nextWidth = clampChatWidth(startWidth + startX - moveEvent.clientX);
+      const nextWidth = clampChatWidth(startWidth + (moveEvent.clientX - startX) * resizeDirection);
       setLoadState((current) => {
         if (current.phase !== "ready") {
           return current;
@@ -631,6 +703,7 @@ export function App() {
     domain: ArchiveMemoryDomain;
     importMode: ArchiveLibraryImportMode;
     libraryName?: string;
+    excludedTopFolders?: string[];
   }) => {
     await importArchiveLibrary({
       ...input,
@@ -638,6 +711,16 @@ export function App() {
       setArchiveSourceScanBusy,
       setArchiveLibraryImportResult,
       setArchiveImportedLibraries,
+      errorMessageOf,
+    });
+  };
+
+  const runArchiveLibraryPreflight = async (sourcePath: string) => {
+    await preflightArchiveLibrary({
+      sourcePath,
+      setChatNotice,
+      setArchiveSourceScanBusy,
+      setArchiveLibraryPreflightResult,
       errorMessageOf,
     });
   };
@@ -795,6 +878,84 @@ export function App() {
     }
   };
 
+  const startArchivePreflightAugmentorSession = async (report: ArchiveLibraryPreflightResult) => {
+    if (chatBusy) {
+      setChatNotice("Stop the current response before opening a Living Archive plan discussion.");
+      return;
+    }
+    const channel =
+      state.channels.find((item) => item.id === "desktop-main" && item.enabled) ??
+      state.channels.find((item) => item.owningAgentId === "strategist.core" && item.enabled) ??
+      null;
+    if (!channel) {
+      setChatNotice("No enabled Augmentor desktop channel is available for this discussion.");
+      return;
+    }
+
+    const threadId = `thread-archive-preflight-${Date.now()}`;
+    const thread: ConversationThread = {
+      id: threadId,
+      title: "Living Archive import plan",
+      owningAgentId: "strategist.core",
+      workspaceId: channel.workspaceId,
+      channelId: channel.id,
+      summary: "Augmentor discussion about a Living Archive import preflight and recommended plan.",
+      messages: [],
+    };
+    const nextState = appendTranscriptEvent(
+      {
+        ...cloneState(state),
+        conversationThreads: [thread, ...state.conversationThreads],
+        uiPreferences: {
+          ...state.uiPreferences,
+          activeChatThreadId: threadId,
+          chatSidebarOpen: true,
+          chatHistoryOpen: false,
+        },
+      },
+      {
+        action: "thread-created",
+        threadId,
+        channelId: channel.id,
+        agentId: "strategist.core",
+        payload: {
+          title: thread.title,
+          workspaceId: channel.workspaceId,
+          source: "living-archive-preflight",
+        },
+      },
+    );
+    commitReadyState(nextState);
+
+    const runToken = `chat-run-${threadId}-${Date.now()}`;
+    activeChatRunTokenRef.current = runToken;
+    await executeChatTurn({
+      snapshot: { state: nextState, bundled, sideloaded },
+      activeThread: thread,
+      composer: "",
+      attachments: [],
+      activeChatModel,
+      thinkingDepth,
+      overrideMessage: buildArchivePreflightAugmentorPrompt(report),
+      commitReadyState,
+      setComposer,
+      setAttachments,
+      setChatNotice,
+      setChatBusy,
+      setChatRunPhase,
+      setAgentActivityLabel,
+      setProviderDiagnostics,
+      setRecoveryRuntimeStatus,
+      runToken,
+      isRunCurrent: (token) => activeChatRunTokenRef.current === token,
+      errorMessageOf,
+    });
+    if (activeChatRunTokenRef.current === runToken) {
+      activeChatRunTokenRef.current = null;
+      setChatRunPhase("idle");
+    }
+  };
+
   const startRecoveryRunbook = () => {
     if (!recoveryModeActive || chatBusy) {
       return;
@@ -828,19 +989,317 @@ export function App() {
   const activeChatAgent = activeThread ? state.agents.find((agent) => agent.id === activeThread.owningAgentId) : null;
   const activeChatAgentName =
     activeChatAgent?.id === "strategist.core" ? displayedStrategistName : activeChatAgent?.displayName ?? displayedStrategistName;
+  const browserManifest = allManifests.find((manifest) => manifest.id === "addon.browser");
+  const browserInstallation = state.installations["addon.browser"];
+  const obsidianManifest = allManifests.find((manifest) => manifest.id === "addon.obsidian");
+  const obsidianInstallation = state.installations["addon.obsidian"];
+  const opencodeManifest = allManifests.find((manifest) => manifest.id === "addon.opencode");
+  const opencodeInstallation = state.installations["addon.opencode"];
+  const terminalManifest = allManifests.find((manifest) => manifest.id === "addon.terminal");
+  const terminalInstallation = state.installations["addon.terminal"];
+  const grantBrowserVisibleAccess = () => {
+    if (!browserManifest) {
+      return;
+    }
+    updateRuntimeState((draft) => {
+      const installation = draft.installations[browserManifest.id];
+      if (!installation) {
+        return draft;
+      }
+      installation.installed = true;
+      installation.enabled = true;
+      const existingGrants = new Map(installation.grantedCapabilities.map((grant) => [grant.capability, grant]));
+      const missingRequestedGrants = browserManifest.requestedCapabilities.filter((grant) => !existingGrants.has(grant.capability));
+      installation.grantedCapabilities = [...installation.grantedCapabilities, ...missingRequestedGrants].map((grant) =>
+        ["network", "ui-embedding", "browser-control"].includes(grant.capability) ? { ...grant, granted: true } : grant,
+      );
+      installation.status = "enabled";
+      installation.notes = ["Installed, enabled, and granted network, ui-embedding, browser-control through Browser setup."];
+      draft.uiPreferences.activeSection = "browser";
+      return draft;
+    });
+  };
+  const updateBrowserWorkspaceState = (browserWorkspace: ResonantShellState["uiPreferences"]["browserWorkspace"]) => {
+    updateRuntimeState((draft) => {
+      draft.uiPreferences.browserWorkspace = browserWorkspace;
+      return draft;
+    });
+  };
+  const patchControlledBrowserSession = (
+    controlledSession: Partial<ResonantShellState["uiPreferences"]["browserWorkspace"]["controlledSession"]>,
+  ) => {
+    updateRuntimeState((draft) => {
+      draft.uiPreferences.browserWorkspace.controlledSession = {
+        ...draft.uiPreferences.browserWorkspace.controlledSession,
+        ...controlledSession,
+      };
+      return draft;
+    });
+  };
+  const syncControlledBrowserSession = async (url: string): Promise<string> => {
+    const runner = createDesktopBrowserToolRunner({
+      manifest: browserManifest,
+      installation: browserInstallation,
+    });
+    patchControlledBrowserSession({
+      status: "starting",
+      url,
+      error: null,
+      lastSyncedAt: new Date().toISOString(),
+    });
+
+    try {
+      const health = await runner.run({ type: "health" });
+      const hasLiveSession = "ready" in health && health.ready;
+      const result = hasLiveSession
+        ? await runner.run({ type: "open_url", params: { url } })
+        : await runner.run({ type: "start", params: { defaultUrl: url, headless: false } });
+      const sessionId = "sessionId" in result ? result.sessionId : null;
+      const finalUrl = "finalUrl" in result ? result.finalUrl : "url" in result ? result.url : url;
+      const title = "title" in result ? result.title : null;
+      patchControlledBrowserSession({
+        sessionId,
+        status: "ready",
+        url: finalUrl,
+        title,
+        error: null,
+        lastSyncedAt: new Date().toISOString(),
+      });
+      return `Controlled Chromium synced: ${title || finalUrl || "active session"}`;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Controlled Browser session sync failed.";
+      patchControlledBrowserSession({
+        status: "error",
+        error: message,
+        lastSyncedAt: new Date().toISOString(),
+      });
+      throw new Error(message);
+    }
+  };
+  const showNativeBrowserWebview = async (input: {
+    url: string;
+    bounds: { x: number; y: number; width: number; height: number };
+    navigate: boolean;
+  }): Promise<string> => {
+    const result = await requestBrowserNativeWebviewShow(input);
+    patchControlledBrowserSession({
+      status: "ready",
+      url: result.url ?? state.uiPreferences.browserWorkspace.controlledSession.url ?? input.url,
+      title: "Native Browser",
+      error: null,
+      lastSyncedAt: new Date().toISOString(),
+    });
+    return result.status === "shown" ? "Native Browser restored." : "Native Browser loaded.";
+  };
+  const resizeNativeBrowserWebview = async (bounds: { x: number; y: number; width: number; height: number }): Promise<void> => {
+    await requestBrowserNativeWebviewResize(bounds);
+  };
+  const hideNativeBrowserWebview = async (): Promise<void> => {
+    await requestBrowserNativeWebviewHide();
+  };
+  const readActiveBrowserPage = async (url: string): Promise<string> => {
+    const runner = createDesktopBrowserToolRunner({
+      manifest: browserManifest,
+      installation: browserInstallation,
+    });
+    const health = await runner.run({ type: "health" });
+    if (!("ready" in health) || !health.ready) {
+      await runner.run({ type: "start", params: { defaultUrl: url, headless: false } });
+    } else if (health.url !== url) {
+      await runner.run({ type: "open_url", params: { url } });
+    }
+    const result = await runner.run({ type: "read_page" });
+    if (!("text" in result)) {
+      return "Browser host responded, but did not return readable page text.";
+    }
+    patchControlledBrowserSession({
+      sessionId: result.sessionId,
+      status: "ready",
+      url: result.finalUrl,
+      title: result.title,
+      error: null,
+      lastSyncedAt: new Date().toISOString(),
+    });
+    const summary = `Controlled read: ${result.title || "Untitled"} · ${result.text.length} text characters · ${result.links.length} links`;
+    setChatNotice(summary);
+    return summary;
+  };
+  const grantObsidianWorkspaceAccess = async () => {
+    if (!obsidianManifest) {
+      return;
+    }
+    const currentVaultPath =
+      typeof obsidianInstallation?.config?.vaultPath === "string" ? obsidianInstallation.config.vaultPath : "";
+    const selectedVaultPath = currentVaultPath || (await requestObsidianVaultFolderSelection());
+    updateRuntimeState((draft) => {
+      const installation = draft.installations[obsidianManifest.id];
+      if (!installation) {
+        return draft;
+      }
+      installation.installed = true;
+      installation.enabled = true;
+      installation.status = "enabled";
+      const existingGrants = new Map(installation.grantedCapabilities.map((grant) => [grant.capability, grant]));
+      const missingRequestedGrants = obsidianManifest.requestedCapabilities.filter((grant) => !existingGrants.has(grant.capability));
+      installation.grantedCapabilities = [...installation.grantedCapabilities, ...missingRequestedGrants].map((grant) =>
+        grant.capability === "filesystem" || grant.capability === "ui-embedding" ? { ...grant, granted: true } : grant,
+      );
+      if (selectedVaultPath) {
+        installation.config = {
+          ...(installation.config ?? {}),
+          vaultPath: selectedVaultPath,
+          lastWorkspaceConnectedAt: new Date().toISOString(),
+        };
+      }
+      installation.notes = selectedVaultPath
+        ? [`Workspace access granted for ${selectedVaultPath}.`]
+        : ["Workspace access granted. Choose a vault to open the Obsidian workspace."];
+      return draft;
+    });
+  };
+  const grantOpenCodeWorkspaceAccess = () => {
+    if (!opencodeManifest) {
+      return;
+    }
+    updateRuntimeState((draft) => {
+      const installation = draft.installations[opencodeManifest.id];
+      if (!installation) {
+        return draft;
+      }
+      installation.installed = true;
+      installation.enabled = true;
+      installation.status = "enabled";
+      const existingGrants = new Map(installation.grantedCapabilities.map((grant) => [grant.capability, grant]));
+      const missingRequestedGrants = opencodeManifest.requestedCapabilities.filter((grant) => !existingGrants.has(grant.capability));
+      installation.grantedCapabilities = [...installation.grantedCapabilities, ...missingRequestedGrants].map((grant) =>
+        ["filesystem", "shell", "ui-embedding"].includes(grant.capability) ? { ...grant, granted: true } : grant,
+      );
+      installation.notes = ["Installed, enabled, and granted scoped filesystem, shell, and UI embedding for OpenCode workspace spike."];
+      draft.uiPreferences.activeSection = "opencode";
+      return draft;
+    });
+  };
+  const updateOpenCodeWorkspacePath = (workspacePath: string) => {
+    if (!opencodeManifest) {
+      return;
+    }
+    updateRuntimeState((draft) => {
+      const installation = draft.installations[opencodeManifest.id];
+      if (!installation) {
+        return draft;
+      }
+      installation.config = {
+        ...(installation.config ?? {}),
+        workspacePath,
+        lastWorkspaceSelectedAt: new Date().toISOString(),
+      };
+      return draft;
+    });
+  };
+  const grantTerminalWorkspaceAccess = () => {
+    if (!terminalManifest) {
+      return;
+    }
+    grantAddonCapabilities(
+      terminalManifest.id,
+      ["shell", "ui-embedding"],
+      terminalManifest.requestedCapabilities,
+      updateRuntimeState,
+    );
+  };
+  const grantAndOpenTerminalWorkspace = (manifest: AddOnManifest) => {
+    updateRuntimeState((draft) => {
+      const installation = draft.installations[manifest.id];
+      if (!installation) {
+        return draft;
+      }
+      installation.installed = true;
+      installation.enabled = true;
+      installation.status = "enabled";
+      const existingGrants = new Map(installation.grantedCapabilities.map((grant) => [grant.capability, grant]));
+      const missingRequestedGrants = manifest.requestedCapabilities.filter((grant) => !existingGrants.has(grant.capability));
+      installation.grantedCapabilities = [...installation.grantedCapabilities, ...missingRequestedGrants].map((grant) =>
+        grant.capability === "shell" || grant.capability === "ui-embedding" ? { ...grant, granted: true } : grant,
+      );
+      installation.notes = ["Installed, enabled, and opened as a center-column Terminal workspace."];
+      draft.uiPreferences.activeSection = "terminal";
+      return draft;
+    });
+  };
+  const browserDockEnabled = Boolean(browserManifest && browserInstallation?.installed && browserInstallation.enabled);
+  const obsidianDockEnabled = Boolean(obsidianManifest && obsidianInstallation?.installed && obsidianInstallation.enabled);
+  const opencodeDockEnabled = Boolean(opencodeManifest && opencodeInstallation?.installed && opencodeInstallation.enabled);
+  const terminalDockEnabled = Boolean(terminalManifest && terminalInstallation?.installed && terminalInstallation.enabled);
+  const addOnNavItems = [
+    ...(obsidianDockEnabled
+      ? [{ id: "obsidian" as Section, label: obsidianManifest?.name ?? "Obsidian", eyebrow: "vault", icon: "archive" as DockIconId, pinned: true }]
+      : []),
+    ...(browserDockEnabled
+      ? [{ id: "browser" as Section, label: browserManifest?.name ?? "Browser", eyebrow: "web", icon: "browser" as DockIconId, pinned: true }]
+      : []),
+    ...(opencodeDockEnabled
+      ? [{ id: "opencode" as Section, label: opencodeManifest?.name ?? "OpenCode", eyebrow: "code", icon: "opencode" as DockIconId, pinned: true }]
+      : []),
+    ...(terminalDockEnabled
+      ? [
+          {
+            id: "terminal" as Section,
+            label: terminalManifest?.name ?? "Terminal",
+            eyebrow: "shell",
+            icon: "terminal" as DockIconId,
+            pinned: true,
+          },
+        ]
+      : []),
+  ];
+  const visibleNavItems = addOnNavItems.length
+    ? [
+        ...navItems.slice(0, 4),
+        ...addOnNavItems,
+        ...navItems.slice(4),
+      ]
+    : navItems;
 
   return (
     <div className="app-zoom-viewport" style={zoomStyle}>
       <div className="app-zoom-stage">
-        <div className={`shell ${state.uiPreferences.chatSidebarOpen ? "chat-open" : "chat-closed"}`} style={shellStyle}>
+        <div
+          className={`shell ${state.uiPreferences.chatSidebarOpen ? "chat-open" : "chat-closed"} layout-${state.uiPreferences.workspaceLayout}`}
+          style={shellStyle}
+        >
       <header className="system-topbar" aria-label="ResonantOS system bar">
         <div className="system-menu">
           <button type="button" className="system-logo-button" title="ResonantOS Home" onClick={() => setSection("overview")}>
             Resonant<span>OS</span>
           </button>
-          <span className="system-active-app">{recoveryModeActive ? "Emergency Recovery" : navItems.find((item) => item.id === currentSection)?.label}</span>
+          <span className="system-active-app">
+            {recoveryModeActive ? "Emergency Recovery" : visibleNavItems.find((item) => item.id === currentSection)?.label}
+          </span>
         </div>
         <div className="system-status-strip">
+          <button
+            type="button"
+            className="system-icon-button"
+            title={
+              state.uiPreferences.workspaceLayout === "chat-main"
+                ? "Move chat back to the right"
+                : "Move chat beside the launcher"
+            }
+            aria-label={
+              state.uiPreferences.workspaceLayout === "chat-main"
+                ? "Move chat back to the right"
+                : "Move chat beside the launcher"
+            }
+            onClick={toggleWorkspaceLayout}
+          >
+            <VendorIcon
+              icon={
+                state.uiPreferences.workspaceLayout === "chat-main"
+                  ? "layout-sidebar-right-collapse"
+                  : "layout-sidebar-left-expand"
+              }
+            />
+          </button>
           <span
             className={`system-health ${strategistRecoveryActive ? "warning" : "ready"}`}
             title={`${recoveryModeActive ? "Recovery Active" : strategistRecoveryActive ? "Local runtime active" : "System Ready"} · ${activeRuntimeNode?.label ?? "No runtime"}`}
@@ -873,7 +1332,7 @@ export function App() {
 
       <aside className="sidebar app-dock" aria-label="ResonantOS app launcher">
         <nav className="nav-list">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <button
               key={item.id}
               type="button"
@@ -900,7 +1359,15 @@ export function App() {
           </div>
         )}
 
-        <section className={`content-grid ${recoveryModeActive ? "recovery-active" : ""}`}>
+        <section
+          className={`content-grid ${recoveryModeActive ? "recovery-active" : ""} ${
+            !recoveryModeActive && currentSection === "browser" ? "browser-active" : ""
+          } ${
+            !recoveryModeActive && currentSection === "terminal" ? "terminal-active" : ""
+          } ${
+            !recoveryModeActive && currentSection === "opencode" ? "opencode-active" : ""
+          }`}
+        >
           {recoveryModeActive ? (
             <RecoveryWorkspace
               state={state}
@@ -930,6 +1397,9 @@ export function App() {
               onOpenArchive={() => setSection("archive")}
               onOpenDelegation={() => setSection("delegation")}
               onOpenAddons={() => setSection("addons")}
+              onOpenBrowser={() => setSection("browser")}
+              onOpenOpenCode={() => setSection("opencode")}
+              onGrantBrowserVisibleAccess={grantBrowserVisibleAccess}
               onOpenSettings={() => setSection("settings")}
             />
           ) : null}
@@ -946,6 +1416,7 @@ export function App() {
           {!recoveryModeActive && currentSection === "archive" && (
             <ArchiveWorkspace
               state={state}
+              focusTarget={archiveFocusTarget}
               archiveStatusBusy={archiveStatusBusy}
               archiveStatus={archiveStatus}
               archiveSearchBusy={archiveSearchBusy}
@@ -966,6 +1437,7 @@ export function App() {
               archiveClassificationReview={archiveClassificationReview}
               archiveReorganisationPlan={archiveReorganisationPlan}
               archiveLibraryImportResult={archiveLibraryImportResult}
+              archiveLibraryPreflightResult={archiveLibraryPreflightResult}
               ingestProbeBusy={archiveProbeBusy}
               ingestProbeResult={archiveProbeResult}
               onRefreshArchiveStatus={() => void refreshArchiveRuntime()}
@@ -976,6 +1448,8 @@ export function App() {
               onQueueArchiveSource={(source) => void queueArchiveSource(source)}
               onScanSourceFolders={(rootPath) => void runArchiveSourceFolderScan(rootPath)}
               onPickLibraryFolder={runPickArchiveLibraryFolder}
+              onPreflightLibrary={(sourcePath) => void runArchiveLibraryPreflight(sourcePath)}
+              onAskAugmentorAboutPreflight={(report) => void startArchivePreflightAugmentorSession(report)}
               onOpenClassificationReview={(classificationManifestPath) => void openArchiveClassificationReview(classificationManifestPath)}
               onGenerateReorganisationPlan={(classificationManifestPath) => void runArchiveReorganisationPlan(classificationManifestPath)}
               onImportLibrary={(input) => void runArchiveLibraryImport(input)}
@@ -1003,6 +1477,60 @@ export function App() {
             />
           )}
 
+          {!recoveryModeActive && currentSection === "browser" && (
+            <BrowserWorkspace
+              manifest={browserManifest}
+              installation={browserInstallation}
+              workspaceState={state.uiPreferences.browserWorkspace}
+              onWorkspaceStateChange={updateBrowserWorkspaceState}
+              onConfigureAddon={() => setSection("addons")}
+              onGrantVisibleAccess={grantBrowserVisibleAccess}
+              onShowNativeWebview={showNativeBrowserWebview}
+              onResizeNativeWebview={resizeNativeBrowserWebview}
+              onHideNativeWebview={hideNativeBrowserWebview}
+              onSyncControlledSession={syncControlledBrowserSession}
+              onReadActivePage={readActiveBrowserPage}
+            />
+          )}
+
+          {!recoveryModeActive && (
+            <OpenCodeWorkspace
+              active={currentSection === "opencode"}
+              manifest={opencodeManifest}
+              installation={opencodeInstallation}
+              onConfigureAddon={() => {
+                setSelectedAddonId("addon.opencode");
+                setSection("addons");
+              }}
+              onGrantWorkspaceAccess={grantOpenCodeWorkspaceAccess}
+              onWorkspacePathChange={updateOpenCodeWorkspacePath}
+            />
+          )}
+
+          {!recoveryModeActive && currentSection === "terminal" && (
+            <TerminalWorkspace
+              manifest={terminalManifest}
+              installation={terminalInstallation}
+              onConfigureAddon={() => {
+                setSelectedAddonId("addon.terminal");
+                setSection("addons");
+              }}
+              onGrantWorkspaceAccess={grantTerminalWorkspaceAccess}
+            />
+          )}
+
+          {!recoveryModeActive && currentSection === "obsidian" && (
+            <ObsidianWorkspace
+              manifest={obsidianManifest}
+              installation={obsidianInstallation}
+              onConfigureAddon={() => {
+                setSelectedAddonId("addon.obsidian");
+                setSection("addons");
+              }}
+              onGrantWorkspaceAccess={grantObsidianWorkspaceAccess}
+            />
+          )}
+
           {!recoveryModeActive && currentSection === "addons" && (
             <AddOnsWorkspace
               search={search}
@@ -1021,6 +1549,15 @@ export function App() {
               onToggleGrant={(manifestId, capability) =>
                 toggleAddonCapabilityGrant(manifestId, capability, updateRuntimeState)
               }
+              onGrantCapabilities={(manifestId, capabilities, requestedCapabilities) =>
+                grantAddonCapabilities(manifestId, capabilities, requestedCapabilities, updateRuntimeState)
+              }
+              onGrantTerminalWorkspaceAccess={grantAndOpenTerminalWorkspace}
+              onUpdateAddonConfig={(manifestId, config) => updateAddonConfig(manifestId, config, updateRuntimeState)}
+              onAskAugmentor={async (message) => {
+                await sendStrategistMessage(message);
+              }}
+              onOpenArchiveReview={openArchiveReview}
             />
           )}
 
@@ -1294,44 +1831,46 @@ export function App() {
 }
 
 function DockIcon(props: { icon: DockIconId }) {
-  switch (props.icon) {
-    case "home":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M4 11.5 12 5l8 6.5V20H6v-7h12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-    case "archive":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M5 5h14v14H5zM8 9h8M8 13h5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-    case "addons":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M9 5h6v4h4v6h-4v4H9v-4H5V9h4z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-    case "delegation":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M5 7h8M5 12h6M5 17h8M15 12h4m0 0-2-2m2 2-2 2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-    case "agent":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 5a4 4 0 1 1 0 8 4 4 0 0 1 0-8ZM5 20a7 7 0 0 1 14 0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-    case "settings":
-      return (
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8ZM4 12h2M18 12h2M12 4v2M12 18v2M6.6 6.6 8 8M16 16l1.4 1.4M17.4 6.6 16 8M8 16l-1.4 1.4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
+  if (props.icon === "opencode") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
+        <use href="/icons/resonant.svg#ros-opencode" />
+      </svg>
+    );
   }
+
+  if (props.icon === "terminal") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <use href="/icons/resonant.svg#ros-terminal" />
+      </svg>
+    );
+  }
+  return <VendorIcon icon={dockIconMap[props.icon]} />;
+}
+
+function VendorIcon(props: { icon: VendorIconId }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <use href={`/icons/vendor-ui.svg#tabler-${props.icon}`} />
+    </svg>
+  );
 }
 
 function SystemTopIcon(props: { icon: "help" | "resurrect" }) {

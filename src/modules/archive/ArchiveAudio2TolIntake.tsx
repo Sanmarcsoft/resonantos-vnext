@@ -8,6 +8,7 @@ type ArchiveAudio2TolIntakeProps = {
   archiveQueueBusy: boolean;
   archiveTolBundles: ArchiveTolBundleCandidate[];
   archiveTolBundleResult: ArchiveTolBundleBuildResult | null;
+  onRefreshTolBundles: () => void;
   onBuildTolBundle: (sessionId: string) => void;
   onOpenArchiveDocument: (path: string) => void;
 };
@@ -16,6 +17,7 @@ export function ArchiveAudio2TolIntake({
   archiveQueueBusy,
   archiveTolBundles,
   archiveTolBundleResult,
+  onRefreshTolBundles,
   onBuildTolBundle,
   onOpenArchiveDocument,
 }: ArchiveAudio2TolIntakeProps) {
@@ -27,6 +29,11 @@ export function ArchiveAudio2TolIntake({
           This surface is not part of the base Living Archive. It appears only when the Audio2TOL add-on is installed and enabled,
           then queues TOL bundles as archive intake for review.
         </p>
+        <div className="archive-review-actions">
+          <button type="button" className="button-secondary touch-action" onClick={onRefreshTolBundles} disabled={archiveQueueBusy}>
+            {archiveQueueBusy ? "Detecting..." : "Detect TOL Bundles"}
+          </button>
+        </div>
       </div>
       {archiveTolBundles.length ? (
         <div className="archive-touch-list compact">

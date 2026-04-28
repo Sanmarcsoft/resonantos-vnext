@@ -17,8 +17,6 @@ type ContextMemoryPanelProps = {
 
 const percentOfUsable = (value: number, usable: number): string => `${Math.min(100, Math.round((value / usable) * 100))}%`;
 
-const sourceLabel = (ids: string[]): string => (ids.length ? ids.slice(0, 3).join(", ") : "no source ids");
-
 const linesOf = (values: string[]): string => values.join("\n");
 
 const splitLines = (value: string): string[] =>
@@ -122,7 +120,7 @@ export function ContextMemoryPanel({
       </div>
 
       <p className="context-memory-location">
-        Open this from the chat composer by pressing the context percentage beside the + button. Edits change compact memory only; raw chat transcript stays intact.
+        Edits change compact memory only; raw chat transcript stays intact.
       </p>
 
       {localNotice ? <div className="inline-notice warning">{localNotice}</div> : null}
@@ -215,7 +213,6 @@ export function ContextMemoryPanel({
           <>
             <span>Last compacted {compactedAt}</span>
             <span>{preservedCount} recent turns preserved</span>
-            <span>Sources: {sourceLabel(compactState.userIntent.sourceMessageIds)}</span>
           </>
         ) : (
           <>

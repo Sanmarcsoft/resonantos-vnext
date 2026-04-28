@@ -734,6 +734,7 @@ export const createDefaultInstallation = (manifest: AddOnManifest, source: AddOn
   recommendedGrantPresetIds: (manifest.grantPresets ?? []).map((preset) => preset.id),
   grantRecommendationSource: manifest.grantPresets?.length ? "preset-bundle" : "manifest-request",
   privateProviderProfileIds: [],
+  config: {},
   notes: ["Not installed yet."],
 });
 
@@ -748,11 +749,9 @@ export const buildDefaultState = (manifests: AddOnManifest[]): ResonantShellStat
     obsidian.enabled = true;
     obsidian.status = "enabled";
     obsidian.grantedCapabilities = obsidian.grantedCapabilities.map((item) =>
-      item.capability === "ui-embedding" || item.capability === "filesystem"
-        ? { ...item, granted: true }
-        : item,
+      item.capability === "filesystem" ? { ...item, granted: true } : item,
     );
-    obsidian.notes = ["Embedded pane ready. Vault access still constrained by archive policy."];
+    obsidian.notes = ["Vault bridge enabled. Select a vault to read markdown notes through host-mediated filesystem access."];
   }
 
   const telegram = installations["addon.telegram-channel"];
@@ -791,9 +790,30 @@ export const buildDefaultState = (manifests: AddOnManifest[]): ResonantShellStat
       pinnedChatProjectIds: [],
       leftSidebarOpen: true,
       chatSidebarOpen: true,
+      workspaceLayout: "main-chat",
       chatHistoryOpen: false,
       chatSidebarWidth: 520,
       windowZoom: 1,
+      browserWorkspace: {
+        activeTabId: "tab-1",
+        tabs: [
+          {
+            id: "tab-1",
+            label: "resonantos.com",
+            url: "https://resonantos.com",
+            history: ["https://resonantos.com"],
+            historyIndex: 0,
+          },
+        ],
+        controlledSession: {
+          sessionId: null,
+          status: "idle",
+          url: null,
+          title: null,
+          error: null,
+          lastSyncedAt: null,
+        },
+      },
       theme: "resonant-dark",
     },
     distributionModel: "curated-plus-sideload",

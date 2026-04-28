@@ -27,6 +27,7 @@ Signing and privileged key operations belong on the Rust side. Wallet actions ar
 - Signing authority must be mediated by core services.
 - Add-ons may request wallet-related actions, but they do not receive uncontrolled access to keys.
 - Every wallet/signing action must be auditable and attributable.
+- Wallet key material must follow the Portable User State and secure vault boundary defined in `ADR-022`.
 
 ## Custody Tiers
 
@@ -98,3 +99,4 @@ Must support:
 - Future wallet features must begin with a Rust-side service contract, not a UI-first prototype.
 - Capability vocabulary will need wallet-specific grants and scopes.
 - Managed-account support can exist, but cannot become the hidden default operating model.
+- Wallet implementation must wait for the encrypted portable vault foundation unless it uses a deliberately temporary non-production mock.

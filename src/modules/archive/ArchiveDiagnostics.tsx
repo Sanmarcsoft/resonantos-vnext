@@ -36,7 +36,12 @@ export function ArchiveDiagnostics({
           {archiveStatus ? (
             <div className="policy-columns">
               <div className="policy-block">
-                <span className="eyebrow">Managed root</span>
+                <span className="eyebrow">Portable ResonantOS folder</span>
+                <strong className="mono-inline">{archiveStatus.portableUserState.rootPath}</strong>
+                <p>Memory: {archiveStatus.portableUserState.memoryRoot}</p>
+              </div>
+              <div className="policy-block">
+                <span className="eyebrow">Runtime config</span>
                 <strong className="mono-inline">{archiveStatus.managedRoot}</strong>
                 <p>Config: {archiveStatus.configPath}</p>
               </div>

@@ -28,6 +28,12 @@
       "revocationBehavior": "hard-stop"
     },
     {
+      "capability": "archive-read",
+      "granted": false,
+      "scope": "shared",
+      "revocationBehavior": "degrade"
+    },
+    {
       "capability": "archive-intake-write",
       "granted": false,
       "scope": "intake-only",

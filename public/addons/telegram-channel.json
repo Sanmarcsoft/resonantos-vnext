@@ -34,6 +34,12 @@
       "revocationBehavior": "degrade"
     },
     {
+      "capability": "archive-read",
+      "granted": false,
+      "scope": "shared",
+      "revocationBehavior": "degrade"
+    },
+    {
       "capability": "providers",
       "granted": false,
       "scope": "shared",

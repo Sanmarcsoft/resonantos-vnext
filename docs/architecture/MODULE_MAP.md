@@ -1,6 +1,6 @@
 # Module Map
 
-Last updated: 2026-04-26
+Last updated: 2026-04-28
 
 ## Intent
 
@@ -16,6 +16,13 @@ This map defines which folder owns which feature area so contributors do not kee
   - cross-module state utilities
   - recovery routing and host-mediated Engineer service bridges
 
+- `src/sdk/addons/`
+  - Add-on SDK V0 entrypoint
+  - manifest validation for bundled and sideloaded add-ons
+  - stable capability, service protocol, and tool contract exports
+  - authority consistency checks for archive scopes, provider profiles, and embedded UI capabilities
+  - architecture reference: `docs/architecture/ADR-018-addon-sdk-v0.md`
+
 - `src/components/`
   - small reusable shell-level presentational primitives
   - currently `Panel`
@@ -25,6 +32,32 @@ This map defines which folder owns which feature area so contributors do not kee
   - runtime state persistence
   - provider secret storage
   - add-on manifest validation/install persistence
+  - host-side add-on capability gate helper used by privileged IPC commands
+  - migration target: Portable User State Root resolution and encrypted secure vault mediation from `docs/architecture/ADR-022-portable-user-state-secure-vault.md`
+
+- `src-tauri/src/obsidian_service.rs`
+  - Obsidian V1 vault bridge host boundary
+  - user-approved vault/markdown-folder status checks
+  - scoped markdown note listing and read-only note preview reads
+  - clean-room Resonant Notes vault indexing for search, tags, wikilinks, and backlinks
+  - validated `obsidian://open` note handoff for returning the user to their external Obsidian editor
+  - conservative `obsidian_write_note` host command with stale-save protection, pre-write version snapshot, and audit record
+  - path traversal guards and internal-folder exclusions
+  - planned ADR-019 write/search/link commands must stay here or in a dedicated `obsidian_service/` split before editing is enabled
+
+- `src-tauri/src/opencode_service.rs`
+  - optional OpenCode add-on host boundary
+  - detects `opencode` without making it a core dependency
+  - launches/stops scoped `opencode web` or `opencode serve` sessions after add-on grants
+  - architecture reference: `docs/architecture/ADR-021-opencode-addon-hosted-service.md`
+
+- `src-tauri/src/browser_service.rs`
+  - Browser add-on host boundary
+  - Chromium engine discovery and launch
+  - Chromium engine install/status checks through the host command boundary
+  - persistent CDP sessions for open URL, read title/final URL, refresh screenshot evidence, read page text/links, close session, and return audit events
+  - rejects local `file:` URLs until Browser has an explicit filesystem capability policy
+  - capability-facing architecture reference: `docs/architecture/ADR-017-resonant-browser-addon.md`
 
 - `src-tauri/src/delegation_service.rs`
   - execution-free task workspace creation
@@ -99,6 +132,13 @@ This map defines which folder owns which feature area so contributors do not kee
 - `src/modules/chat/*.css`
   - chat message, composer, and right-rail styling
 
+- `src/modules/browser/`
+  - Resonant Browser add-on workspace
+  - active browser-only center workspace surface
+  - controlled Chromium evidence surface with URL bar, refresh, close, status, and error overlays
+  - capability-gated network/UI embedding/browser-control state
+  - Browser engine action reference: `docs/architecture/ADR-017-resonant-browser-addon.md`
+
 - `src/modules/archive/archive.css`
   - Living Archive workspace, review, search, reader, and import styling
 
@@ -145,14 +185,47 @@ This map defines which folder owns which feature area so contributors do not kee
   - Audio2TOL intake analysis reference for the optional Audio2TOL add-on bridge: `docs/architecture/AUDIO2TOL_INTAKE_ANALYSIS.md`
   - memory domain architecture reference: `docs/architecture/ADR-013-living-archive-memory-domains.md`
   - system architecture memory reference: `docs/architecture/ADR-014-system-architecture-memory.md`
+  - portable user-state root reference: `docs/architecture/ADR-022-portable-user-state-secure-vault.md`
 
 - `src/modules/addons/`
   - add-on catalog
   - manifest details
   - capability grant surface
+  - Browser setup surface for explicit grants and Chromium engine installation/status
+  - `ObsidianAddonPanel` V1 vault bridge for selecting, scanning, and previewing markdown notes
+  - `ObsidianAddonSections` owns the vault bridge presentational sections so the panel controller does not become a UI monolith
+  - `obsidian-addon-model` owns Obsidian sync-state, prompt, slug, and raw-intake serialization helpers
+  - Augmentor note-action handoff for read-only Obsidian summaries, organization proposals, and archive-intake planning
+  - manual changed-note refresh after external Obsidian edits, with explicit queueing still required
+  - selectable changed/new note review list with deterministic change reasons before batch queueing into raw intake
+  - capability-gated Obsidian note copy into raw Living Archive intake with explicit confirmation
+  - capped batch queueing for scanned Obsidian notes into raw intake, still review-gated
+  - local sync index for new, changed, and queued-unchanged vault-note state
+  - recent Obsidian intake history and focused review-desk navigation
+  - planned ADR-019 Obsidian workspace shell should split into `ObsidianWorkspace`, `ObsidianVaultTree`, `ObsidianEditor`, `ObsidianPreview`, and `ObsidianMetadataPanel`
   - add-on install/grant controller
   - delegation target metadata reference: `docs/architecture/ADR-015-delegation-fabric-addon-catalog-native-tools.md`
   - planned launcher integration for opening installed add-ons in the center workspace
+
+- `src/modules/obsidian/`
+  - ADR-019 central Obsidian-compatible workspace
+  - ADR-020 clean-room Resonant Notes behavior over Markdown vaults
+  - workspace gate for selected vault, filesystem grant, and `ui-embedding`
+  - vault note list loaded through host-mediated commands
+  - markdown editor and preview toggle
+  - read-only note metadata panel for frontmatter, tags, and wikilinks
+  - vault index panel for search results and selected-note backlinks
+  - search result and backlink navigation uses the guarded workspace note-open path
+  - Obsidian-reference workspace layout: compact tabs, left ribbon, one active sidebar view, central editor/preview, bottom status bar
+  - dirty-state, discard, and audited save through `obsidian_write_note`
+  - `obsidian-workspace-model` owns metadata parsing and preview rendering helpers
+  - future split target: `ObsidianVaultTree`, `ObsidianEditor`, and `ObsidianPreview`
+
+- `src/modules/opencode/`
+  - optional OpenCode add-on workspace
+  - compact toolbar and hidden settings drawer for installed runtime, scoped workspace path, and capability grants
+  - embeds OpenCode's own web UI after host launch
+  - does not replace Resonant Notes or trusted Living Archive ingest
 
 - `src/modules/settings/`
   - provider settings
@@ -194,6 +267,8 @@ Guardrails:
 - split shell chrome into reusable layout primitives for left rail, center workspace, and chat rail
 - replace the settings-like Overview surface with a Home / Apps launcher
 - add active workspace state for center-launched add-ons
+- evolve Obsidian from read-only vault bridge into the ADR-019 hosted Obsidian-compatible workspace after write/audit host commands exist
+- evolve Browser from one-shot Chromium capture into a persistent controlled Chromium sidecar session
 - add module-local tests for `overview`, `strategist`, `archive`, `addons`, and `settings`
 - continue shrinking shell-owned orchestration logic, especially remaining state commit/update helpers and top-level shell wiring in `src/App.tsx`
 - introduce clearer IPC boundaries as Rust-side services expand

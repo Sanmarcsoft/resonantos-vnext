@@ -350,6 +350,69 @@ pub(crate) struct ArchiveLibraryImportRequest {
     pub(crate) import_mode: String,
     pub(crate) library_name: Option<String>,
     pub(crate) actor_id: String,
+    pub(crate) excluded_top_folders: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveLibraryPreflightRequest {
+    pub(crate) source_path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveLibraryPreflightCount {
+    pub(crate) label: String,
+    pub(crate) count: usize,
+    pub(crate) size_bytes: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveLibraryPreflightSample {
+    pub(crate) path: String,
+    pub(crate) reason: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveLibraryPreflightWarning {
+    pub(crate) severity: String,
+    pub(crate) title: String,
+    pub(crate) detail: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveLibraryRecommendedImportPlan {
+    pub(crate) summary: String,
+    pub(crate) recommended_action: String,
+    pub(crate) auto_excluded_top_folders: Vec<String>,
+    pub(crate) ambiguous_top_folders: Vec<String>,
+    pub(crate) included_top_folders: Vec<String>,
+    pub(crate) approval_note: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveLibraryPreflightResult {
+    pub(crate) source_path: String,
+    pub(crate) exists: bool,
+    pub(crate) is_directory: bool,
+    pub(crate) obsidian_vault_detected: bool,
+    pub(crate) supported_files: usize,
+    pub(crate) skipped_files: usize,
+    pub(crate) hidden_entries_skipped: usize,
+    pub(crate) generated_archive_entries_skipped: usize,
+    pub(crate) estimated_import_bytes: u64,
+    pub(crate) estimated_managed_storage_bytes: u64,
+    pub(crate) supported_by_extension: Vec<ArchiveLibraryPreflightCount>,
+    pub(crate) skipped_by_extension: Vec<ArchiveLibraryPreflightCount>,
+    pub(crate) supported_by_top_folder: Vec<ArchiveLibraryPreflightCount>,
+    pub(crate) skipped_by_top_folder: Vec<ArchiveLibraryPreflightCount>,
+    pub(crate) warnings: Vec<ArchiveLibraryPreflightWarning>,
+    pub(crate) samples: Vec<ArchiveLibraryPreflightSample>,
+    pub(crate) recommended_plan: ArchiveLibraryRecommendedImportPlan,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -692,7 +755,7 @@ use archive_source_library::{
     collect_imported_library_manifests, import_archive_library_with_runtime, supported_source_file,
 };
 pub(crate) use archive_source_library::{
-    import_archive_library, list_imported_archive_libraries,
+    import_archive_library, list_imported_archive_libraries, preflight_archive_library_import,
     read_archive_library_classification_review, scan_archive_source_folders,
     write_archive_library_reorganisation_plan,
 };
@@ -1535,6 +1598,7 @@ mod tests {
                 import_mode: "copy".to_string(),
                 library_name: Some("Identity Vault".to_string()),
                 actor_id: "strategist.core".to_string(),
+                excluded_top_folders: None,
             },
         )
         .expect("library import should succeed");
@@ -1593,6 +1657,7 @@ mod tests {
                 import_mode: "move".to_string(),
                 library_name: Some("Identity Vault".to_string()),
                 actor_id: "strategist.core".to_string(),
+                excluded_top_folders: None,
             },
         );
 
@@ -1658,6 +1723,7 @@ mod tests {
                 import_mode: "copy".to_string(),
                 library_name: Some("Mixed Vault".to_string()),
                 actor_id: "strategist.core".to_string(),
+                excluded_top_folders: None,
             },
         )
         .expect("mixed library import should succeed");

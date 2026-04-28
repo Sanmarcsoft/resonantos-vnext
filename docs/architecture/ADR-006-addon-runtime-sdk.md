@@ -3,6 +3,8 @@
 Status: Accepted  
 Date: 2026-04-23
 
+Implementation note: ADR-018 defines the concrete Add-on SDK V0 package and validation rules under `src/sdk/addons`.
+
 ## Decision
 
 ResonantOS uses a signed, capability-gated add-on system with provenance tiers and explicit runtime categories.

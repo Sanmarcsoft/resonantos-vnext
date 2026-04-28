@@ -8,6 +8,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+use crate::host_state::{ensure_portable_user_state, PortableUserStateStatus};
+
 use super::{
     load_archive_stats, load_recent_activity, open_archive_db, ArchiveActivityEntry, ArchiveStats,
 };
@@ -16,6 +18,7 @@ use super::{
 struct ArchiveConfigFile {
     mode: Option<String>,
     vault_root: String,
+    #[allow(dead_code)]
     managed_root: String,
     wiki_root: String,
     data_root: String,
@@ -89,6 +92,7 @@ struct ArchiveIngestAgentStatus {
 pub(crate) struct ArchiveRuntimeStatus {
     pub(crate) status: String,
     pub(crate) mode: String,
+    pub(crate) portable_user_state: PortableUserStateStatus,
     pub(crate) config_path: String,
     pub(crate) vault_root: String,
     pub(crate) managed_root: String,
@@ -121,6 +125,7 @@ pub(super) struct ArchiveRuntime {
 
 impl ArchiveRuntime {
     pub(super) fn resolve(app: &AppHandle) -> Result<Self, String> {
+        let portable_user_state = ensure_portable_user_state(app)?;
         let config_path = archive_config_candidates(app)?
             .into_iter()
             .find(|candidate| candidate.exists())
@@ -155,7 +160,7 @@ impl ArchiveRuntime {
             config_path,
             mode: config.mode.unwrap_or_else(|| "adopt".to_string()),
             vault_root: PathBuf::from(config.vault_root),
-            managed_root: PathBuf::from(config.managed_root),
+            managed_root: PathBuf::from(portable_user_state.memory_root),
             wiki_root: PathBuf::from(config.wiki_root),
             data_root: PathBuf::from(config.data_root),
             logs_root: PathBuf::from(config.logs_root),
@@ -289,6 +294,7 @@ pub(super) fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 pub(crate) fn query_archive_runtime_status(
     app: &AppHandle,
 ) -> Result<ArchiveRuntimeStatus, String> {
+    let portable_user_state = ensure_portable_user_state(app)?;
     let runtime = ArchiveRuntime::resolve(app)?;
     fs::create_dir_all(runtime.intake_root())
         .map_err(|error| format!("Failed to ensure archive intake root: {error}"))?;
@@ -374,6 +380,7 @@ pub(crate) fn query_archive_runtime_status(
             "attention".to_string()
         },
         mode: runtime.mode.clone(),
+        portable_user_state,
         config_path: runtime.config_path.display().to_string(),
         vault_root: runtime.vault_root.display().to_string(),
         managed_root: runtime.managed_root.display().to_string(),

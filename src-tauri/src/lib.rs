@@ -1,8 +1,13 @@
 mod archive_service;
+mod browser_host_service;
+mod browser_service;
 mod delegation_service;
 mod host_state;
+mod obsidian_service;
+mod opencode_service;
 mod provider_service;
 mod recovery_service;
+mod terminal_service;
 
 use std::collections::HashMap;
 use std::env;
@@ -16,15 +21,16 @@ use crate::archive_service::{
     archive_system_memory_status, build_archive_tol_bundle, decide_archive_review_artifact,
     import_archive_library, list_archive_ingest_requests, list_archive_review_artifacts,
     list_archive_tol_bundle_candidates, list_imported_archive_libraries,
-    process_archive_ingest_request, promote_archive_review_artifact, query_archive_runtime_status,
-    queue_archive_ingest_request, read_archive_document,
-    read_archive_library_classification_review, refresh_archive_system_memory,
-    scan_archive_source_folders, search_archive, write_archive_intake_artifact,
-    write_archive_library_reorganisation_plan, ArchiveDocumentPayload,
-    ArchiveImportedLibrarySummary, ArchiveIngestRequestRecord, ArchiveIngestRequestResult,
-    ArchiveIntakeWriteRequest, ArchiveIntakeWriteResult, ArchiveLibraryClassificationReview,
-    ArchiveLibraryClassificationReviewRequest, ArchiveLibraryImportRequest,
-    ArchiveLibraryImportResult, ArchiveLibraryReorganisationPlan,
+    preflight_archive_library_import, process_archive_ingest_request,
+    promote_archive_review_artifact, query_archive_runtime_status, queue_archive_ingest_request,
+    read_archive_document, read_archive_library_classification_review,
+    refresh_archive_system_memory, scan_archive_source_folders, search_archive,
+    write_archive_intake_artifact, write_archive_library_reorganisation_plan,
+    ArchiveDocumentPayload, ArchiveImportedLibrarySummary, ArchiveIngestRequestRecord,
+    ArchiveIngestRequestResult, ArchiveIntakeWriteRequest, ArchiveIntakeWriteResult,
+    ArchiveLibraryClassificationReview, ArchiveLibraryClassificationReviewRequest,
+    ArchiveLibraryImportRequest, ArchiveLibraryImportResult, ArchiveLibraryPreflightRequest,
+    ArchiveLibraryPreflightResult, ArchiveLibraryReorganisationPlan,
     ArchiveLibraryReorganisationPlanRequest, ArchiveProcessIngestRequest,
     ArchiveProcessIngestResult, ArchivePromoteReviewArtifactRequest,
     ArchivePromoteReviewArtifactResult, ArchiveQueuedIngestRequest, ArchiveReadDocumentRequest,
@@ -34,14 +40,40 @@ use crate::archive_service::{
     ArchiveSystemMemoryRefreshResult, ArchiveSystemMemoryStatus, ArchiveTolBundleBuildRequest,
     ArchiveTolBundleBuildResult, ArchiveTolBundleCandidate,
 };
+use crate::browser_host_service::{
+    browser_host_required_capabilities, execute_browser_host_command, BrowserHostCommandRequest,
+};
+use crate::browser_service::{
+    execute_browser_close_session, execute_browser_native_webview_hide,
+    execute_browser_native_webview_resize, execute_browser_native_webview_show,
+    execute_browser_open_url, execute_browser_session_click, execute_browser_session_open_url,
+    execute_browser_session_read_page, execute_browser_session_screenshot,
+    execute_browser_session_scroll, execute_browser_start_session, install_browser_engine,
+    query_browser_engine_status, BrowserCloseSessionResult, BrowserEngineInstallResult,
+    BrowserEngineStatus, BrowserInteractionRequest, BrowserInteractionResult,
+    BrowserNativeWebviewBoundsRequest, BrowserNativeWebviewRequest, BrowserNativeWebviewResult,
+    BrowserOpenUrlRequest, BrowserOpenUrlResult, BrowserReadPageResult, BrowserSessionIdRequest,
+    BrowserSessionRequest,
+};
 use crate::delegation_service::{
     create_task_workspace, finish_task_workspace, list_task_workspaces, read_task_workspace,
     CreateTaskWorkspaceRequest, FinishTaskWorkspaceRequest, FinishTaskWorkspaceResult,
     ReadTaskWorkspaceRequest, TaskWorkspacePayload, TaskWorkspaceRecord,
 };
 use crate::host_state::{
-    addons_dir, read_provider_secrets, read_runtime_state_value, state_file, validate_manifest,
-    write_provider_secrets,
+    addons_dir, assert_addon_capabilities, read_provider_secrets, read_runtime_state_value,
+    state_file, validate_manifest, write_provider_secrets,
+};
+use crate::obsidian_service::{
+    index_obsidian_vault, list_obsidian_notes, open_obsidian_note, query_obsidian_vault_status,
+    read_obsidian_note, write_obsidian_note, ObsidianListNotesRequest, ObsidianNotePayload,
+    ObsidianNoteSummary, ObsidianOpenNoteRequest, ObsidianOpenNoteResult, ObsidianReadNoteRequest,
+    ObsidianVaultIndex, ObsidianVaultIndexRequest, ObsidianVaultRequest, ObsidianVaultStatus,
+    ObsidianWriteNoteRequest, ObsidianWriteNoteResult,
+};
+use crate::opencode_service::{
+    query_opencode_status, start_opencode_service, stop_opencode_service, OpenCodeServiceResult,
+    OpenCodeStartRequest, OpenCodeStatus, OpenCodeStopRequest,
 };
 use crate::provider_service::{
     abort_provider_service_chat_stream, execute_archive_ingest_probe,
@@ -53,6 +85,12 @@ use crate::provider_service::{
 };
 use crate::recovery_service::{
     execute_engineer_recovery_turn, EngineerRecoveryTurnRequest, EngineerRecoveryTurnResult,
+};
+use crate::terminal_service::{
+    resize_terminal_pty, run_terminal_command, start_terminal_pty, stop_terminal_pty,
+    write_terminal_pty, TerminalPtySessionResult, TerminalResizePtyRequest,
+    TerminalRunCommandRequest, TerminalRunCommandResult, TerminalStartPtyRequest,
+    TerminalWritePtyRequest,
 };
 
 #[tauri::command]
@@ -201,6 +239,14 @@ fn archive_import_library(
 }
 
 #[tauri::command]
+fn archive_preflight_library_import(
+    app: AppHandle,
+    request: ArchiveLibraryPreflightRequest,
+) -> Result<ArchiveLibraryPreflightResult, String> {
+    preflight_archive_library_import(&app, request)
+}
+
+#[tauri::command]
 fn archive_imported_libraries(
     app: AppHandle,
 ) -> Result<Vec<ArchiveImportedLibrarySummary>, String> {
@@ -249,6 +295,243 @@ fn archive_read_document(
     request: ArchiveReadDocumentRequest,
 ) -> Result<ArchiveDocumentPayload, String> {
     read_archive_document(&app, request)
+}
+
+#[tauri::command]
+fn obsidian_vault_status(request: ObsidianVaultRequest) -> Result<ObsidianVaultStatus, String> {
+    query_obsidian_vault_status(request)
+}
+
+#[tauri::command]
+fn obsidian_list_notes(
+    request: ObsidianListNotesRequest,
+) -> Result<Vec<ObsidianNoteSummary>, String> {
+    list_obsidian_notes(request)
+}
+
+#[tauri::command]
+fn obsidian_read_note(request: ObsidianReadNoteRequest) -> Result<ObsidianNotePayload, String> {
+    read_obsidian_note(request)
+}
+
+#[tauri::command]
+fn obsidian_open_note(request: ObsidianOpenNoteRequest) -> Result<ObsidianOpenNoteResult, String> {
+    open_obsidian_note(request)
+}
+
+#[tauri::command]
+fn obsidian_write_note(
+    app: AppHandle,
+    request: ObsidianWriteNoteRequest,
+) -> Result<ObsidianWriteNoteResult, String> {
+    assert_addon_capabilities(&app, "addon.obsidian", &["filesystem"])?;
+    write_obsidian_note(request)
+}
+
+#[tauri::command]
+fn obsidian_vault_index(request: ObsidianVaultIndexRequest) -> Result<ObsidianVaultIndex, String> {
+    index_obsidian_vault(request)
+}
+
+#[tauri::command]
+fn browser_engine_status() -> BrowserEngineStatus {
+    query_browser_engine_status()
+}
+
+#[tauri::command]
+fn browser_install_engine(app: AppHandle) -> Result<BrowserEngineInstallResult, String> {
+    assert_addon_capabilities(&app, "addon.browser", &["network", "browser-control"])?;
+    install_browser_engine()
+}
+
+#[tauri::command]
+fn browser_open_url(
+    app: AppHandle,
+    request: BrowserOpenUrlRequest,
+) -> Result<BrowserOpenUrlResult, String> {
+    assert_addon_capabilities(
+        &app,
+        "addon.browser",
+        &["network", "ui-embedding", "browser-control"],
+    )?;
+    execute_browser_open_url(&app, request)
+}
+
+#[tauri::command]
+fn browser_start_session(
+    app: AppHandle,
+    request: BrowserOpenUrlRequest,
+) -> Result<BrowserOpenUrlResult, String> {
+    assert_addon_capabilities(
+        &app,
+        "addon.browser",
+        &["network", "ui-embedding", "browser-control"],
+    )?;
+    execute_browser_start_session(&app, request)
+}
+
+#[tauri::command]
+fn browser_session_open_url(
+    app: AppHandle,
+    request: BrowserSessionRequest,
+) -> Result<BrowserOpenUrlResult, String> {
+    assert_addon_capabilities(
+        &app,
+        "addon.browser",
+        &["network", "ui-embedding", "browser-control"],
+    )?;
+    execute_browser_session_open_url(request)
+}
+
+#[tauri::command]
+fn browser_session_screenshot(
+    app: AppHandle,
+    request: BrowserSessionIdRequest,
+) -> Result<BrowserOpenUrlResult, String> {
+    assert_addon_capabilities(&app, "addon.browser", &["ui-embedding", "browser-control"])?;
+    execute_browser_session_screenshot(request)
+}
+
+#[tauri::command]
+fn browser_session_read_page(
+    app: AppHandle,
+    request: BrowserSessionIdRequest,
+) -> Result<BrowserReadPageResult, String> {
+    assert_addon_capabilities(&app, "addon.browser", &["browser-control"])?;
+    execute_browser_session_read_page(request)
+}
+
+#[tauri::command]
+fn browser_session_click(
+    app: AppHandle,
+    request: BrowserInteractionRequest,
+) -> Result<BrowserInteractionResult, String> {
+    assert_addon_capabilities(&app, "addon.browser", &["ui-embedding", "browser-control"])?;
+    execute_browser_session_click(request)
+}
+
+#[tauri::command]
+fn browser_session_scroll(
+    app: AppHandle,
+    request: BrowserInteractionRequest,
+) -> Result<BrowserInteractionResult, String> {
+    assert_addon_capabilities(&app, "addon.browser", &["ui-embedding", "browser-control"])?;
+    execute_browser_session_scroll(request)
+}
+
+#[tauri::command]
+fn browser_close_session(
+    request: BrowserSessionIdRequest,
+) -> Result<BrowserCloseSessionResult, String> {
+    execute_browser_close_session(request)
+}
+
+#[tauri::command]
+fn browser_host_command(
+    app: AppHandle,
+    request: BrowserHostCommandRequest,
+) -> Result<Value, String> {
+    let required = browser_host_required_capabilities(&request.method)?;
+    assert_addon_capabilities(&app, "addon.browser", &required)?;
+    execute_browser_host_command(&app, request)
+}
+
+#[tauri::command]
+fn browser_native_webview_show(
+    app: AppHandle,
+    request: BrowserNativeWebviewRequest,
+) -> Result<BrowserNativeWebviewResult, String> {
+    assert_addon_capabilities(
+        &app,
+        "addon.browser",
+        &["network", "ui-embedding", "browser-control"],
+    )?;
+    execute_browser_native_webview_show(&app, request)
+}
+
+#[tauri::command]
+fn browser_native_webview_resize(
+    app: AppHandle,
+    request: BrowserNativeWebviewBoundsRequest,
+) -> Result<BrowserNativeWebviewResult, String> {
+    assert_addon_capabilities(&app, "addon.browser", &["ui-embedding", "browser-control"])?;
+    execute_browser_native_webview_resize(&app, request)
+}
+
+#[tauri::command]
+fn browser_native_webview_hide(app: AppHandle) -> Result<BrowserNativeWebviewResult, String> {
+    assert_addon_capabilities(&app, "addon.browser", &["ui-embedding", "browser-control"])?;
+    execute_browser_native_webview_hide(&app)
+}
+
+#[tauri::command]
+fn opencode_status() -> OpenCodeStatus {
+    query_opencode_status()
+}
+
+#[tauri::command]
+fn opencode_start_service(
+    app: AppHandle,
+    request: OpenCodeStartRequest,
+) -> Result<OpenCodeServiceResult, String> {
+    assert_addon_capabilities(
+        &app,
+        "addon.opencode",
+        &["filesystem", "shell", "ui-embedding"],
+    )?;
+    start_opencode_service(request)
+}
+
+#[tauri::command]
+fn opencode_stop_service(
+    app: AppHandle,
+    request: OpenCodeStopRequest,
+) -> Result<OpenCodeServiceResult, String> {
+    assert_addon_capabilities(&app, "addon.opencode", &["shell"])?;
+    stop_opencode_service(request)
+}
+
+#[tauri::command]
+fn terminal_status(app: AppHandle) -> Result<String, String> {
+    assert_addon_capabilities(&app, "addon.terminal", &["shell", "ui-embedding"])?;
+    Ok("ready".to_string())
+}
+
+#[tauri::command]
+fn terminal_run_command(
+    app: AppHandle,
+    request: TerminalRunCommandRequest,
+) -> Result<TerminalRunCommandResult, String> {
+    assert_addon_capabilities(&app, "addon.terminal", &["shell"])?;
+    run_terminal_command(request)
+}
+
+#[tauri::command]
+fn terminal_start_pty(
+    app: AppHandle,
+    window: Window,
+    request: TerminalStartPtyRequest,
+) -> Result<TerminalPtySessionResult, String> {
+    assert_addon_capabilities(&app, "addon.terminal", &["shell", "ui-embedding"])?;
+    start_terminal_pty(window, request)
+}
+
+#[tauri::command]
+fn terminal_write_pty(app: AppHandle, request: TerminalWritePtyRequest) -> Result<(), String> {
+    assert_addon_capabilities(&app, "addon.terminal", &["shell"])?;
+    write_terminal_pty(request)
+}
+
+#[tauri::command]
+fn terminal_resize_pty(app: AppHandle, request: TerminalResizePtyRequest) -> Result<(), String> {
+    assert_addon_capabilities(&app, "addon.terminal", &["shell", "ui-embedding"])?;
+    resize_terminal_pty(request)
+}
+
+#[tauri::command]
+fn terminal_stop_pty(app: AppHandle, session_id: String) -> Result<(), String> {
+    assert_addon_capabilities(&app, "addon.terminal", &["shell"])?;
+    stop_terminal_pty(&session_id)
 }
 
 #[tauri::command]
@@ -517,6 +800,7 @@ pub fn run() {
             local_runtime_status,
             archive_runtime_status,
             archive_scan_source_folders,
+            archive_preflight_library_import,
             archive_import_library,
             archive_imported_libraries,
             archive_library_classification_review,
@@ -525,6 +809,35 @@ pub fn run() {
             archive_refresh_system_memory,
             archive_search,
             archive_read_document,
+            obsidian_vault_status,
+            obsidian_list_notes,
+            obsidian_read_note,
+            obsidian_open_note,
+            obsidian_write_note,
+            obsidian_vault_index,
+            browser_engine_status,
+            browser_install_engine,
+            browser_open_url,
+            browser_start_session,
+            browser_session_open_url,
+            browser_session_screenshot,
+            browser_session_read_page,
+            browser_session_click,
+            browser_session_scroll,
+            browser_close_session,
+            browser_host_command,
+            browser_native_webview_show,
+            browser_native_webview_resize,
+            browser_native_webview_hide,
+            opencode_status,
+            opencode_start_service,
+            opencode_stop_service,
+            terminal_status,
+            terminal_run_command,
+            terminal_start_pty,
+            terminal_write_pty,
+            terminal_resize_pty,
+            terminal_stop_pty,
             archive_write_intake_artifact,
             archive_request_ingest,
             archive_review_queue,

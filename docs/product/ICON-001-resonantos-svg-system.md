@@ -39,6 +39,7 @@ The preview page is:
 - Standalone custom icons should also exist when the icon is a real product concept, so the asset can be previewed directly.
 - Third-party icons must retain license files and source provenance.
 - Chat action icons should use `public/icons/vendor-ui.svg` unless a custom icon is explicitly needed.
+- Left launcher rail icons must use MIT open-source vendor icons through `public/icons/vendor-ui.svg`; do not add inline hand-drawn SVGs in `App.tsx`.
 
 ## Current Set
 

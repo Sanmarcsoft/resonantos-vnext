@@ -25,6 +25,8 @@ Shell behavior:
 - Left dock labels appear on hover/focus through tooltips.
 - The right rail can collapse to a slim chat handle.
 - The right rail width is user-resizable and must be remembered.
+- The user can swap the chat rail and center workspace, producing either left dock + workspace + chat or left dock + chat + workspace.
+- Layout swap must preserve the active add-on/workspace and active chat thread; it is a shell layout preference, not a navigation reset.
 - The center workspace must expand when the chat rail is collapsed.
 - The center workspace must remain readable when both rails are open.
 
