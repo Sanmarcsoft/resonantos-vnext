@@ -204,6 +204,16 @@ Last updated: 2026-04-28
   - sideloaded entries are forced to unverified/unreviewed provenance even if the manifest claims stronger trust
   - bundled add-ons are no longer installed or enabled by default, including Telegram
   - Add-ons workspace cards and detail panels now show registry source, review state, verification state, and install state
+- Added future Add-on Store policy on 2026-04-28:
+  - `ADR-024` defines the future Store as the user-facing discovery and commerce layer on top of the Registry trust layer
+  - future add-on pages should support screenshots, media, creator identity, feature highlights, ratings, reviews, pricing, and subscription/purchase state
+  - community ratings must stay separate from security review and provenance
+  - paid add-ons and subscriptions require wallet/security services first; add-ons cannot receive raw signing authority
+  - near-term UI can move toward a more visual store layout without enabling commerce
+- Added Glocal Discovery Interface direction on 2026-04-29:
+  - `docs/product/UX-002-glocal-discovery-interface.md` captures the reusable search, filter, timeline, map, and graph pattern inspired by Glocal Music
+  - the pattern can be applied to the Add-on Store, Living Archive, research datasets, marketplaces, and community directories
+  - Glocal Music can become a future domain-specific showcase add-on rather than a core feature
 - Added architecture policy on 2026-04-25:
   - `ADR-015` defines Delegation Packets as the source of truth for delegated tasks
   - `TASK.md` is now an interoperability artifact generated from structured delegation state
@@ -301,6 +311,24 @@ Last updated: 2026-04-28
   - add page read/extract, evidence capture, audit log, and archive-intake artifact export after the live surface exists
 - Runtime lifecycle manager.
 - Capability grant UX.
+- Store-style Add-ons UI:
+  - visual add-on cards with icons/screenshots
+  - dedicated add-on detail pages with media, benefits, trust, capabilities, reviews, and install controls
+  - `Ask Augmentor about this add-on`
+  - placeholder ratings/pricing only after the trust distinction is clear
+- Glocal Discovery engine:
+  - reusable advanced search/filter component
+  - timeline explorer
+  - privacy-aware world-map explorer
+  - optional relationship graph explorer
+  - SDK hooks so add-ons can expose searchable/map/timeline datasets
+- Glocal Music add-on:
+  - artist/catalog directory
+  - music/news/event discovery
+  - mood/function/location/time filters
+  - map and timeline exploration
+  - media previews and playlists
+  - commerce hooks only after wallet/store infrastructure exists
 - SDK documentation.
 - Sidecar isolation model and health monitoring.
 - Implement ADR-006 contracts in `src/core/` and host services.
