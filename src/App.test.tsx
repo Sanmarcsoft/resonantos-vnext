@@ -1199,6 +1199,7 @@ describe("App boot flow", () => {
   });
 
   beforeEach(() => {
+    window.history.replaceState({}, "", "/");
     class ResizeObserverMock {
       observe() {}
       unobserve() {}
@@ -2341,6 +2342,25 @@ describe("App boot flow", () => {
     );
     expect(container.querySelector(".shell.chat-closed")).toBeTruthy();
     expect(screen.queryByLabelText("Chat history")).toBeNull();
+  });
+
+  it("keeps floating chat history local to the detached window", async () => {
+    window.history.replaceState({}, "", "/?surface=floating-chat");
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    persistStateMock.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show chat history" }));
+
+    expect(await screen.findByLabelText("Chat history")).toBeTruthy();
+    expect(persistStateMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        uiPreferences: expect.objectContaining({
+          chatHistoryOpen: true,
+        }),
+      }),
+    );
   });
 
   it("opens the Resonant Browser workspace from Home with a live viewport contract", async () => {

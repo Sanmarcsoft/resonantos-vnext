@@ -271,6 +271,7 @@ export function App() {
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [dictating, setDictating] = useState(false);
   const [agentActivityLabel, setAgentActivityLabel] = useState("Standing by.");
+  const [floatingChatHistoryOpen, setFloatingChatHistoryOpen] = useState(false);
   const [systemClockLabel, setSystemClockLabel] = useState(() =>
     new Date().toLocaleString([], {
       weekday: "short",
@@ -2018,7 +2019,7 @@ export function App() {
         contextUsageTitle={contextUsageTitle}
         contextBudget={contextBudget}
         compactState={latestCompactState}
-        historyOpen={isFloatingChatSurface ? false : state.uiPreferences.chatHistoryOpen}
+        historyOpen={isFloatingChatSurface ? floatingChatHistoryOpen : state.uiPreferences.chatHistoryOpen}
         activityLabel={agentActivityLabel}
         recoveryRuntimeStatus={
           recoveryModeActive
@@ -2053,8 +2054,8 @@ export function App() {
             setChatNotice,
           })
         }
-        onSetHistoryOpen={setChatHistoryOpen}
-        onToggleSidebar={toggleChatSidebar}
+        onSetHistoryOpen={isFloatingChatSurface ? setFloatingChatHistoryOpen : setChatHistoryOpen}
+        onToggleSidebar={isFloatingChatSurface ? () => undefined : toggleChatSidebar}
         onSetActiveThread={(threadId) =>
           activateChatThread(threadId, updateRuntimeState, setComposer, setChatNotice, setAttachments)
         }
