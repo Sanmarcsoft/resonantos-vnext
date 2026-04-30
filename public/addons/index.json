@@ -1,13 +1,4 @@
 [
-  "telegram-channel.json",
-  "obsidian.json",
-  "browser.json",
-  "terminal.json",
-  "opencode.json",
-  "hermes.json",
-  "audio2tol.json",
-  "openclaw.json",
-  "shield.json",
-  "logician.json",
-  "r-awareness.json"
+  "augmentor-chat.json",
+  "living-archive.json"
 ]

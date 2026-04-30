@@ -2,6 +2,7 @@
 // Intent citation: docs/architecture/ADR-009-rust-service-ipc-boundary.md
 
 import type {
+  CapabilityGrant,
   AddOnManifest,
   LocalRuntimeStatus,
   RecoveryRouteCandidate,
@@ -16,6 +17,7 @@ import {
   requestLocalRuntimeStatus,
   requestRecoveryRouteCandidates,
 } from "../../core/runtime";
+import { recommendedGrantCapabilities, recommendedSystemSlotManifests } from "./system-slots";
 
 export type BootedShellState = {
   bundled: AddOnManifest[];
@@ -58,3 +60,47 @@ export const loadRecoveryRuntimeSnapshot = async (
 
   return { status, candidates };
 };
+
+export const applyFirstRunRecommendedAddOns = (
+  state: ResonantShellState,
+  manifests: AddOnManifest[],
+  selectedAddonIds: string[],
+): ResonantShellState => {
+  const selected = new Set(selectedAddonIds);
+  const recommendedIds = new Set(recommendedSystemSlotManifests(manifests).map((manifest) => manifest.id));
+  const nextState = structuredClone(state) as ResonantShellState;
+
+  for (const manifest of manifests) {
+    if (!recommendedIds.has(manifest.id) || !selected.has(manifest.id)) {
+      continue;
+    }
+    const installation = nextState.installations[manifest.id];
+    if (!installation) {
+      continue;
+    }
+    const recommendedCapabilities = recommendedGrantCapabilities(manifest);
+    installation.installed = true;
+    installation.enabled = true;
+    installation.status = "enabled";
+    installation.grantedCapabilities = installation.grantedCapabilities.map((grant) =>
+      recommendedCapabilities.includes(grant.capability as CapabilityGrant["capability"]) ? { ...grant, granted: true } : grant,
+    );
+    installation.notes = ["Enabled during first-run setup as a recommended replaceable default."];
+  }
+
+  nextState.uiPreferences.recommendedAddOnsReviewed = true;
+  nextState.uiPreferences.chatSidebarOpen =
+    selected.has("addon.augmentor-chat") || !recommendedIds.has("addon.augmentor-chat")
+      ? nextState.uiPreferences.chatSidebarOpen
+      : false;
+
+  return nextState;
+};
+
+export const markFirstRunRecommendedAddOnsReviewed = (state: ResonantShellState): ResonantShellState => ({
+  ...state,
+  uiPreferences: {
+    ...state.uiPreferences,
+    recommendedAddOnsReviewed: true,
+  },
+});

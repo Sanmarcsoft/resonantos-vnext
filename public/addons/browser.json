@@ -5,7 +5,7 @@
   "author": "Resonant Alpha",
   "category": "tool",
   "sdkVersion": "0.1.0",
-  "description": "Live internal browser add-on for web work and future AI-controlled browsing. V1 uses a live center-workspace web frame, while the AI-control host is a separate audited Chromium service.",
+  "description": "Native embedded Chromium browser add-on for web work and future AI-controlled browsing. Product Browser requires an embedded native host with Phantom Wallet and Bitwarden compatibility.",
   "runtimeType": "local-service",
   "surfaces": [
     {
@@ -32,6 +32,12 @@
       "capability": "browser-control",
       "granted": false,
       "scope": "system",
+      "revocationBehavior": "hard-stop"
+    },
+    {
+      "capability": "filesystem",
+      "granted": false,
+      "scope": "shared",
       "revocationBehavior": "hard-stop"
     },
     {
@@ -75,6 +81,12 @@
           "granted": true,
           "scope": "system",
           "revocationBehavior": "hard-stop"
+        },
+        {
+          "capability": "filesystem",
+          "granted": true,
+          "scope": "shared",
+          "revocationBehavior": "hard-stop"
         }
       ]
     }
@@ -90,15 +102,40 @@
     "canWriteKnowledgePages": false
   },
   "health": {
-    "strategy": "browser-engine-ready"
+    "strategy": "native-browser-host-probe"
   },
   "service": {
-    "protocol": "stdio-json-rpc",
-    "entrypoint": "addons/resonant-browser-host/src/browser-host.mjs",
-    "healthCommand": "browser.health",
-    "shutdownCommand": "browser.close"
+    "protocol": "host-command",
+    "entrypoint": "addons/resonant-browser-native/native-browser-host.contract.json",
+    "healthCommand": "browser.native.probe",
+    "shutdownCommand": "browser.native.close"
   },
   "tools": [
+    {
+      "name": "browser.native.bridge_probe",
+      "description": "Check that the in-process native Browser bridge library exists and exports the required C ABI.",
+      "requiredCapabilities": ["ui-embedding", "browser-control"],
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["status", "integrationMode", "bridgeLibraryStatus", "cAbiStatus", "checkedAt"],
+        "properties": {
+          "status": { "type": "string" },
+          "integrationMode": { "type": "string" },
+          "bridgeLibraryStatus": { "type": "string" },
+          "cAbiStatus": { "type": "string" },
+          "checkedAt": { "type": "string" }
+        }
+      },
+      "audit": {
+        "logRequest": true,
+        "logResult": true,
+        "artifactTypes": ["diagnostic-report"]
+      },
+      "requiresHumanApproval": false
+    },
     {
       "name": "browser.health",
       "description": "Check the controlled Chromium browser host state.",
@@ -297,6 +334,109 @@
         "logRequest": true,
         "logResult": true,
         "artifactTypes": ["log", "citation-bundle"]
+      },
+      "requiresHumanApproval": false
+    },
+    {
+      "name": "browser.native.extension.list",
+      "description": "List extensions available to the native embedded Chromium Browser host.",
+      "requiredCapabilities": ["browser-control"],
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["extensions", "audit"],
+        "properties": {
+          "extensions": { "type": "array" },
+          "audit": { "type": "array" }
+        }
+      },
+      "audit": {
+        "logRequest": true,
+        "logResult": true,
+        "artifactTypes": ["log"]
+      },
+      "requiresHumanApproval": false
+    },
+    {
+      "name": "browser.native.extension.install",
+      "description": "Open the native embedded Chromium trusted extension-install flow, including Chrome Web Store installation where supported.",
+      "requiredCapabilities": ["network", "browser-control"],
+      "inputSchema": {
+        "type": "object",
+        "required": ["source"],
+        "properties": {
+          "source": { "type": "string" },
+          "extensionId": { "type": "string" },
+          "pinned": { "type": "boolean" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["extension", "audit"],
+        "properties": {
+          "extension": { "type": "object" },
+          "audit": { "type": "array" }
+        }
+      },
+      "audit": {
+        "logRequest": true,
+        "logResult": true,
+        "artifactTypes": ["log"]
+      },
+      "requiresHumanApproval": true
+    },
+    {
+      "name": "browser.native.extension.pin",
+      "description": "Update native Browser chrome pin state for a loaded extension where the host supports pinning.",
+      "requiredCapabilities": ["browser-control"],
+      "inputSchema": {
+        "type": "object",
+        "required": ["extensionId"],
+        "properties": {
+          "extensionId": { "type": "string" },
+          "pinned": { "type": "boolean" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["extensions", "audit"],
+        "properties": {
+          "extensions": { "type": "array" },
+          "audit": { "type": "array" }
+        }
+      },
+      "audit": {
+        "logRequest": true,
+        "logResult": true,
+        "artifactTypes": ["log"]
+      },
+      "requiresHumanApproval": false
+    },
+    {
+      "name": "browser.native.extension.disable",
+      "description": "Disable a Browser extension from the current native embedded Chromium host session.",
+      "requiredCapabilities": ["browser-control"],
+      "inputSchema": {
+        "type": "object",
+        "required": ["extensionId"],
+        "properties": {
+          "extensionId": { "type": "string" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["extensions", "audit"],
+        "properties": {
+          "extensions": { "type": "array" },
+          "audit": { "type": "array" }
+        }
+      },
+      "audit": {
+        "logRequest": true,
+        "logResult": true,
+        "artifactTypes": ["log"]
       },
       "requiresHumanApproval": false
     },

@@ -160,7 +160,7 @@ function ActiveAppSurface({
   const isTerminal = app.runtimeSurface === "terminal-app";
   const isEmbedded = app.runtimeSurface === "embedded-app";
   const primaryHandler =
-    app.id === "core.living-archive"
+    app.id === "addon.living-archive" && (app.status === "enabled" || app.status === "installed")
       ? onOpenArchive
       : app.id === "core.delegation"
         ? onOpenDelegation
@@ -323,15 +323,6 @@ function buildLauncherApps(state: ResonantShellState, manifests: AddOnManifest[]
   const visiblePlannedApps = plannedApps.filter((app) => !plannedManifestIds.has(app.id));
 
   return [
-    {
-      id: "core.living-archive",
-      name: "Living Archive",
-      description: "Open the memory workspace for intake, search, review, and wiki promotion.",
-      category: "core",
-      status: "core",
-      runtimeSurface: "system-workspace",
-      primaryAction: "Open Archive",
-    },
     {
       id: "core.delegation",
       name: "Delegation Monitor",

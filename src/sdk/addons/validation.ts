@@ -24,6 +24,8 @@ const categories: readonly AddOnCategory[] = ["agent", "channel", "memory", "sec
 const surfaceTypes: readonly AddOnSurfaceType[] = [
   "page",
   "panel",
+  "rail",
+  "floating-window",
   "embedded-pane",
   "modal",
   "tool-action",

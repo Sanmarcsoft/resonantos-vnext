@@ -34,6 +34,12 @@
       "revocationBehavior": "degrade"
     },
     {
+      "capability": "shell",
+      "granted": false,
+      "scope": "self",
+      "revocationBehavior": "degrade"
+    },
+    {
       "capability": "archive-read",
       "granted": false,
       "scope": "shared",

@@ -1,0 +1,146 @@
+{
+  "id": "addon.living-archive",
+  "name": "Living Archive",
+  "version": "0.1.0",
+  "author": "Resonant Alpha",
+  "category": "memory",
+  "sdkVersion": "0.1.0",
+  "description": "Recommended default memory-system add-on for ResonantOS. It manages Human Knowledge, External Knowledge, and AI Memory through host-mediated scoped APIs and can be disabled or replaced by another memory add-on.",
+  "runtimeType": "local-service",
+  "surfaces": [
+    {
+      "id": "living-archive-workspace",
+      "type": "page",
+      "label": "Memory Workspace",
+      "description": "Configure sources, inspect intake, review memory operations, and manage the active memory provider."
+    },
+    {
+      "id": "living-archive-review",
+      "type": "panel",
+      "label": "Review Queue",
+      "description": "Review memory intake and promotion requests before trusted writes."
+    }
+  ],
+  "requestedCapabilities": [
+    {
+      "capability": "memory-provider",
+      "granted": false,
+      "scope": "system",
+      "revocationBehavior": "hard-stop"
+    },
+    {
+      "capability": "filesystem",
+      "granted": false,
+      "scope": "shared",
+      "revocationBehavior": "hard-stop"
+    },
+    {
+      "capability": "providers",
+      "granted": false,
+      "scope": "shared",
+      "revocationBehavior": "degrade"
+    },
+    {
+      "capability": "archive-read",
+      "granted": false,
+      "scope": "shared",
+      "revocationBehavior": "hard-stop"
+    },
+    {
+      "capability": "archive-intake-write",
+      "granted": false,
+      "scope": "intake-only",
+      "revocationBehavior": "hard-stop"
+    }
+  ],
+  "provenance": {
+    "tier": "curated-signed",
+    "verificationState": "verified",
+    "signed": true,
+    "signer": "ResonantOS bundled catalog"
+  },
+  "runtimeIsolation": {
+    "boundary": "host-mediated-service",
+    "supportsDegradedMode": true,
+    "requiresReviewedGrant": true
+  },
+  "grantPresets": [
+    {
+      "id": "recommended-memory-system",
+      "label": "Recommended memory system",
+      "description": "Enable Living Archive as the default memory provider with filesystem, provider, read, and intake-write access mediated by the host.",
+      "grants": [
+        {
+          "capability": "memory-provider",
+          "granted": true,
+          "scope": "system",
+          "revocationBehavior": "hard-stop"
+        },
+        {
+          "capability": "filesystem",
+          "granted": true,
+          "scope": "shared",
+          "revocationBehavior": "hard-stop"
+        },
+        {
+          "capability": "providers",
+          "granted": true,
+          "scope": "shared",
+          "revocationBehavior": "degrade"
+        },
+        {
+          "capability": "archive-read",
+          "granted": true,
+          "scope": "shared",
+          "revocationBehavior": "hard-stop"
+        },
+        {
+          "capability": "archive-intake-write",
+          "granted": true,
+          "scope": "intake-only",
+          "revocationBehavior": "hard-stop"
+        }
+      ]
+    }
+  ],
+  "systemSlots": [
+    {
+      "id": "memory-system",
+      "role": "default-provider",
+      "replaceable": true,
+      "requiredForFirstRun": false,
+      "recommended": true
+    }
+  ],
+  "providerRequirements": {
+    "sharedProfiles": ["shared-openai", "shared-minimax", "shared-local"],
+    "supportsPrivateCredentials": true,
+    "recommendedPrimaryModel": "gpt-5.4",
+    "recommendedFallbackModel": "MiniMax-M2.7",
+    "preferredRuntimeKinds": ["cloud", "remote-user-owned", "local"],
+    "allowExperimentalAuth": true,
+    "fallbackPolicyId": "chain-archive-premium"
+  },
+  "archiveIntegration": {
+    "readScopes": ["active-memory/context", "system-memory/context"],
+    "intakeWriteScopes": ["Memory/INTAKE"],
+    "canRequestIngest": true,
+    "canWriteKnowledgePages": false
+  },
+  "health": {
+    "strategy": "host-command-ready"
+  },
+  "service": {
+    "protocol": "host-command",
+    "entrypoint": "archive_runtime_status",
+    "healthCommand": "archive_runtime_status"
+  },
+  "installHooks": {
+    "onInstall": "initialize-memory-provider",
+    "onEnable": "activate-memory-system-slot"
+  },
+  "compatibility": {
+    "shellVersion": "^0.1.0",
+    "platforms": ["macOS", "linux", "windows"]
+  }
+}

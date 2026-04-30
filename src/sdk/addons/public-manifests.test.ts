@@ -23,4 +23,14 @@ describe("bundled add-on manifests", () => {
       })),
     ).toEqual([]);
   });
+
+  it("keeps the reference third-party memory add-on manifest sideloadable", () => {
+    const manifest = JSON.parse(
+      readFileSync(resolve(process.cwd(), "examples", "addons", "reference-memory.json"), "utf8"),
+    ) as unknown;
+
+    const validation = validateAddOnManifest(manifest, { source: "sideload" });
+
+    expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
+  });
 });

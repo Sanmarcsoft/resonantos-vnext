@@ -48,6 +48,42 @@ pub(crate) struct ObsidianWriteNoteRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct ObsidianCreateNoteRequest {
+    pub vault_path: String,
+    pub note_path: String,
+    pub content: Option<String>,
+    pub actor_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ObsidianCreateFolderRequest {
+    pub vault_path: String,
+    pub folder_path: String,
+    pub actor_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ObsidianMoveNoteRequest {
+    pub vault_path: String,
+    pub from_note_path: String,
+    pub to_note_path: String,
+    pub expected_modified_at: Option<String>,
+    pub actor_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ObsidianArchiveNoteRequest {
+    pub vault_path: String,
+    pub note_path: String,
+    pub expected_modified_at: Option<String>,
+    pub actor_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ObsidianVaultIndexRequest {
     pub vault_path: String,
     pub query: Option<String>,
@@ -101,6 +137,21 @@ pub(crate) struct ObsidianWriteNoteResult {
     pub previous_modified_at: Option<String>,
     pub modified_at: Option<String>,
     pub version_path: String,
+    pub audit_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ObsidianNoteOperationResult {
+    pub operation: String,
+    pub note_path: Option<String>,
+    pub previous_note_path: Option<String>,
+    pub folder_path: Option<String>,
+    pub archived_path: Option<String>,
+    pub title: Option<String>,
+    pub size_bytes: Option<u64>,
+    pub modified_at: Option<String>,
+    pub version_path: Option<String>,
     pub audit_path: String,
 }
 
@@ -291,6 +342,213 @@ pub(crate) fn write_obsidian_note(
     })
 }
 
+pub(crate) fn create_obsidian_note(
+    request: ObsidianCreateNoteRequest,
+) -> Result<ObsidianNoteOperationResult, String> {
+    let content = request
+        .content
+        .unwrap_or_else(|| "# Untitled\n".to_string());
+    if content.as_bytes().len() as u64 > MAX_NOTE_BYTES {
+        return Err(format!(
+            "Obsidian note content is too large for V2 editing: {} bytes",
+            content.as_bytes().len()
+        ));
+    }
+
+    let root = validated_vault_root(&request.vault_path)?;
+    let note_path = safe_new_note_path(&root, &request.note_path)?;
+    if note_path.exists() {
+        return Err("An Obsidian note already exists at that path.".to_string());
+    }
+    if let Some(parent) = note_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to create Obsidian note folder: {error}"))?;
+    }
+    fs::write(&note_path, content)
+        .map_err(|error| format!("Failed to create Obsidian note: {error}"))?;
+    let metadata = fs::metadata(&note_path)
+        .map_err(|error| format!("Failed to inspect created Obsidian note: {error}"))?;
+    let relative_path = relative_note_path(&root, &note_path)?;
+    let audit_path = write_note_operation_audit_record(
+        &root,
+        "create-note",
+        serde_json::json!({
+            "notePath": relative_path,
+            "modifiedAt": modified_label(&metadata),
+            "actorId": request.actor_id.as_deref().unwrap_or("addon.obsidian"),
+        }),
+    )?;
+
+    Ok(ObsidianNoteOperationResult {
+        operation: "create-note".to_string(),
+        note_path: Some(relative_path),
+        previous_note_path: None,
+        folder_path: None,
+        archived_path: None,
+        title: Some(note_title(&note_path)),
+        size_bytes: Some(metadata.len()),
+        modified_at: modified_label(&metadata),
+        version_path: None,
+        audit_path: audit_path.display().to_string(),
+    })
+}
+
+pub(crate) fn create_obsidian_folder(
+    request: ObsidianCreateFolderRequest,
+) -> Result<ObsidianNoteOperationResult, String> {
+    let root = validated_vault_root(&request.vault_path)?;
+    let folder_path = safe_new_folder_path(&root, &request.folder_path)?;
+    if folder_path.exists() {
+        return Err("An Obsidian folder already exists at that path.".to_string());
+    }
+    fs::create_dir_all(&folder_path)
+        .map_err(|error| format!("Failed to create Obsidian folder: {error}"))?;
+    let relative_path = relative_note_path(&root, &folder_path)?;
+    let audit_path = write_note_operation_audit_record(
+        &root,
+        "create-folder",
+        serde_json::json!({
+            "folderPath": relative_path,
+            "actorId": request.actor_id.as_deref().unwrap_or("addon.obsidian"),
+        }),
+    )?;
+
+    Ok(ObsidianNoteOperationResult {
+        operation: "create-folder".to_string(),
+        note_path: None,
+        previous_note_path: None,
+        folder_path: Some(relative_path),
+        archived_path: None,
+        title: None,
+        size_bytes: None,
+        modified_at: None,
+        version_path: None,
+        audit_path: audit_path.display().to_string(),
+    })
+}
+
+pub(crate) fn move_obsidian_note(
+    request: ObsidianMoveNoteRequest,
+) -> Result<ObsidianNoteOperationResult, String> {
+    let root = validated_vault_root(&request.vault_path)?;
+    let from_path = safe_note_path(&root, &request.from_note_path)?;
+    let to_path = safe_new_note_path(&root, &request.to_note_path)?;
+    if to_path.exists() {
+        return Err("An Obsidian note already exists at the destination path.".to_string());
+    }
+
+    let previous_metadata = fs::metadata(&from_path)
+        .map_err(|error| format!("Failed to inspect Obsidian note before move: {error}"))?;
+    let previous_modified_at = modified_label(&previous_metadata);
+    if let Some(expected_modified_at) = request.expected_modified_at.as_deref() {
+        if previous_modified_at.as_deref() != Some(expected_modified_at) {
+            return Err(
+                "Obsidian note changed on disk since it was opened; rescan before moving."
+                    .to_string(),
+            );
+        }
+    }
+
+    let previous_relative_path = relative_note_path(&root, &from_path)?;
+    let version_path = version_note_path(&root, &previous_relative_path)?;
+    if let Some(parent) = version_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to create Obsidian note version folder: {error}"))?;
+    }
+    fs::copy(&from_path, &version_path)
+        .map_err(|error| format!("Failed to snapshot Obsidian note before move: {error}"))?;
+    if let Some(parent) = to_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!("Failed to create Obsidian note destination folder: {error}")
+        })?;
+    }
+    fs::rename(&from_path, &to_path)
+        .map_err(|error| format!("Failed to move Obsidian note: {error}"))?;
+    let metadata = fs::metadata(&to_path)
+        .map_err(|error| format!("Failed to inspect moved Obsidian note: {error}"))?;
+    let next_relative_path = relative_note_path(&root, &to_path)?;
+    let audit_path = write_note_operation_audit_record(
+        &root,
+        "move-note",
+        serde_json::json!({
+            "previousNotePath": previous_relative_path,
+            "notePath": next_relative_path,
+            "versionPath": version_path.display().to_string(),
+            "previousModifiedAt": previous_modified_at,
+            "modifiedAt": modified_label(&metadata),
+            "actorId": request.actor_id.as_deref().unwrap_or("addon.obsidian"),
+        }),
+    )?;
+
+    Ok(ObsidianNoteOperationResult {
+        operation: "move-note".to_string(),
+        note_path: Some(next_relative_path),
+        previous_note_path: Some(previous_relative_path),
+        folder_path: None,
+        archived_path: None,
+        title: Some(note_title(&to_path)),
+        size_bytes: Some(metadata.len()),
+        modified_at: modified_label(&metadata),
+        version_path: Some(version_path.display().to_string()),
+        audit_path: audit_path.display().to_string(),
+    })
+}
+
+pub(crate) fn archive_obsidian_note(
+    request: ObsidianArchiveNoteRequest,
+) -> Result<ObsidianNoteOperationResult, String> {
+    let root = validated_vault_root(&request.vault_path)?;
+    let note_path = safe_note_path(&root, &request.note_path)?;
+    let metadata = fs::metadata(&note_path)
+        .map_err(|error| format!("Failed to inspect Obsidian note before archive: {error}"))?;
+    let previous_modified_at = modified_label(&metadata);
+    if let Some(expected_modified_at) = request.expected_modified_at.as_deref() {
+        if previous_modified_at.as_deref() != Some(expected_modified_at) {
+            return Err(
+                "Obsidian note changed on disk since it was opened; rescan before archiving."
+                    .to_string(),
+            );
+        }
+    }
+
+    let previous_relative_path = relative_note_path(&root, &note_path)?;
+    let stamp = unix_nanos_now()?;
+    let archived_path = root
+        .join(".resonantos")
+        .join("obsidian-note-trash")
+        .join(stamp.to_string())
+        .join(&previous_relative_path);
+    if let Some(parent) = archived_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to create Obsidian note archive folder: {error}"))?;
+    }
+    fs::rename(&note_path, &archived_path)
+        .map_err(|error| format!("Failed to archive Obsidian note: {error}"))?;
+    let audit_path = write_note_operation_audit_record(
+        &root,
+        "archive-note",
+        serde_json::json!({
+            "previousNotePath": previous_relative_path,
+            "archivedPath": archived_path.display().to_string(),
+            "previousModifiedAt": previous_modified_at,
+            "actorId": request.actor_id.as_deref().unwrap_or("addon.obsidian"),
+        }),
+    )?;
+
+    Ok(ObsidianNoteOperationResult {
+        operation: "archive-note".to_string(),
+        note_path: None,
+        previous_note_path: Some(previous_relative_path),
+        folder_path: None,
+        archived_path: Some(archived_path.display().to_string()),
+        title: Some(note_title(&archived_path)),
+        size_bytes: Some(metadata.len()),
+        modified_at: None,
+        version_path: None,
+        audit_path: audit_path.display().to_string(),
+    })
+}
+
 pub(crate) fn index_obsidian_vault(
     request: ObsidianVaultIndexRequest,
 ) -> Result<ObsidianVaultIndex, String> {
@@ -367,6 +625,30 @@ fn safe_note_path(root: &Path, note_path: &str) -> Result<PathBuf, String> {
     Ok(resolved)
 }
 
+fn safe_new_note_path(root: &Path, note_path: &str) -> Result<PathBuf, String> {
+    reject_internal_note_path(note_path)?;
+    let candidate = root.join(note_path);
+    if candidate.extension().and_then(|item| item.to_str()) != Some("md") {
+        return Err("Only markdown notes can be created or moved by Resonant Notes.".to_string());
+    }
+    ensure_lexical_child(root, &candidate)?;
+    Ok(candidate)
+}
+
+fn safe_new_folder_path(root: &Path, folder_path: &str) -> Result<PathBuf, String> {
+    reject_internal_note_path(folder_path)?;
+    let candidate = root.join(folder_path);
+    ensure_lexical_child(root, &candidate)?;
+    Ok(candidate)
+}
+
+fn ensure_lexical_child(root: &Path, candidate: &Path) -> Result<(), String> {
+    if candidate == root || !candidate.starts_with(root) {
+        return Err("Obsidian path must stay inside the configured vault.".to_string());
+    }
+    Ok(())
+}
+
 fn reject_internal_note_path(note_path: &str) -> Result<(), String> {
     for component in Path::new(note_path).components() {
         match component {
@@ -431,6 +713,29 @@ fn write_note_audit_record(
         .map_err(|error| format!("Failed to encode Obsidian note audit record: {error}"))?;
     fs::write(&audit_path, encoded)
         .map_err(|error| format!("Failed to write Obsidian note audit record: {error}"))?;
+    Ok(audit_path)
+}
+
+fn write_note_operation_audit_record(
+    root: &Path,
+    operation: &str,
+    details: serde_json::Value,
+) -> Result<PathBuf, String> {
+    let stamp = unix_seconds_now()?;
+    let audit_root = root.join(".resonantos").join("obsidian-note-audit");
+    fs::create_dir_all(&audit_root)
+        .map_err(|error| format!("Failed to create Obsidian note audit folder: {error}"))?;
+    let audit_path = audit_root.join(format!("{stamp}-{operation}.json"));
+    let payload = serde_json::json!({
+        "artifactType": "obsidian-note-operation-audit",
+        "operation": operation,
+        "details": details,
+        "recordedAt": format!("unix:{stamp}"),
+    });
+    let encoded = serde_json::to_string_pretty(&payload)
+        .map_err(|error| format!("Failed to encode Obsidian operation audit record: {error}"))?;
+    fs::write(&audit_path, encoded)
+        .map_err(|error| format!("Failed to write Obsidian operation audit record: {error}"))?;
     Ok(audit_path)
 }
 
@@ -885,6 +1190,131 @@ mod tests {
                 .expect("original note should remain"),
             "# Note One"
         );
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn creates_moves_and_archives_notes_with_audit_records() {
+        let root = temp_vault();
+
+        let created = create_obsidian_note(ObsidianCreateNoteRequest {
+            vault_path: root.display().to_string(),
+            note_path: "Projects/New Note.md".to_string(),
+            content: Some("# New Note".to_string()),
+            actor_id: Some("test.actor".to_string()),
+        })
+        .expect("note should be created");
+        assert_eq!(created.note_path.as_deref(), Some("Projects/New Note.md"));
+        assert!(PathBuf::from(&created.audit_path).exists());
+        assert!(root.join("Projects").join("New Note.md").exists());
+
+        let folder = create_obsidian_folder(ObsidianCreateFolderRequest {
+            vault_path: root.display().to_string(),
+            folder_path: "Projects/Nested".to_string(),
+            actor_id: Some("test.actor".to_string()),
+        })
+        .expect("folder should be created");
+        assert_eq!(folder.folder_path.as_deref(), Some("Projects/Nested"));
+        assert!(root.join("Projects").join("Nested").is_dir());
+
+        let before = read_obsidian_note(ObsidianReadNoteRequest {
+            vault_path: root.display().to_string(),
+            note_path: "Projects/New Note.md".to_string(),
+        })
+        .expect("created note should read before move");
+        let moved = move_obsidian_note(ObsidianMoveNoteRequest {
+            vault_path: root.display().to_string(),
+            from_note_path: "Projects/New Note.md".to_string(),
+            to_note_path: "Projects/Nested/Renamed Note.md".to_string(),
+            expected_modified_at: before.modified_at,
+            actor_id: Some("test.actor".to_string()),
+        })
+        .expect("note should move");
+        assert_eq!(
+            moved.previous_note_path.as_deref(),
+            Some("Projects/New Note.md")
+        );
+        assert_eq!(
+            moved.note_path.as_deref(),
+            Some("Projects/Nested/Renamed Note.md")
+        );
+        assert!(moved
+            .version_path
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap()
+            .exists());
+        assert!(!root.join("Projects").join("New Note.md").exists());
+        assert!(root
+            .join("Projects")
+            .join("Nested")
+            .join("Renamed Note.md")
+            .exists());
+
+        let before_archive = read_obsidian_note(ObsidianReadNoteRequest {
+            vault_path: root.display().to_string(),
+            note_path: "Projects/Nested/Renamed Note.md".to_string(),
+        })
+        .expect("moved note should read before archive");
+        let archived = archive_obsidian_note(ObsidianArchiveNoteRequest {
+            vault_path: root.display().to_string(),
+            note_path: "Projects/Nested/Renamed Note.md".to_string(),
+            expected_modified_at: before_archive.modified_at,
+            actor_id: Some("test.actor".to_string()),
+        })
+        .expect("note should archive");
+        assert_eq!(
+            archived.previous_note_path.as_deref(),
+            Some("Projects/Nested/Renamed Note.md")
+        );
+        assert!(archived
+            .archived_path
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap()
+            .exists());
+        assert!(!root
+            .join("Projects")
+            .join("Nested")
+            .join("Renamed Note.md")
+            .exists());
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn rejects_create_move_and_archive_paths_outside_safe_vault_area() {
+        let root = temp_vault();
+
+        assert!(create_obsidian_note(ObsidianCreateNoteRequest {
+            vault_path: root.display().to_string(),
+            note_path: "../Escaped.md".to_string(),
+            content: None,
+            actor_id: None,
+        })
+        .is_err());
+        assert!(create_obsidian_folder(ObsidianCreateFolderRequest {
+            vault_path: root.display().to_string(),
+            folder_path: ".obsidian/generated".to_string(),
+            actor_id: None,
+        })
+        .is_err());
+        assert!(move_obsidian_note(ObsidianMoveNoteRequest {
+            vault_path: root.display().to_string(),
+            from_note_path: "Folder/Note One.md".to_string(),
+            to_note_path: ".resonantos/Note One.md".to_string(),
+            expected_modified_at: None,
+            actor_id: None,
+        })
+        .is_err());
+        assert!(archive_obsidian_note(ObsidianArchiveNoteRequest {
+            vault_path: root.display().to_string(),
+            note_path: "../Escaped.md".to_string(),
+            expected_modified_at: None,
+            actor_id: None,
+        })
+        .is_err());
 
         fs::remove_dir_all(root).ok();
     }

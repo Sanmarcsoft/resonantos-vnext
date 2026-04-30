@@ -69,6 +69,12 @@ export const toggleAddonInstallation = (
       installation.status = "enabled";
       installation.notes = ["Re-enabled after prior disable."];
     }
+    if (manifest.id === "addon.hermes") {
+      const hermesChannel = draft.channels.find((channel) => channel.id === "desktop-hermes");
+      if (hermesChannel) {
+        hermesChannel.enabled = installation.enabled;
+      }
+    }
     return draft;
   });
 };
@@ -112,6 +118,12 @@ export const grantAddonCapabilities = (
     );
     installation.status = "enabled";
     installation.notes = [`Installed, enabled, and granted ${capabilities.join(", ")} through reviewed setup.`];
+    if (manifestId === "addon.hermes") {
+      const hermesChannel = draft.channels.find((channel) => channel.id === "desktop-hermes");
+      if (hermesChannel) {
+        hermesChannel.enabled = true;
+      }
+    }
     return draft;
   });
 };

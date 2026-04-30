@@ -4,6 +4,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import type {
   AddOnManifest,
+  ArchiveBackgroundCycleResult,
   ArchiveDocumentPayload,
   ArchiveImportedLibrarySummary,
   ArchivePromoteReviewArtifactResult,
@@ -14,6 +15,8 @@ import type {
   ArchiveLibraryImportResult,
   ArchiveLibraryPreflightResult,
   ArchiveLibraryReorganisationPlan,
+  ArchiveLintResult,
+  ArchiveMaintenanceCycleResult,
   ArchiveMemoryDomain,
   ArchiveQueuedIngestRequest,
   ArchiveReviewArtifact,
@@ -23,31 +26,30 @@ import type {
   ArchiveTolBundleBuildResult,
   ArchiveTolBundleCandidate,
   ArchiveSearchSourceHit,
+  ArchiveSemanticLintResult,
   ArchiveRuntimeStatus,
   ArchiveSearchResult,
   ProviderDiagnosticReport,
   ResonantShellState,
 } from "../../core/contracts";
+import type { MemoryProviderBroker } from "../../core/memory-provider";
+import { livingArchiveMemoryProvider } from "../../core/memory-provider";
 import { applyProviderDiagnostics } from "../../core/policies";
-import { resolveArchiveIngestRoute, routedProviderLabel } from "../../core/provider-service";
+import { resolveArchiveIngestRoute, resolveRoutineRoute, routedProviderLabel } from "../../core/provider-service";
 import {
-  requestArchiveDocument,
   requestArchiveBuildTolBundle,
-  requestArchiveIngestRequest,
+  requestArchiveBackgroundCycle,
   requestArchiveIngestProbe,
   requestArchiveImportedLibraries,
   requestArchiveLibraryFolderSelection,
   requestArchiveLibraryClassificationReview,
   requestArchiveLibraryImport,
+  requestArchiveLint,
+  requestArchiveSemanticLint,
   requestArchiveLibraryPreflight,
   requestArchiveLibraryReorganisationPlan,
-  requestArchiveProcessIngestRequest,
-  requestArchivePromoteReviewArtifact,
   requestArchiveReviewArtifacts,
-  requestArchiveReviewDecision,
   requestArchiveReviewQueue,
-  requestArchiveRuntimeStatus,
-  requestArchiveSearch,
   requestArchiveSourceFolderScan,
   requestArchiveTolBundleCandidates,
   requestProviderDiagnostics,
@@ -77,6 +79,7 @@ type ArchiveProbeControllerInput = {
 };
 
 type ArchiveRuntimeStatusControllerInput = {
+  memoryProvider?: MemoryProviderBroker;
   setChatNotice: Dispatch<SetStateAction<string | null>>;
   setArchiveStatusBusy: Dispatch<SetStateAction<boolean>>;
   setArchiveStatus: Dispatch<SetStateAction<ArchiveRuntimeStatus | null>>;
@@ -92,6 +95,7 @@ type ArchiveImportedLibrariesControllerInput = {
 
 type ArchiveSearchControllerInput = {
   query: string;
+  memoryProvider?: MemoryProviderBroker;
   setChatNotice: Dispatch<SetStateAction<string | null>>;
   setArchiveSearchBusy: Dispatch<SetStateAction<boolean>>;
   setArchiveSearchResult: Dispatch<SetStateAction<ArchiveSearchResult | null>>;
@@ -100,6 +104,7 @@ type ArchiveSearchControllerInput = {
 
 type ArchiveDocumentControllerInput = {
   path: string;
+  memoryProvider?: MemoryProviderBroker;
   setChatNotice: Dispatch<SetStateAction<string | null>>;
   setArchiveDocumentBusy: Dispatch<SetStateAction<boolean>>;
   setArchiveDocument: Dispatch<SetStateAction<ArchiveDocumentPayload | null>>;
@@ -107,6 +112,7 @@ type ArchiveDocumentControllerInput = {
 };
 
 type ArchiveReviewQueueControllerInput = {
+  memoryProvider?: MemoryProviderBroker;
   setChatNotice: Dispatch<SetStateAction<string | null>>;
   setArchiveQueueBusy: Dispatch<SetStateAction<boolean>>;
   setArchiveQueue: Dispatch<SetStateAction<ArchiveQueuedIngestRequest[]>>;
@@ -116,6 +122,7 @@ type ArchiveReviewQueueControllerInput = {
 
 type ArchiveQueueRequestControllerInput = {
   source: ArchiveSearchSourceHit;
+  memoryProvider?: MemoryProviderBroker;
   setChatNotice: Dispatch<SetStateAction<string | null>>;
   setArchiveQueueBusy: Dispatch<SetStateAction<boolean>>;
   setArchiveQueue: Dispatch<SetStateAction<ArchiveQueuedIngestRequest[]>>;
@@ -125,6 +132,7 @@ type ArchiveQueueRequestControllerInput = {
 
 type ArchiveQueueWatchedSourceControllerInput = {
   source: ArchiveSourceWatchRecord;
+  memoryProvider?: MemoryProviderBroker;
   setChatNotice: Dispatch<SetStateAction<string | null>>;
   setArchiveQueueBusy: Dispatch<SetStateAction<boolean>>;
   setArchiveQueue: Dispatch<SetStateAction<ArchiveQueuedIngestRequest[]>>;
@@ -180,6 +188,7 @@ type ArchiveLibraryReorganisationPlanControllerInput = {
 type ArchiveProcessRequestControllerInput = {
   snapshot: ReadyShellSnapshot;
   requestFile: string;
+  memoryProvider?: MemoryProviderBroker;
   commitReadyState: (state: ResonantShellState) => void;
   setProviderDiagnostics: Dispatch<SetStateAction<ProviderDiagnosticReport[]>>;
   setChatNotice: Dispatch<SetStateAction<string | null>>;
@@ -195,6 +204,7 @@ type ArchiveReviewDecisionControllerInput = {
   action: "approve" | "reject" | "escalate";
   actorId: string;
   notes?: string;
+  memoryProvider?: MemoryProviderBroker;
   setChatNotice: Dispatch<SetStateAction<string | null>>;
   setArchiveQueueBusy: Dispatch<SetStateAction<boolean>>;
   setArchiveReviewArtifacts: Dispatch<SetStateAction<ArchiveReviewArtifact[]>>;
@@ -205,10 +215,62 @@ type ArchiveReviewDecisionControllerInput = {
 type ArchivePromoteReviewArtifactControllerInput = {
   artifactFile: string;
   actorId: string;
+  memoryProvider?: MemoryProviderBroker;
   setChatNotice: Dispatch<SetStateAction<string | null>>;
   setArchiveQueueBusy: Dispatch<SetStateAction<boolean>>;
   setArchiveReviewArtifacts: Dispatch<SetStateAction<ArchiveReviewArtifact[]>>;
   setArchivePromotionResult: Dispatch<SetStateAction<ArchivePromoteReviewArtifactResult | null>>;
+  errorMessageOf: (error: unknown, fallback: string) => string;
+};
+
+type ArchiveMaintenanceCycleControllerInput = {
+  snapshot: ReadyShellSnapshot;
+  memoryProvider?: MemoryProviderBroker;
+  commitReadyState: (state: ResonantShellState) => void;
+  setProviderDiagnostics: Dispatch<SetStateAction<ProviderDiagnosticReport[]>>;
+  setChatNotice: Dispatch<SetStateAction<string | null>>;
+  setArchiveQueueBusy: Dispatch<SetStateAction<boolean>>;
+  setArchiveQueue: Dispatch<SetStateAction<ArchiveQueuedIngestRequest[]>>;
+  setArchiveReviewArtifacts: Dispatch<SetStateAction<ArchiveReviewArtifact[]>>;
+  setArchiveProcessResult: Dispatch<SetStateAction<ArchiveProcessIngestResult | null>>;
+  setArchivePromotionResult: Dispatch<SetStateAction<ArchivePromoteReviewArtifactResult | null>>;
+  setArchiveMaintenanceResult: Dispatch<SetStateAction<ArchiveMaintenanceCycleResult | null>>;
+  errorMessageOf: (error: unknown, fallback: string) => string;
+};
+
+type ArchiveBackgroundCycleControllerInput = {
+  snapshot: ReadyShellSnapshot;
+  memoryProvider?: MemoryProviderBroker;
+  commitReadyState: (state: ResonantShellState) => void;
+  setProviderDiagnostics: Dispatch<SetStateAction<ProviderDiagnosticReport[]>>;
+  setChatNotice: Dispatch<SetStateAction<string | null>>;
+  setArchiveQueueBusy: Dispatch<SetStateAction<boolean>>;
+  setArchiveQueue: Dispatch<SetStateAction<ArchiveQueuedIngestRequest[]>>;
+  setArchiveReviewArtifacts: Dispatch<SetStateAction<ArchiveReviewArtifact[]>>;
+  setArchiveProcessResult: Dispatch<SetStateAction<ArchiveProcessIngestResult | null>>;
+  setArchivePromotionResult: Dispatch<SetStateAction<ArchivePromoteReviewArtifactResult | null>>;
+  setArchiveMaintenanceResult: Dispatch<SetStateAction<ArchiveMaintenanceCycleResult | null>>;
+  setArchiveSourceScanResult?: Dispatch<SetStateAction<ArchiveSourceFolderScanResult | null>>;
+  setArchiveBackgroundResult?: Dispatch<SetStateAction<ArchiveBackgroundCycleResult | null>>;
+  errorMessageOf: (error: unknown, fallback: string) => string;
+};
+
+type ArchiveLintControllerInput = {
+  memoryProvider?: MemoryProviderBroker;
+  setChatNotice: Dispatch<SetStateAction<string | null>>;
+  setArchiveQueueBusy: Dispatch<SetStateAction<boolean>>;
+  setArchiveLintResult: Dispatch<SetStateAction<ArchiveLintResult | null>>;
+  errorMessageOf: (error: unknown, fallback: string) => string;
+};
+
+type ArchiveSemanticLintControllerInput = {
+  snapshot: ReadyShellSnapshot;
+  memoryProvider?: MemoryProviderBroker;
+  commitReadyState: (state: ResonantShellState) => void;
+  setProviderDiagnostics: Dispatch<SetStateAction<ProviderDiagnosticReport[]>>;
+  setChatNotice: Dispatch<SetStateAction<string | null>>;
+  setArchiveQueueBusy: Dispatch<SetStateAction<boolean>>;
+  setArchiveSemanticLintResult: Dispatch<SetStateAction<ArchiveSemanticLintResult | null>>;
   errorMessageOf: (error: unknown, fallback: string) => string;
 };
 
@@ -237,6 +299,7 @@ const ARCHIVE_PROBE_SOURCE = {
 };
 
 export const loadArchiveRuntimeStatus = async ({
+  memoryProvider = livingArchiveMemoryProvider(),
   setChatNotice,
   setArchiveStatusBusy,
   setArchiveStatus,
@@ -245,7 +308,7 @@ export const loadArchiveRuntimeStatus = async ({
   setArchiveStatusBusy(true);
   setChatNotice(null);
   try {
-    const status = await requestArchiveRuntimeStatus();
+    const status = await memoryProvider.status();
     setArchiveStatus(status);
   } catch (error) {
     setChatNotice(errorMessageOf(error, "Failed to load Living Archive runtime status."));
@@ -274,6 +337,7 @@ export const loadArchiveImportedLibraries = async ({
 
 export const executeArchiveSearch = async ({
   query,
+  memoryProvider = livingArchiveMemoryProvider(),
   setChatNotice,
   setArchiveSearchBusy,
   setArchiveSearchResult,
@@ -282,7 +346,7 @@ export const executeArchiveSearch = async ({
   setArchiveSearchBusy(true);
   setChatNotice(null);
   try {
-    const result = await requestArchiveSearch(query);
+    const result = await memoryProvider.search(query);
     setArchiveSearchResult(result);
   } catch (error) {
     setChatNotice(errorMessageOf(error, "Living Archive search failed."));
@@ -293,6 +357,7 @@ export const executeArchiveSearch = async ({
 
 export const loadArchiveDocument = async ({
   path,
+  memoryProvider = livingArchiveMemoryProvider(),
   setChatNotice,
   setArchiveDocumentBusy,
   setArchiveDocument,
@@ -301,7 +366,7 @@ export const loadArchiveDocument = async ({
   setArchiveDocumentBusy(true);
   setChatNotice(null);
   try {
-    const document = await requestArchiveDocument(path);
+    const document = await memoryProvider.read(path);
     setArchiveDocument(document);
   } catch (error) {
     setChatNotice(errorMessageOf(error, "Failed to read archive document."));
@@ -311,6 +376,7 @@ export const loadArchiveDocument = async ({
 };
 
 export const loadArchiveReviewQueue = async ({
+  memoryProvider = livingArchiveMemoryProvider(),
   setChatNotice,
   setArchiveQueueBusy,
   setArchiveQueue,
@@ -320,7 +386,7 @@ export const loadArchiveReviewQueue = async ({
   setArchiveQueueBusy(true);
   setChatNotice(null);
   try {
-    const [queue, artifacts] = await Promise.all([requestArchiveReviewQueue(), requestArchiveReviewArtifacts()]);
+    const [queue, artifacts] = await Promise.all([memoryProvider.reviewQueue(), memoryProvider.reviewArtifacts()]);
     setArchiveQueue(queue);
     setArchiveReviewArtifacts?.(artifacts);
   } catch (error) {
@@ -332,6 +398,7 @@ export const loadArchiveReviewQueue = async ({
 
 export const queueArchiveSourceForIngest = async ({
   source,
+  memoryProvider = livingArchiveMemoryProvider(),
   setChatNotice,
   setArchiveQueueBusy,
   setArchiveQueue,
@@ -341,7 +408,7 @@ export const queueArchiveSourceForIngest = async ({
   setArchiveQueueBusy(true);
   setChatNotice(null);
   try {
-    await requestArchiveIngestRequest({
+    await memoryProvider.ingestRequest({
       actorId: "strategist.core",
       sourcePath: source.rawPath,
       sourceType: source.sourceType,
@@ -351,7 +418,7 @@ export const queueArchiveSourceForIngest = async ({
         processed: source.processed,
       },
     });
-    const [queue, artifacts] = await Promise.all([requestArchiveReviewQueue(), requestArchiveReviewArtifacts()]);
+    const [queue, artifacts] = await Promise.all([memoryProvider.reviewQueue(), memoryProvider.reviewArtifacts()]);
     setArchiveQueue(queue);
     setArchiveReviewArtifacts?.(artifacts);
     setChatNotice(`Queued ${source.title} for Living Archive ingest review.`);
@@ -364,6 +431,7 @@ export const queueArchiveSourceForIngest = async ({
 
 export const queueWatchedArchiveSourceForIngest = async ({
   source,
+  memoryProvider = livingArchiveMemoryProvider(),
   setChatNotice,
   setArchiveQueueBusy,
   setArchiveQueue,
@@ -373,7 +441,7 @@ export const queueWatchedArchiveSourceForIngest = async ({
   setArchiveQueueBusy(true);
   setChatNotice(null);
   try {
-    await requestArchiveIngestRequest({
+    await memoryProvider.ingestRequest({
       actorId: "strategist.core",
       sourcePath: source.path,
       sourceType: source.sourceType,
@@ -387,7 +455,7 @@ export const queueWatchedArchiveSourceForIngest = async ({
         modifiedAt: source.modifiedAt,
       },
     });
-    const [queue, artifacts] = await Promise.all([requestArchiveReviewQueue(), requestArchiveReviewArtifacts()]);
+    const [queue, artifacts] = await Promise.all([memoryProvider.reviewQueue(), memoryProvider.reviewArtifacts()]);
     setArchiveQueue(queue);
     setArchiveReviewArtifacts?.(artifacts);
     setChatNotice(`Queued ${source.title} for Living Archive ingest review.`);
@@ -536,9 +604,34 @@ export const pickArchiveLibraryFolder = async ({
   }
 };
 
+const credentialReady = (provider: { providerType: string; credentialStatus?: string; label: string }): void => {
+  if (provider.providerType !== "local" && provider.credentialStatus !== "configured") {
+    throw new Error(`${provider.label} credential missing. Add it in Settings > Provider Profiles.`);
+  }
+};
+
+const verifierRouteInput = (state: ResonantShellState) => {
+  const verifierRoute = resolveRoutineRoute(state);
+  if (!verifierRoute.provider || !verifierRoute.runtimeNode || !verifierRoute.model) {
+    return {};
+  }
+  credentialReady(verifierRoute.provider);
+  return {
+    verifierProviderId: verifierRoute.provider.id,
+    verifierProviderType: verifierRoute.provider.providerType,
+    verifierApiBaseUrl: verifierRoute.runtimeNode.endpoint ?? verifierRoute.provider.apiBaseUrl,
+    verifierRuntimeNodeId: verifierRoute.runtimeNode.id,
+    verifierRuntimeNodeKind: verifierRoute.runtimeNode.kind,
+    verifierRuntimeNodeEndpoint: verifierRoute.runtimeNode.endpoint,
+    verifierAuthTier: verifierRoute.decision.authTier,
+    verifierModel: verifierRoute.model,
+  };
+};
+
 export const processArchiveQueuedRequest = async ({
   snapshot,
   requestFile,
+  memoryProvider = livingArchiveMemoryProvider(),
   commitReadyState,
   setProviderDiagnostics,
   setChatNotice,
@@ -573,11 +666,10 @@ export const processArchiveQueuedRequest = async ({
           : "Archive ingest route is missing provider or runtime details.",
       );
     }
-    if (provider.providerType !== "local" && provider.credentialStatus !== "configured") {
-      throw new Error(`${provider.label} credential missing. Add it in Settings > Provider Profiles.`);
-    }
+    credentialReady(provider);
+    const verifier = verifierRouteInput(routedState);
 
-    const result = await requestArchiveProcessIngestRequest({
+    const result = await memoryProvider.processIngestRequest({
       requestFile,
       providerId: provider.id,
       providerType: provider.providerType,
@@ -587,9 +679,10 @@ export const processArchiveQueuedRequest = async ({
       runtimeNodeEndpoint: runtimeNode.endpoint,
       authTier: route.decision.authTier,
       model: route.model,
+      ...verifier,
     });
 
-    const [queue, artifacts] = await Promise.all([requestArchiveReviewQueue(), requestArchiveReviewArtifacts()]);
+    const [queue, artifacts] = await Promise.all([memoryProvider.reviewQueue(), memoryProvider.reviewArtifacts()]);
     setArchiveQueue(queue);
     setArchiveReviewArtifacts(artifacts);
     setArchiveProcessResult(result);
@@ -606,6 +699,7 @@ export const decideArchiveReviewArtifact = async ({
   action,
   actorId,
   notes,
+  memoryProvider = livingArchiveMemoryProvider(),
   setChatNotice,
   setArchiveQueueBusy,
   setArchiveReviewArtifacts,
@@ -615,8 +709,8 @@ export const decideArchiveReviewArtifact = async ({
   setArchiveQueueBusy(true);
   setChatNotice(null);
   try {
-    const result = await requestArchiveReviewDecision({ artifactFile, actorId, action, notes });
-    const artifacts = await requestArchiveReviewArtifacts();
+    const result = await memoryProvider.decideReview({ artifactFile, actorId, action, notes });
+    const artifacts = await memoryProvider.reviewArtifacts();
     setArchiveReviewArtifacts(artifacts);
     setArchiveReviewDecisionResult(result);
     setChatNotice("Archive review decision recorded.");
@@ -630,6 +724,7 @@ export const decideArchiveReviewArtifact = async ({
 export const promoteArchiveReviewArtifact = async ({
   artifactFile,
   actorId,
+  memoryProvider = livingArchiveMemoryProvider(),
   setChatNotice,
   setArchiveQueueBusy,
   setArchiveReviewArtifacts,
@@ -639,8 +734,8 @@ export const promoteArchiveReviewArtifact = async ({
   setArchiveQueueBusy(true);
   setChatNotice(null);
   try {
-    const result = await requestArchivePromoteReviewArtifact({ artifactFile, actorId });
-    const artifacts = await requestArchiveReviewArtifacts();
+    const result = await memoryProvider.promoteReviewArtifact({ artifactFile, actorId });
+    const artifacts = await memoryProvider.reviewArtifacts();
     setArchiveReviewArtifacts(artifacts);
     setArchivePromotionResult(result);
     setChatNotice(
@@ -650,6 +745,245 @@ export const promoteArchiveReviewArtifact = async ({
     );
   } catch (error) {
     setChatNotice(errorMessageOf(error, "Failed to promote archive review artifact."));
+  } finally {
+    setArchiveQueueBusy(false);
+  }
+};
+
+export const runArchiveMaintenanceCycle = async ({
+  snapshot,
+  memoryProvider = livingArchiveMemoryProvider(),
+  commitReadyState,
+  setProviderDiagnostics,
+  setChatNotice,
+  setArchiveQueueBusy,
+  setArchiveQueue,
+  setArchiveReviewArtifacts,
+  setArchiveProcessResult,
+  setArchivePromotionResult,
+  setArchiveMaintenanceResult,
+  errorMessageOf,
+}: ArchiveMaintenanceCycleControllerInput): Promise<void> => {
+  const { state } = snapshot;
+
+  setArchiveQueueBusy(true);
+  setChatNotice(null);
+  try {
+    if (!memoryProvider.maintenanceCycle) {
+      throw new Error("The active memory provider does not expose a maintenance-cycle operation.");
+    }
+
+    let routedState = state;
+    try {
+      const reports = await requestProviderDiagnostics();
+      setProviderDiagnostics(reports);
+      routedState = applyProviderDiagnostics(state, reports);
+      commitReadyState(routedState);
+    } catch {
+      routedState = state;
+    }
+
+    const route = resolveArchiveIngestRoute(routedState);
+    const provider = route.provider;
+    const runtimeNode = route.runtimeNode;
+    if (!provider || !runtimeNode || !route.model) {
+      throw new Error(
+        route.decision.resolutionReason === "no-viable-route"
+          ? "No live archive ingest route is currently available under the agreed strategy."
+          : "Archive maintenance route is missing provider or runtime details.",
+      );
+    }
+    credentialReady(provider);
+    const verifier = verifierRouteInput(routedState);
+
+    const result = await memoryProvider.maintenanceCycle({
+      providerId: provider.id,
+      providerType: provider.providerType,
+      apiBaseUrl: runtimeNode.endpoint ?? provider.apiBaseUrl,
+      runtimeNodeId: runtimeNode.id,
+      runtimeNodeKind: runtimeNode.kind,
+      runtimeNodeEndpoint: runtimeNode.endpoint,
+      authTier: route.decision.authTier,
+      model: route.model,
+      ...verifier,
+      maxRequests: 3,
+      autoPromote: true,
+      actorId: "archive-maintenance.ai",
+    });
+
+    const [queue, artifacts] = await Promise.all([memoryProvider.reviewQueue(), memoryProvider.reviewArtifacts()]);
+    setArchiveQueue(queue);
+    setArchiveReviewArtifacts(artifacts);
+    setArchiveMaintenanceResult(result);
+    setArchiveProcessResult(result.processed.at(-1) ?? null);
+    setArchivePromotionResult(result.promoted.at(-1) ?? null);
+    setChatNotice(
+      `Archive maintenance finished: ${result.processed.length} processed, ${result.promoted.length} promoted, index/log refreshed.`,
+    );
+  } catch (error) {
+    setChatNotice(errorMessageOf(error, "Failed to run Living Archive maintenance."));
+  } finally {
+    setArchiveQueueBusy(false);
+  }
+};
+
+export const runArchiveBackgroundCycle = async ({
+  snapshot,
+  memoryProvider = livingArchiveMemoryProvider(),
+  commitReadyState,
+  setProviderDiagnostics,
+  setChatNotice,
+  setArchiveQueueBusy,
+  setArchiveQueue,
+  setArchiveReviewArtifacts,
+  setArchiveProcessResult,
+  setArchivePromotionResult,
+  setArchiveMaintenanceResult,
+  setArchiveSourceScanResult,
+  setArchiveBackgroundResult,
+  errorMessageOf,
+}: ArchiveBackgroundCycleControllerInput): Promise<void> => {
+  const { state } = snapshot;
+
+  setArchiveQueueBusy(true);
+  setChatNotice(null);
+  try {
+    let routedState = state;
+    try {
+      const reports = await requestProviderDiagnostics();
+      setProviderDiagnostics(reports);
+      routedState = applyProviderDiagnostics(state, reports);
+      commitReadyState(routedState);
+    } catch {
+      routedState = state;
+    }
+
+    const route = resolveArchiveIngestRoute(routedState);
+    const provider = route.provider;
+    const runtimeNode = route.runtimeNode;
+    if (!provider || !runtimeNode || !route.model) {
+      throw new Error(
+        route.decision.resolutionReason === "no-viable-route"
+          ? "No live archive ingest route is currently available under the agreed strategy."
+          : "Archive background route is missing provider or runtime details.",
+      );
+    }
+    credentialReady(provider);
+    const verifier = verifierRouteInput(routedState);
+
+    const input = {
+      providerId: provider.id,
+      providerType: provider.providerType,
+      apiBaseUrl: runtimeNode.endpoint ?? provider.apiBaseUrl,
+      runtimeNodeId: runtimeNode.id,
+      runtimeNodeKind: runtimeNode.kind,
+      runtimeNodeEndpoint: runtimeNode.endpoint,
+      authTier: route.decision.authTier,
+      model: route.model,
+      ...verifier,
+      maxRequests: 3,
+      autoPromote: true,
+      actorId: "archive-background-sync.core",
+    };
+    const result = memoryProvider.backgroundCycle
+      ? await memoryProvider.backgroundCycle(input)
+      : await requestArchiveBackgroundCycle(input);
+
+    const [queue, artifacts] = await Promise.all([memoryProvider.reviewQueue(), memoryProvider.reviewArtifacts()]);
+    setArchiveQueue(queue);
+    setArchiveReviewArtifacts(artifacts);
+    setArchiveSourceScanResult?.(result.scan);
+    setArchiveMaintenanceResult(result.maintenance);
+    setArchiveProcessResult(result.maintenance.processed.at(-1) ?? null);
+    setArchivePromotionResult(result.maintenance.promoted.at(-1) ?? null);
+    setArchiveBackgroundResult?.(result);
+    setChatNotice(
+      `Archive background cycle finished: ${result.scan.newFiles} new, ${result.scan.changedFiles} changed, ${result.queuedRequestFiles.length} queued, ${result.maintenance.promoted.length} promoted.`,
+    );
+  } catch (error) {
+    setChatNotice(errorMessageOf(error, "Failed to run Living Archive background cycle."));
+  } finally {
+    setArchiveQueueBusy(false);
+  }
+};
+
+export const runArchiveLint = async ({
+  memoryProvider = livingArchiveMemoryProvider(),
+  setChatNotice,
+  setArchiveQueueBusy,
+  setArchiveLintResult,
+  errorMessageOf,
+}: ArchiveLintControllerInput): Promise<void> => {
+  setArchiveQueueBusy(true);
+  setChatNotice(null);
+  try {
+    const result = memoryProvider.lint ? await memoryProvider.lint() : await requestArchiveLint();
+    setArchiveLintResult(result);
+    setChatNotice(`Archive lint finished: ${result.findings.length} finding(s), report written.`);
+  } catch (error) {
+    setChatNotice(errorMessageOf(error, "Failed to run Living Archive lint."));
+  } finally {
+    setArchiveQueueBusy(false);
+  }
+};
+
+export const runArchiveSemanticLint = async ({
+  snapshot,
+  memoryProvider = livingArchiveMemoryProvider(),
+  commitReadyState,
+  setProviderDiagnostics,
+  setChatNotice,
+  setArchiveQueueBusy,
+  setArchiveSemanticLintResult,
+  errorMessageOf,
+}: ArchiveSemanticLintControllerInput): Promise<void> => {
+  const { state } = snapshot;
+
+  setArchiveQueueBusy(true);
+  setChatNotice(null);
+  try {
+    let routedState = state;
+    try {
+      const reports = await requestProviderDiagnostics();
+      setProviderDiagnostics(reports);
+      routedState = applyProviderDiagnostics(state, reports);
+      commitReadyState(routedState);
+    } catch {
+      routedState = state;
+    }
+
+    const route = resolveArchiveIngestRoute(routedState);
+    const provider = route.provider;
+    const runtimeNode = route.runtimeNode;
+    if (!provider || !runtimeNode || !route.model) {
+      throw new Error(
+        route.decision.resolutionReason === "no-viable-route"
+          ? "No live archive semantic lint route is currently available under the agreed strategy."
+          : "Archive semantic lint route is missing provider or runtime details.",
+      );
+    }
+    if (provider.providerType !== "local" && provider.credentialStatus !== "configured") {
+      throw new Error(`${provider.label} credential missing. Add it in Settings > Provider Profiles.`);
+    }
+
+    const input = {
+      providerId: provider.id,
+      providerType: provider.providerType,
+      apiBaseUrl: runtimeNode.endpoint ?? provider.apiBaseUrl,
+      runtimeNodeId: runtimeNode.id,
+      runtimeNodeKind: runtimeNode.kind,
+      runtimeNodeEndpoint: runtimeNode.endpoint,
+      authTier: route.decision.authTier,
+      model: route.model,
+      maxCandidates: 6,
+    };
+    const result = memoryProvider.semanticLint
+      ? await memoryProvider.semanticLint(input)
+      : await requestArchiveSemanticLint(input);
+    setArchiveSemanticLintResult(result);
+    setChatNotice(`Semantic archive lint finished: ${result.findings.length} finding(s), ${result.candidatesReviewed} candidate(s) reviewed.`);
+  } catch (error) {
+    setChatNotice(errorMessageOf(error, "Failed to run Living Archive semantic lint."));
   } finally {
     setArchiveQueueBusy(false);
   }

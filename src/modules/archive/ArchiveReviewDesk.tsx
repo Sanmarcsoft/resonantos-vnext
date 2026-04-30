@@ -2,6 +2,7 @@
 // Intent citation: docs/architecture/ADR-011-living-archive-host-service.md
 
 import type {
+  ArchiveMaintenanceCycleResult,
   ArchivePromoteReviewArtifactResult,
   ArchiveProcessIngestResult,
   ArchiveQueuedIngestRequest,
@@ -17,12 +18,16 @@ type ArchiveReviewDeskProps = {
   archiveProcessResult: ArchiveProcessIngestResult | null;
   archiveReviewDecisionResult: ArchiveReviewDecisionResult | null;
   archivePromotionResult: ArchivePromoteReviewArtifactResult | null;
+  archiveMaintenanceResult: ArchiveMaintenanceCycleResult | null;
+  autoMaintenanceEnabled: boolean;
   onRefreshArchiveQueue: () => void;
   onProcessArchiveRequest: (requestFile: string) => void;
   onApproveReviewArtifact: (artifactFile: string) => void;
   onEscalateReviewArtifact: (artifactFile: string) => void;
   onRejectReviewArtifact: (artifactFile: string) => void;
   onPromoteReviewArtifact: (artifactFile: string) => void;
+  onToggleAutoMaintenance: () => void;
+  onRunArchiveMaintenance: () => void;
 };
 
 type ProposedPagePreview = {
@@ -56,12 +61,16 @@ export function ArchiveReviewDesk({
   archiveProcessResult,
   archiveReviewDecisionResult,
   archivePromotionResult,
+  archiveMaintenanceResult,
+  autoMaintenanceEnabled,
   onRefreshArchiveQueue,
   onProcessArchiveRequest,
   onApproveReviewArtifact,
   onEscalateReviewArtifact,
   onRejectReviewArtifact,
   onPromoteReviewArtifact,
+  onToggleAutoMaintenance,
+  onRunArchiveMaintenance,
 }: ArchiveReviewDeskProps) {
   const pendingArtifacts = archiveReviewArtifacts.filter((artifact) => artifact.decision.status === "pending").length;
   const approvedArtifacts = archiveReviewArtifacts.filter((artifact) => artifact.decision.status === "approved").length;
@@ -73,9 +82,17 @@ export function ArchiveReviewDesk({
         title="Ingest Review Desk"
         subtitle="Turn raw intake into trusted wiki knowledge through the Strategist-owned review path."
         actions={
-          <button type="button" className="button-secondary touch-action" onClick={onRefreshArchiveQueue} disabled={archiveQueueBusy}>
-            {archiveQueueBusy ? "Refreshing..." : "Refresh Queue"}
-          </button>
+          <div className="archive-review-hero-actions">
+            <button type="button" className="button-primary touch-action" onClick={onRunArchiveMaintenance} disabled={archiveQueueBusy}>
+              {archiveQueueBusy ? "Synchronising..." : "Run Full Archive Sync"}
+            </button>
+            <button type="button" className="button-secondary touch-action" onClick={onToggleAutoMaintenance}>
+              {autoMaintenanceEnabled ? "Auto On" : "Auto Off"}
+            </button>
+            <button type="button" className="button-secondary touch-action" onClick={onRefreshArchiveQueue} disabled={archiveQueueBusy}>
+              {archiveQueueBusy ? "Refreshing..." : "Refresh Queue"}
+            </button>
+          </div>
         }
       >
         <div className="archive-review-stats" aria-label="Archive review status">
@@ -88,7 +105,23 @@ export function ArchiveReviewDesk({
           <li>Process into review artifact</li>
           <li>Approve, reject, or escalate</li>
           <li>Promote approved pages to the trusted wiki</li>
+          <li>Regenerate wiki index.md and log.md</li>
         </ol>
+        {archiveMaintenanceResult ? (
+          <div className="archive-maintenance-summary" role="status">
+            <strong>Last maintenance cycle</strong>
+            <p>
+              {archiveMaintenanceResult.processed.length} processed · {archiveMaintenanceResult.promoted.length} promoted ·{" "}
+              {archiveMaintenanceResult.navigation.pagesIndexed} indexed ·{" "}
+              {archiveMaintenanceResult.navigation.activityEntries} log entries
+            </p>
+            <p className="mono-inline">{archiveMaintenanceResult.navigation.indexPath}</p>
+          </div>
+        ) : null}
+        <div className="inline-notice">
+          Auto sync is opt-in because provider usage can cost money. When enabled, ResonantOS periodically scans connected source
+          folders, queues new or changed files, verifier-approves routine artifacts, promotes approved pages, and refreshes wiki navigation while the app is open.
+        </div>
       </Panel>
 
       <Panel title="Queue" subtitle="Sources wait here before the ingest model turns them into reviewable knowledge proposals.">

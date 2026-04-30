@@ -34,6 +34,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["../docs"]
+    "resources": [
+      "../docs",
+      "../addons/resonant-browser-host",
+      "../build/native-browser"
+    ]
   }
 }

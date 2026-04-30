@@ -444,6 +444,18 @@ export const agents: AgentDefinition[] = [
     canWriteKnowledgePages: true,
     channelIds: [],
   },
+  {
+    id: "hermes.agent",
+    displayName: "Hermes",
+    trustTier: "addon",
+    workspaceBehavior: "delegated",
+    providerProfileId: "shared-minimax",
+    fallbackProviderProfileId: "shared-local",
+    archiveReadScopes: ["living-archive/context"],
+    archiveIntakeWriteScopes: ["LivingArchive/INTAKE/hermes"],
+    canWriteKnowledgePages: false,
+    channelIds: ["desktop-hermes"],
+  },
 ];
 
 export const channels: ChannelDefinition[] = [
@@ -502,6 +514,17 @@ export const channels: ChannelDefinition[] = [
     workspaceId: "workspace-field",
     metadata: { botName: "augmentor_field", route: "field-capture" },
   },
+  {
+    id: "desktop-hermes",
+    type: "desktop",
+    label: "Hermes",
+    owningAgentId: "hermes.agent",
+    strategistIdentityId: "strategist.identity",
+    enabled: false,
+    sessionMode: "isolated-session",
+    workspaceId: "workspace-hermes",
+    metadata: { surface: "hermes-addon", addonId: "addon.hermes" },
+  },
 ];
 
 export const workspaces: WorkspaceDefinition[] = [
@@ -544,6 +567,16 @@ export const workspaces: WorkspaceDefinition[] = [
     sharedArtifacts: true,
     surfaces: ["telegram-capture", "archive-intake"],
     channelIds: ["telegram-field"],
+  },
+  {
+    id: "workspace-hermes",
+    kind: "delegated",
+    owningEntityId: "hermes.agent",
+    title: "Hermes Integration",
+    visibility: "user-facing",
+    sharedArtifacts: false,
+    surfaces: ["chat", "delegation", "compatibility-audit"],
+    channelIds: ["desktop-hermes"],
   },
 ];
 
@@ -774,6 +807,7 @@ export const buildDefaultState = (manifests: AddOnManifest[]): ResonantShellStat
       workspaceLayout: "main-chat",
       chatHistoryOpen: false,
       chatSidebarWidth: 520,
+      recommendedAddOnsReviewed: false,
       windowZoom: 1,
       browserWorkspace: {
         activeTabId: "tab-1",

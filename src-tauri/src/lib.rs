@@ -1,7 +1,9 @@
 mod archive_service;
 mod browser_host_service;
+mod browser_native_service;
 mod browser_service;
 mod delegation_service;
+mod hermes_service;
 mod host_state;
 mod obsidian_service;
 mod opencode_service;
@@ -15,61 +17,84 @@ use std::fs;
 use std::path::PathBuf;
 
 use serde_json::Value;
-use tauri::{AppHandle, Window};
+use tauri::{AppHandle, Emitter, Window};
 
 use crate::archive_service::{
     archive_system_memory_status, build_archive_tol_bundle, decide_archive_review_artifact,
-    import_archive_library, list_archive_ingest_requests, list_archive_review_artifacts,
-    list_archive_tol_bundle_candidates, list_imported_archive_libraries,
-    preflight_archive_library_import, process_archive_ingest_request,
-    promote_archive_review_artifact, query_archive_runtime_status, queue_archive_ingest_request,
-    read_archive_document, read_archive_library_classification_review,
-    refresh_archive_system_memory, scan_archive_source_folders, search_archive,
+    import_archive_library, lint_archive, list_archive_ingest_requests,
+    list_archive_review_artifacts, list_archive_tol_bundle_candidates,
+    list_imported_archive_libraries, preflight_archive_library_import,
+    process_archive_ingest_request, promote_archive_review_artifact, query_archive_runtime_status,
+    queue_archive_ingest_request, read_archive_document,
+    read_archive_library_classification_review, refresh_archive_system_memory,
+    refresh_archive_wiki_navigation, run_archive_background_cycle, run_archive_maintenance_cycle,
+    scan_archive_source_folders, search_archive, semantic_lint_archive,
     write_archive_intake_artifact, write_archive_library_reorganisation_plan,
-    ArchiveDocumentPayload, ArchiveImportedLibrarySummary, ArchiveIngestRequestRecord,
-    ArchiveIngestRequestResult, ArchiveIntakeWriteRequest, ArchiveIntakeWriteResult,
-    ArchiveLibraryClassificationReview, ArchiveLibraryClassificationReviewRequest,
-    ArchiveLibraryImportRequest, ArchiveLibraryImportResult, ArchiveLibraryPreflightRequest,
-    ArchiveLibraryPreflightResult, ArchiveLibraryReorganisationPlan,
-    ArchiveLibraryReorganisationPlanRequest, ArchiveProcessIngestRequest,
+    ArchiveBackgroundCycleRequest, ArchiveBackgroundCycleResult, ArchiveDocumentPayload,
+    ArchiveImportedLibrarySummary, ArchiveIngestRequestRecord, ArchiveIngestRequestResult,
+    ArchiveIntakeWriteRequest, ArchiveIntakeWriteResult, ArchiveLibraryClassificationReview,
+    ArchiveLibraryClassificationReviewRequest, ArchiveLibraryImportRequest,
+    ArchiveLibraryImportResult, ArchiveLibraryPreflightRequest, ArchiveLibraryPreflightResult,
+    ArchiveLibraryReorganisationPlan, ArchiveLibraryReorganisationPlanRequest, ArchiveLintResult,
+    ArchiveMaintenanceCycleRequest, ArchiveMaintenanceCycleResult, ArchiveProcessIngestRequest,
     ArchiveProcessIngestResult, ArchivePromoteReviewArtifactRequest,
     ArchivePromoteReviewArtifactResult, ArchiveQueuedIngestRequest, ArchiveReadDocumentRequest,
     ArchiveReviewArtifact, ArchiveReviewDecisionRequest, ArchiveReviewDecisionResult,
-    ArchiveRuntimeStatus, ArchiveSearchRequest, ArchiveSearchResult,
-    ArchiveSourceFolderScanRequest, ArchiveSourceFolderScanResult,
+    ArchiveRuntimeStatus, ArchiveSearchRequest, ArchiveSearchResult, ArchiveSemanticLintRequest,
+    ArchiveSemanticLintResult, ArchiveSourceFolderScanRequest, ArchiveSourceFolderScanResult,
     ArchiveSystemMemoryRefreshResult, ArchiveSystemMemoryStatus, ArchiveTolBundleBuildRequest,
-    ArchiveTolBundleBuildResult, ArchiveTolBundleCandidate,
+    ArchiveTolBundleBuildResult, ArchiveTolBundleCandidate, ArchiveWikiNavigationRefreshResult,
 };
 use crate::browser_host_service::{
-    browser_host_required_capabilities, execute_browser_host_command, BrowserHostCommandRequest,
+    browser_host_required_capabilities, execute_browser_host_command,
+    execute_browser_visible_host_command, BrowserHostCommandRequest,
+};
+use crate::browser_native_service::{
+    execute_native_browser_embedded_hide, execute_native_browser_embedded_resize,
+    execute_native_browser_embedded_show, prepare_native_browser_application_if_available,
+    query_native_browser_attach_smoke, query_native_browser_bridge_probe,
+    query_native_browser_probe, NativeBrowserAttachSmokeRequest, NativeBrowserAttachSmokeResult,
+    NativeBrowserBridgeProbeRequest, NativeBrowserBridgeProbeResult, NativeBrowserProbeRequest,
+    NativeBrowserProbeResult,
 };
 use crate::browser_service::{
-    execute_browser_close_session, execute_browser_native_webview_hide,
-    execute_browser_native_webview_resize, execute_browser_native_webview_show,
-    execute_browser_open_url, execute_browser_session_click, execute_browser_session_open_url,
-    execute_browser_session_read_page, execute_browser_session_screenshot,
-    execute_browser_session_scroll, execute_browser_start_session, install_browser_engine,
-    query_browser_engine_status, BrowserCloseSessionResult, BrowserEngineInstallResult,
-    BrowserEngineStatus, BrowserInteractionRequest, BrowserInteractionResult,
-    BrowserNativeWebviewBoundsRequest, BrowserNativeWebviewRequest, BrowserNativeWebviewResult,
-    BrowserOpenUrlRequest, BrowserOpenUrlResult, BrowserReadPageResult, BrowserSessionIdRequest,
-    BrowserSessionRequest,
+    execute_browser_close_session, execute_browser_open_url, execute_browser_session_click,
+    execute_browser_session_open_url, execute_browser_session_read_page,
+    execute_browser_session_screenshot, execute_browser_session_scroll,
+    execute_browser_start_session, install_browser_engine, query_browser_engine_status,
+    BrowserCloseSessionResult, BrowserEngineInstallResult, BrowserEngineStatus,
+    BrowserInteractionRequest, BrowserInteractionResult, BrowserNativeWebviewBoundsRequest,
+    BrowserNativeWebviewRequest, BrowserNativeWebviewResult, BrowserOpenUrlRequest,
+    BrowserOpenUrlResult, BrowserReadPageResult, BrowserSessionIdRequest, BrowserSessionRequest,
+};
+#[cfg(not(target_os = "macos"))]
+use crate::browser_service::{
+    execute_browser_native_webview_hide, execute_browser_native_webview_resize,
+    execute_browser_native_webview_show,
 };
 use crate::delegation_service::{
     create_task_workspace, finish_task_workspace, list_task_workspaces, read_task_workspace,
     CreateTaskWorkspaceRequest, FinishTaskWorkspaceRequest, FinishTaskWorkspaceResult,
     ReadTaskWorkspaceRequest, TaskWorkspacePayload, TaskWorkspaceRecord,
 };
+use crate::hermes_service::{
+    execute_hermes_chat, query_hermes_status, HermesChatRequest, HermesChatResult,
+    HermesInstallStatus,
+};
 use crate::host_state::{
-    addons_dir, assert_addon_capabilities, read_provider_secrets, read_runtime_state_value,
-    state_file, validate_manifest, write_provider_secrets,
+    addons_dir, assert_addon_capabilities, assert_living_archive_host_access,
+    read_provider_secrets, read_runtime_state_value, state_file, validate_manifest,
+    write_provider_secrets,
 };
 use crate::obsidian_service::{
-    index_obsidian_vault, list_obsidian_notes, open_obsidian_note, query_obsidian_vault_status,
-    read_obsidian_note, write_obsidian_note, ObsidianListNotesRequest, ObsidianNotePayload,
-    ObsidianNoteSummary, ObsidianOpenNoteRequest, ObsidianOpenNoteResult, ObsidianReadNoteRequest,
-    ObsidianVaultIndex, ObsidianVaultIndexRequest, ObsidianVaultRequest, ObsidianVaultStatus,
-    ObsidianWriteNoteRequest, ObsidianWriteNoteResult,
+    archive_obsidian_note, create_obsidian_folder, create_obsidian_note, index_obsidian_vault,
+    list_obsidian_notes, move_obsidian_note, open_obsidian_note, query_obsidian_vault_status,
+    read_obsidian_note, write_obsidian_note, ObsidianArchiveNoteRequest,
+    ObsidianCreateFolderRequest, ObsidianCreateNoteRequest, ObsidianListNotesRequest,
+    ObsidianMoveNoteRequest, ObsidianNoteOperationResult, ObsidianNotePayload, ObsidianNoteSummary,
+    ObsidianOpenNoteRequest, ObsidianOpenNoteResult, ObsidianReadNoteRequest, ObsidianVaultIndex,
+    ObsidianVaultIndexRequest, ObsidianVaultRequest, ObsidianVaultStatus, ObsidianWriteNoteRequest,
+    ObsidianWriteNoteResult,
 };
 use crate::opencode_service::{
     query_opencode_status, start_opencode_service, stop_opencode_service, OpenCodeServiceResult,
@@ -104,6 +129,8 @@ fn save_runtime_state(app: AppHandle, state: Value) -> Result<Value, String> {
     let payload = serde_json::to_string_pretty(&state)
         .map_err(|error| format!("Failed to encode runtime state: {error}"))?;
     fs::write(&path, payload).map_err(|error| format!("Failed to write runtime state: {error}"))?;
+    app.emit("runtime-state-updated", state.clone())
+        .map_err(|error| format!("Failed to broadcast runtime state update: {error}"))?;
     Ok(state)
 }
 
@@ -219,6 +246,7 @@ fn local_runtime_status(target_model: Option<String>) -> LocalRuntimeStatus {
 
 #[tauri::command]
 fn archive_runtime_status(app: AppHandle) -> Result<ArchiveRuntimeStatus, String> {
+    assert_living_archive_host_access(&app, &[])?;
     query_archive_runtime_status(&app)
 }
 
@@ -227,6 +255,7 @@ fn archive_scan_source_folders(
     app: AppHandle,
     request: ArchiveSourceFolderScanRequest,
 ) -> Result<ArchiveSourceFolderScanResult, String> {
+    assert_living_archive_host_access(&app, &["filesystem"])?;
     scan_archive_source_folders(&app, request)
 }
 
@@ -235,6 +264,7 @@ fn archive_import_library(
     app: AppHandle,
     request: ArchiveLibraryImportRequest,
 ) -> Result<ArchiveLibraryImportResult, String> {
+    assert_living_archive_host_access(&app, &["filesystem", "archive-intake-write"])?;
     import_archive_library(&app, request)
 }
 
@@ -243,6 +273,7 @@ fn archive_preflight_library_import(
     app: AppHandle,
     request: ArchiveLibraryPreflightRequest,
 ) -> Result<ArchiveLibraryPreflightResult, String> {
+    assert_living_archive_host_access(&app, &["filesystem"])?;
     preflight_archive_library_import(&app, request)
 }
 
@@ -250,6 +281,7 @@ fn archive_preflight_library_import(
 fn archive_imported_libraries(
     app: AppHandle,
 ) -> Result<Vec<ArchiveImportedLibrarySummary>, String> {
+    assert_living_archive_host_access(&app, &[])?;
     list_imported_archive_libraries(&app)
 }
 
@@ -258,6 +290,7 @@ fn archive_library_classification_review(
     app: AppHandle,
     request: ArchiveLibraryClassificationReviewRequest,
 ) -> Result<ArchiveLibraryClassificationReview, String> {
+    assert_living_archive_host_access(&app, &["archive-read"])?;
     read_archive_library_classification_review(&app, request)
 }
 
@@ -266,11 +299,13 @@ fn archive_library_reorganisation_plan(
     app: AppHandle,
     request: ArchiveLibraryReorganisationPlanRequest,
 ) -> Result<ArchiveLibraryReorganisationPlan, String> {
+    assert_living_archive_host_access(&app, &["archive-read"])?;
     write_archive_library_reorganisation_plan(&app, request)
 }
 
 #[tauri::command]
 fn archive_system_memory(app: AppHandle) -> Result<ArchiveSystemMemoryStatus, String> {
+    assert_living_archive_host_access(&app, &["archive-read"])?;
     archive_system_memory_status(&app)
 }
 
@@ -278,6 +313,7 @@ fn archive_system_memory(app: AppHandle) -> Result<ArchiveSystemMemoryStatus, St
 fn archive_refresh_system_memory(
     app: AppHandle,
 ) -> Result<ArchiveSystemMemoryRefreshResult, String> {
+    assert_living_archive_host_access(&app, &["filesystem", "archive-read"])?;
     refresh_archive_system_memory(&app)
 }
 
@@ -286,6 +322,7 @@ fn archive_search(
     app: AppHandle,
     request: ArchiveSearchRequest,
 ) -> Result<ArchiveSearchResult, String> {
+    assert_living_archive_host_access(&app, &["archive-read"])?;
     search_archive(&app, request)
 }
 
@@ -294,6 +331,7 @@ fn archive_read_document(
     app: AppHandle,
     request: ArchiveReadDocumentRequest,
 ) -> Result<ArchiveDocumentPayload, String> {
+    assert_living_archive_host_access(&app, &["archive-read"])?;
     read_archive_document(&app, request)
 }
 
@@ -326,6 +364,42 @@ fn obsidian_write_note(
 ) -> Result<ObsidianWriteNoteResult, String> {
     assert_addon_capabilities(&app, "addon.obsidian", &["filesystem"])?;
     write_obsidian_note(request)
+}
+
+#[tauri::command]
+fn obsidian_create_note(
+    app: AppHandle,
+    request: ObsidianCreateNoteRequest,
+) -> Result<ObsidianNoteOperationResult, String> {
+    assert_addon_capabilities(&app, "addon.obsidian", &["filesystem"])?;
+    create_obsidian_note(request)
+}
+
+#[tauri::command]
+fn obsidian_create_folder(
+    app: AppHandle,
+    request: ObsidianCreateFolderRequest,
+) -> Result<ObsidianNoteOperationResult, String> {
+    assert_addon_capabilities(&app, "addon.obsidian", &["filesystem"])?;
+    create_obsidian_folder(request)
+}
+
+#[tauri::command]
+fn obsidian_move_note(
+    app: AppHandle,
+    request: ObsidianMoveNoteRequest,
+) -> Result<ObsidianNoteOperationResult, String> {
+    assert_addon_capabilities(&app, "addon.obsidian", &["filesystem"])?;
+    move_obsidian_note(request)
+}
+
+#[tauri::command]
+fn obsidian_archive_note(
+    app: AppHandle,
+    request: ObsidianArchiveNoteRequest,
+) -> Result<ObsidianNoteOperationResult, String> {
+    assert_addon_capabilities(&app, "addon.obsidian", &["filesystem"])?;
+    archive_obsidian_note(request)
 }
 
 #[tauri::command]
@@ -437,8 +511,19 @@ fn browser_host_command(
 }
 
 #[tauri::command]
+fn browser_visible_host_command(
+    app: AppHandle,
+    request: BrowserHostCommandRequest,
+) -> Result<Value, String> {
+    let required = browser_host_required_capabilities(&request.method)?;
+    assert_addon_capabilities(&app, "addon.browser", &required)?;
+    execute_browser_visible_host_command(&app, request)
+}
+
+#[tauri::command]
 fn browser_native_webview_show(
     app: AppHandle,
+    window: Window,
     request: BrowserNativeWebviewRequest,
 ) -> Result<BrowserNativeWebviewResult, String> {
     assert_addon_capabilities(
@@ -446,7 +531,17 @@ fn browser_native_webview_show(
         "addon.browser",
         &["network", "ui-embedding", "browser-control"],
     )?;
-    execute_browser_native_webview_show(&app, request)
+    #[cfg(target_os = "macos")]
+    {
+        let parent = window
+            .ns_view()
+            .map_err(|error| format!("Native Browser parent NSView unavailable: {error}"))?;
+        execute_native_browser_embedded_show(parent.cast(), request)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        execute_browser_native_webview_show(&app, request)
+    }
 }
 
 #[tauri::command]
@@ -455,18 +550,112 @@ fn browser_native_webview_resize(
     request: BrowserNativeWebviewBoundsRequest,
 ) -> Result<BrowserNativeWebviewResult, String> {
     assert_addon_capabilities(&app, "addon.browser", &["ui-embedding", "browser-control"])?;
-    execute_browser_native_webview_resize(&app, request)
+    #[cfg(target_os = "macos")]
+    {
+        execute_native_browser_embedded_resize(request)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        execute_browser_native_webview_resize(&app, request)
+    }
 }
 
 #[tauri::command]
 fn browser_native_webview_hide(app: AppHandle) -> Result<BrowserNativeWebviewResult, String> {
     assert_addon_capabilities(&app, "addon.browser", &["ui-embedding", "browser-control"])?;
-    execute_browser_native_webview_hide(&app)
+    #[cfg(target_os = "macos")]
+    {
+        execute_native_browser_embedded_hide()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        execute_browser_native_webview_hide(&app)
+    }
+}
+
+#[tauri::command]
+fn browser_native_probe(
+    app: AppHandle,
+    request: NativeBrowserProbeRequest,
+) -> Result<NativeBrowserProbeResult, String> {
+    assert_addon_capabilities(&app, "addon.browser", &["ui-embedding", "browser-control"])?;
+    Ok(query_native_browser_probe(request))
+}
+
+#[tauri::command]
+fn browser_native_attach_smoke(
+    app: AppHandle,
+    window: Window,
+    request: NativeBrowserAttachSmokeRequest,
+) -> Result<NativeBrowserAttachSmokeResult, String> {
+    assert_addon_capabilities(&app, "addon.browser", &["ui-embedding", "browser-control"])?;
+    #[cfg(target_os = "macos")]
+    {
+        let parent_handle_present = window.ns_view().is_ok();
+        Ok(query_native_browser_attach_smoke(
+            request,
+            "macos",
+            "macos-ns-view",
+            parent_handle_present,
+        ))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Ok(query_native_browser_attach_smoke(
+            request,
+            "windows",
+            "windows-hwnd",
+            false,
+        ))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Ok(query_native_browser_attach_smoke(
+            request,
+            "linux",
+            "x11-or-wayland-handle",
+            false,
+        ))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        Ok(query_native_browser_attach_smoke(
+            request,
+            std::env::consts::OS,
+            "unsupported-platform-handle",
+            false,
+        ))
+    }
+}
+
+#[tauri::command]
+fn browser_native_bridge_probe(
+    app: AppHandle,
+    request: NativeBrowserBridgeProbeRequest,
+) -> Result<NativeBrowserBridgeProbeResult, String> {
+    assert_addon_capabilities(&app, "addon.browser", &["ui-embedding", "browser-control"])?;
+    Ok(query_native_browser_bridge_probe(request))
 }
 
 #[tauri::command]
 fn opencode_status() -> OpenCodeStatus {
     query_opencode_status()
+}
+
+#[tauri::command]
+fn hermes_status(profile_home: Option<String>) -> HermesInstallStatus {
+    query_hermes_status(profile_home)
+}
+
+#[tauri::command]
+async fn hermes_chat(
+    app: AppHandle,
+    request: HermesChatRequest,
+) -> Result<HermesChatResult, String> {
+    assert_addon_capabilities(&app, "addon.hermes", &["shell"])?;
+    tauri::async_runtime::spawn_blocking(move || execute_hermes_chat(request))
+        .await
+        .map_err(|error| format!("Hermes bridge task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -539,6 +728,7 @@ fn archive_write_intake_artifact(
     app: AppHandle,
     request: ArchiveIntakeWriteRequest,
 ) -> Result<ArchiveIntakeWriteResult, String> {
+    assert_living_archive_host_access(&app, &["archive-intake-write"])?;
     write_archive_intake_artifact(&app, request)
 }
 
@@ -547,21 +737,25 @@ fn archive_request_ingest(
     app: AppHandle,
     request: ArchiveIngestRequestRecord,
 ) -> Result<ArchiveIngestRequestResult, String> {
+    assert_living_archive_host_access(&app, &["archive-intake-write"])?;
     queue_archive_ingest_request(&app, request)
 }
 
 #[tauri::command]
 fn archive_review_queue(app: AppHandle) -> Result<Vec<ArchiveQueuedIngestRequest>, String> {
+    assert_living_archive_host_access(&app, &["archive-read"])?;
     list_archive_ingest_requests(&app)
 }
 
 #[tauri::command]
 fn archive_review_artifacts(app: AppHandle) -> Result<Vec<ArchiveReviewArtifact>, String> {
+    assert_living_archive_host_access(&app, &["archive-read"])?;
     list_archive_review_artifacts(&app)
 }
 
 #[tauri::command]
 fn archive_tol_bundle_candidates(app: AppHandle) -> Result<Vec<ArchiveTolBundleCandidate>, String> {
+    assert_living_archive_host_access(&app, &["archive-read"])?;
     list_archive_tol_bundle_candidates(&app)
 }
 
@@ -570,6 +764,7 @@ fn archive_build_tol_bundle(
     app: AppHandle,
     request: ArchiveTolBundleBuildRequest,
 ) -> Result<ArchiveTolBundleBuildResult, String> {
+    assert_living_archive_host_access(&app, &["archive-intake-write"])?;
     build_archive_tol_bundle(&app, request)
 }
 
@@ -578,7 +773,26 @@ async fn archive_process_ingest_request(
     app: AppHandle,
     request: ArchiveProcessIngestRequest,
 ) -> Result<ArchiveProcessIngestResult, String> {
+    assert_living_archive_host_access(&app, &["archive-read", "providers"])?;
     process_archive_ingest_request(&app, request).await
+}
+
+#[tauri::command]
+async fn archive_maintenance_cycle(
+    app: AppHandle,
+    request: ArchiveMaintenanceCycleRequest,
+) -> Result<ArchiveMaintenanceCycleResult, String> {
+    assert_living_archive_host_access(&app, &["archive-read", "providers", "filesystem"])?;
+    run_archive_maintenance_cycle(&app, request).await
+}
+
+#[tauri::command]
+async fn archive_background_cycle(
+    app: AppHandle,
+    request: ArchiveBackgroundCycleRequest,
+) -> Result<ArchiveBackgroundCycleResult, String> {
+    assert_living_archive_host_access(&app, &["archive-read", "providers", "filesystem"])?;
+    run_archive_background_cycle(&app, request).await
 }
 
 #[tauri::command]
@@ -586,6 +800,7 @@ fn archive_review_decision(
     app: AppHandle,
     request: ArchiveReviewDecisionRequest,
 ) -> Result<ArchiveReviewDecisionResult, String> {
+    assert_living_archive_host_access(&app, &["archive-read"])?;
     decide_archive_review_artifact(&app, request)
 }
 
@@ -594,7 +809,31 @@ fn archive_promote_review_artifact(
     app: AppHandle,
     request: ArchivePromoteReviewArtifactRequest,
 ) -> Result<ArchivePromoteReviewArtifactResult, String> {
+    assert_living_archive_host_access(&app, &["archive-read", "filesystem"])?;
     promote_archive_review_artifact(&app, request)
+}
+
+#[tauri::command]
+fn archive_refresh_wiki_navigation(
+    app: AppHandle,
+) -> Result<ArchiveWikiNavigationRefreshResult, String> {
+    assert_living_archive_host_access(&app, &["archive-read", "filesystem"])?;
+    refresh_archive_wiki_navigation(&app)
+}
+
+#[tauri::command]
+fn archive_lint(app: AppHandle) -> Result<ArchiveLintResult, String> {
+    assert_living_archive_host_access(&app, &["archive-read", "filesystem"])?;
+    lint_archive(&app)
+}
+
+#[tauri::command]
+async fn archive_semantic_lint(
+    app: AppHandle,
+    request: ArchiveSemanticLintRequest,
+) -> Result<ArchiveSemanticLintResult, String> {
+    assert_living_archive_host_access(&app, &["archive-read", "providers", "filesystem"])?;
+    semantic_lint_archive(&app, request).await
 }
 
 #[tauri::command]
@@ -784,6 +1023,7 @@ async fn archive_ingest_probe(
 }
 
 pub fn run() {
+    let _ = prepare_native_browser_application_if_available();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -814,6 +1054,10 @@ pub fn run() {
             obsidian_read_note,
             obsidian_open_note,
             obsidian_write_note,
+            obsidian_create_note,
+            obsidian_create_folder,
+            obsidian_move_note,
+            obsidian_archive_note,
             obsidian_vault_index,
             browser_engine_status,
             browser_install_engine,
@@ -826,9 +1070,15 @@ pub fn run() {
             browser_session_scroll,
             browser_close_session,
             browser_host_command,
+            browser_visible_host_command,
             browser_native_webview_show,
             browser_native_webview_resize,
             browser_native_webview_hide,
+            browser_native_probe,
+            browser_native_attach_smoke,
+            browser_native_bridge_probe,
+            hermes_status,
+            hermes_chat,
             opencode_status,
             opencode_start_service,
             opencode_stop_service,
@@ -845,8 +1095,13 @@ pub fn run() {
             archive_tol_bundle_candidates,
             archive_build_tol_bundle,
             archive_process_ingest_request,
+            archive_maintenance_cycle,
+            archive_background_cycle,
             archive_review_decision,
             archive_promote_review_artifact,
+            archive_refresh_wiki_navigation,
+            archive_lint,
+            archive_semantic_lint,
             engineer_recovery_turn,
             recovery_route_candidates,
             provider_diagnostics,

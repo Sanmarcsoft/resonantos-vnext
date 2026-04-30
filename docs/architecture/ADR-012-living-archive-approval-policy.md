@@ -13,13 +13,13 @@ The approval tiers are:
 - `strategist-review`
 - `human-review`
 
-The default approver for trusted archive promotion is the **Strategist**, not the human. Human review is reserved for higher-risk or higher-ambiguity cases.
+The default approver for trusted archive promotion is the **Strategist-owned archive approval path**, not the human. In implementation this path may be performed by an archive verifier model acting under Strategist policy. Human review is reserved for higher-risk or higher-ambiguity cases.
 
 ## Why
 
 - Requiring a human to review every archive write would create too much operational overhead and break the goal of making ResonantOS usable at scale.
 - Allowing every queued ingest result to mutate trusted wiki pages automatically would erode archive quality and trust.
-- The right control point is not “manual or automatic.” It is “who approves at each risk level.”
+- The right control point is not “manual or automatic.” It is “which trusted verifier approves at each risk level.”
 - The archive should stay high-trust while still supporting routine, low-friction ingestion.
 
 ## Rules
@@ -34,6 +34,7 @@ The default approver for trusted archive promotion is the **Strategist**, not th
   - confidence level
   - operation type
 - `strategist-review` is the default tier unless a narrower policy explicitly allows `auto-approve`.
+- `strategist-review` may be completed by an AI verifier operating under the Strategist-owned archive policy.
 - `human-review` is required for high-impact or low-confidence cases.
 - `auto-approve` must be limited to narrow, proven-safe classes of ingest.
 - Approval decisions must be logged with:
@@ -66,14 +67,14 @@ Requirements:
 
 This is the default promotion tier.
 
-The Strategist reviews the review artifact, archive policy, and provenance, then decides whether to:
+The Strategist-owned approval path reviews the review artifact, archive policy, and provenance, then decides whether to:
 
 - approve promotion
 - reject
 - defer for human review
 - request regeneration or clarification
 
-This keeps the human out of most routine archive maintenance while preserving a high-trust gate.
+This keeps the human out of most routine archive maintenance while preserving a high-trust gate. The normal V1 implementation is an AI verifier pass that challenges the ingest draft before promotion. The verifier should be a different role from the ingest writer and may run on a cheaper/local model when the user's provider strategy allows it.
 
 ### `human-review`
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, revised on 2026-04-28.
+Superseded for product Browser engine selection by `ADR-025: Native Embedded Browser Host`.
 
 ## Decision
 
@@ -12,9 +12,7 @@ The Browser add-on must host an interactive Chromium-class browser surface insid
 
 The previous CDP screenshot prototype is explicitly rejected as the Browser UI foundation. It may remain useful only as a narrow evidence-capture or headless-research tool after a live browser exists, but it must not be presented to the user as Resonant Browser.
 
-The immediate visible implementation path is a live center-workspace web frame so the user gets an operable browsing surface now while the add-on remains inside the current Tauri shell. This is an interim user-visible surface, not the final Chromium-class AI-control engine.
-
-The immediate AI-control implementation path is a separate Playwright Chromium host exposed through the add-on SDK's `stdio-json-rpc` service contract. This gives ResonantOS a deterministic browser-control contract for open/read/click/type/evidence capture before the visible shell is wired to the same controlled Chromium session. The final user-visible engine target remains Electron `WebContentsView`/`BrowserWindow` or CEF so the human and AI can operate one shared live Chromium session.
+The product Browser engine path is now governed by ADR-025. Interim web frames, screenshots, and Electron sidecars are not product Browser implementations.
 
 ## Why
 
@@ -29,6 +27,8 @@ ResonantOS currently runs on Tauri. Tauri's primary app surface is the operating
 - Browser must expose a live interactive browser viewport, not a rendered screenshot.
 - Browser must use a Chromium-class engine for the target product unless this ADR is superseded.
 - Interim center-workspace web-frame support is allowed only because it is live and user-operable; it must not be described as the final Chromium engine.
+- Interim browser chrome may include menus, bookmarks, AI Mode, and extension-slot affordances, but it must clearly distinguish unavailable Chromium-only features from working features.
+- Chrome extension installation, pinning, profiles, extension background pages, and extension-store compatibility require the final Chromium BrowserView/CEF host. They must not be presented as fully available on the Tauri OS WebView surface.
 - The Playwright Chromium host is the current audited control foundation, not the final visible browser surface.
 - Until the visible browser and control host share one session, Augmentor may use the host only for delegated browser tasks, not as proof that it controls the user's visible tab.
 - Browser must keep Augmentor available in the right rail unless the user enters a full-screen workspace mode.
@@ -56,6 +56,7 @@ Limits:
 
 - many sites can block embedding or restrict behavior
 - it is not one consistent Chromium automation surface
+- it cannot provide Chrome extension install/pin/profile compatibility
 - it does not expose reliable DOM inspection, CDP, click/type automation, or page-read tooling against the same live session
 - this cannot be the final AI-controlled Browser engine
 
@@ -91,7 +92,7 @@ Rules:
 - Sensitive typing requires explicit human approval.
 - The runner calls a transport abstraction, not Playwright directly. This keeps the add-on host replaceable and prevents UI code from bypassing ResonantOS mediation.
 
-### Preferred V1 Candidate: Electron Browser Add-on Host
+### Rejected Product Path: Electron Browser Add-on Host
 
 Use an Electron-based Browser add-on host with Chromium `BrowserWindow`, `BrowserView`, or `WebContentsView`.
 
@@ -99,6 +100,7 @@ Advantages:
 
 - real Chromium surface
 - mature tab/navigation APIs
+- best path to Chrome extension compatibility, pinned extension UI, profiles, and Chromium menu behavior
 - direct DevTools Protocol access to the same live session
 - strong fit for AI control, page inspection, and automation
 - faster path to the intended product than CEF-native integration
@@ -108,21 +110,31 @@ Tradeoffs:
 - adds a second desktop runtime beside the Tauri shell
 - requires process lifecycle, window/view embedding, packaging, signing, and update policy
 - needs a clear IPC bridge between ResonantOS and the Browser add-on host
+- Electron can load local unpacked extensions, but it does not automatically provide Chrome's full extension toolbar, Chrome Web Store install flow, or pinning UI. ResonantOS must provide its own extension manager and pinned-extension surface.
 
-### Candidate: CEF Child-View Host
+Rejection rule:
 
-Use a Chromium Embedded Framework sidecar or native child-view integration while keeping the Tauri shell.
+- Electron sidecar work may remain as a temporary research harness only.
+- It must not be launched automatically from the Browser workspace.
+- It must not be represented as embedded in ResonantOS.
+- It must not be used to claim Phantom or Bitwarden readiness.
+
+### Selected Product Direction: Native Embedded Chromium Host
+
+Use a native embedded Chromium host while keeping the Tauri shell. The first candidate is CEF with Chrome Runtime enabled, but it is accepted only if Phantom Wallet and Bitwarden pass deterministic compatibility tests.
 
 Advantages:
 
 - keeps the main ResonantOS shell architecture intact
 - can produce a true live Chromium viewport
+- can attach the browser surface to the center workspace instead of opening another app window
 
 Tradeoffs:
 
 - significantly more native integration work
 - more fragile cross-platform packaging
 - higher maintenance burden for macOS, Windows, and Linux
+- CEF extension support is limited and must be tested against Phantom and Bitwarden before building UI on top of it
 
 ### Rejected For Product Browser UI
 
@@ -141,6 +153,7 @@ Browser manifest requirements:
 - optional capability: `archive-intake-write`
 - service: live browser host process, not screenshot-only capture
 - first tools: `browser.open_url`, `browser.read_page`, `browser.click`, `browser.type`, `browser.navigate`, `browser.capture_evidence`, `browser.close_session`
+- extension tools: `browser.extensions.list`, `browser.extensions.load_unpacked`, `browser.extensions.set_pinned`, `browser.extensions.disable`
 - delegation task types: `research`, `browser-inspection`
 - artifact return types: `summary`, `markdown`, `log`, `citation-bundle`, `diagnostic-report`
 
@@ -156,6 +169,17 @@ type LiveBrowserSession = {
   engine: "chromium";
   scale: 1;
   controlMode: "human" | "ai-assisted" | "ai-running";
+};
+
+type BrowserExtensionState = {
+  extensionId: string;
+  name: string;
+  version: string;
+  installed: boolean;
+  pinned: boolean;
+  enabled: boolean;
+  source: "chrome-web-store" | "local-unpacked" | "resonantos-registry";
+  requestedCapabilities: string[];
 };
 
 type BrowserSessionCommand =
@@ -175,6 +199,8 @@ Execution boundary:
 - The Browser add-on host owns the live Chromium surface, tab state, navigation, and page lifecycle.
 - Rust/Tauri owns privileged grants, process lifecycle mediation, secrets, filesystem boundaries, and audit persistence.
 - Agents request browser actions; ResonantOS grants, mediates, logs, and can stop execution.
+- Extension loading is treated as privileged because extensions can observe pages, access storage, and affect authenticated sessions.
+- Extension disable/unpin actions are host-mediated lifecycle controls. Add-ons and agents must not mutate extension state directly.
 
 ## Consequences
 
@@ -182,13 +208,15 @@ Execution boundary:
 - The Browser workspace should use the live center-workspace web frame while the final Chromium engine host is selected and implemented.
 - Building the real Browser is a platform decision, not a cosmetic UI task.
 - Before AI-control implementation resumes, choose either Electron Browser add-on host or CEF child-view host and document the selected packaging/lifecycle path.
-- The likely next implementation path is an Electron Browser add-on host because Electron's `WebContentsView`/Chromium model gives the same live session both a visible browser view and automation/control APIs.
+- ADR-025 chooses the native embedded browser host path and requires extension compatibility proof before product UI expansion.
 
 ## Current Implementation State
 
 - `public/addons/browser.json` declares the Browser add-on as a bundled SDK V0 add-on.
 - `src/modules/browser/BrowserWorkspace.tsx` creates a live center-workspace web frame when Browser grants are present.
 - `addons/resonant-browser-host` provides the first tested Chromium control service for delegated browser actions.
+- `addons/resonant-browser-native` defines the native embedded Browser host contract.
+- `addons/resonant-browser-host/src/electron-visible-host.mjs` is retained only as a research harness.
 - The live web frame is user-operable and replaces the screenshot UI, but it is not the final Chromium-class AI-control engine.
 - `src-tauri/src/browser_service.rs` still contains the rejected CDP screenshot prototype and should be treated as deprecated until either removed or repurposed as a non-UI evidence-capture service.
 - Browser add-on install/grant UI exists, but this does not mean the live browser engine exists.

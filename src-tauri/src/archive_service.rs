@@ -2,15 +2,20 @@
 // Intent citation: docs/architecture/ADR-011-living-archive-host-service.md
 // Intent citation: docs/architecture/ADR-012-living-archive-approval-policy.md
 
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use tauri::AppHandle;
+
+use crate::provider_service::{
+    execute_provider_service_chat, ChatMessageInput, ProviderServiceChatRequest,
+};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -171,7 +176,7 @@ pub(crate) struct ArchiveReviewArtifact {
     pub(crate) decision: ArchiveReviewDecision,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ArchiveProcessIngestRequest {
     pub(crate) request_file: String,
@@ -183,6 +188,63 @@ pub(crate) struct ArchiveProcessIngestRequest {
     pub(crate) runtime_node_endpoint: Option<String>,
     pub(crate) auth_tier: Option<String>,
     pub(crate) model: String,
+    pub(crate) verifier_provider_id: Option<String>,
+    pub(crate) verifier_provider_type: Option<String>,
+    pub(crate) verifier_api_base_url: Option<String>,
+    pub(crate) verifier_runtime_node_id: Option<String>,
+    pub(crate) verifier_runtime_node_kind: Option<String>,
+    pub(crate) verifier_runtime_node_endpoint: Option<String>,
+    pub(crate) verifier_auth_tier: Option<String>,
+    pub(crate) verifier_model: Option<String>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveMaintenanceCycleRequest {
+    pub(crate) provider_id: String,
+    pub(crate) provider_type: String,
+    pub(crate) api_base_url: Option<String>,
+    pub(crate) runtime_node_id: Option<String>,
+    pub(crate) runtime_node_kind: Option<String>,
+    pub(crate) runtime_node_endpoint: Option<String>,
+    pub(crate) auth_tier: Option<String>,
+    pub(crate) model: String,
+    pub(crate) verifier_provider_id: Option<String>,
+    pub(crate) verifier_provider_type: Option<String>,
+    pub(crate) verifier_api_base_url: Option<String>,
+    pub(crate) verifier_runtime_node_id: Option<String>,
+    pub(crate) verifier_runtime_node_kind: Option<String>,
+    pub(crate) verifier_runtime_node_endpoint: Option<String>,
+    pub(crate) verifier_auth_tier: Option<String>,
+    pub(crate) verifier_model: Option<String>,
+    pub(crate) max_requests: Option<usize>,
+    pub(crate) auto_promote: Option<bool>,
+    pub(crate) actor_id: Option<String>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveBackgroundCycleRequest {
+    pub(crate) provider_id: String,
+    pub(crate) provider_type: String,
+    pub(crate) api_base_url: Option<String>,
+    pub(crate) runtime_node_id: Option<String>,
+    pub(crate) runtime_node_kind: Option<String>,
+    pub(crate) runtime_node_endpoint: Option<String>,
+    pub(crate) auth_tier: Option<String>,
+    pub(crate) model: String,
+    pub(crate) verifier_provider_id: Option<String>,
+    pub(crate) verifier_provider_type: Option<String>,
+    pub(crate) verifier_api_base_url: Option<String>,
+    pub(crate) verifier_runtime_node_id: Option<String>,
+    pub(crate) verifier_runtime_node_kind: Option<String>,
+    pub(crate) verifier_runtime_node_endpoint: Option<String>,
+    pub(crate) verifier_auth_tier: Option<String>,
+    pub(crate) verifier_model: Option<String>,
+    pub(crate) max_requests: Option<usize>,
+    pub(crate) auto_promote: Option<bool>,
+    pub(crate) actor_id: Option<String>,
+    pub(crate) root_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -194,6 +256,100 @@ pub(crate) struct ArchiveProcessIngestResult {
     pub(crate) summary: String,
     pub(crate) checked_at: String,
     pub(crate) review_artifact: ArchiveReviewArtifact,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveMaintenanceCycleResult {
+    pub(crate) started_at: String,
+    pub(crate) finished_at: String,
+    pub(crate) processed: Vec<ArchiveProcessIngestResult>,
+    pub(crate) promoted: Vec<ArchivePromoteReviewArtifactResult>,
+    pub(crate) navigation: ArchiveWikiNavigationRefreshResult,
+    pub(crate) lint: ArchiveLintResult,
+    pub(crate) skipped: Vec<String>,
+    pub(crate) errors: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveBackgroundCycleResult {
+    pub(crate) started_at: String,
+    pub(crate) finished_at: String,
+    pub(crate) scan: ArchiveSourceFolderScanResult,
+    pub(crate) queued_request_files: Vec<String>,
+    pub(crate) skipped_queue_sources: Vec<String>,
+    pub(crate) maintenance: ArchiveMaintenanceCycleResult,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveWikiNavigationRefreshResult {
+    pub(crate) refreshed_at: String,
+    pub(crate) index_path: String,
+    pub(crate) log_path: String,
+    pub(crate) pages_indexed: usize,
+    pub(crate) activity_entries: usize,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveLintFinding {
+    pub(crate) severity: String,
+    pub(crate) category: String,
+    pub(crate) target: String,
+    pub(crate) detail: String,
+    pub(crate) recommended_action: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveLintResult {
+    pub(crate) checked_at: String,
+    pub(crate) report_path: String,
+    pub(crate) pages_checked: usize,
+    pub(crate) sources_checked: usize,
+    pub(crate) findings: Vec<ArchiveLintFinding>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveSemanticLintRequest {
+    pub(crate) provider_id: String,
+    pub(crate) provider_type: String,
+    pub(crate) api_base_url: Option<String>,
+    pub(crate) runtime_node_id: Option<String>,
+    pub(crate) runtime_node_kind: Option<String>,
+    pub(crate) runtime_node_endpoint: Option<String>,
+    pub(crate) auth_tier: Option<String>,
+    pub(crate) model: String,
+    pub(crate) max_candidates: Option<usize>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveSemanticLintFinding {
+    pub(crate) severity: String,
+    pub(crate) target_pages: Vec<String>,
+    pub(crate) claim: String,
+    pub(crate) conflicting_evidence: String,
+    pub(crate) confidence: String,
+    pub(crate) recommended_action: String,
+    pub(crate) requires_human_review: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveSemanticLintResult {
+    pub(crate) checked_at: String,
+    pub(crate) report_path: String,
+    pub(crate) provider_id: String,
+    pub(crate) model: String,
+    pub(crate) source_lint_report_path: String,
+    pub(crate) candidates_reviewed: usize,
+    pub(crate) findings: Vec<ArchiveSemanticLintFinding>,
+    pub(crate) summary: String,
+    pub(crate) repair_request_files: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -705,10 +861,7 @@ fn resolve_document_path(
     let normalized = resolved
         .canonicalize()
         .map_err(|error| format!("Failed to resolve archive document path: {error}"))?;
-    let allowed = runtime
-        .allowed_roots()
-        .into_iter()
-        .any(|root| normalized == root || normalized.starts_with(&root));
+    let allowed = archive_path_is_allowed(runtime, &normalized);
     if !allowed {
         return Err(format!(
             "Archive document path `{}` is outside the allowed archive roots.",
@@ -718,6 +871,27 @@ fn resolve_document_path(
     Ok(normalized)
 }
 
+fn validate_intake_file_name(file_name: &str) -> Result<(), String> {
+    let file_name_path = Path::new(file_name);
+    if file_name_path.is_absolute() || file_name.contains('/') || file_name.contains('\\') {
+        return Err(
+            "Archive intake artifact file name must not contain path separators.".to_string(),
+        );
+    }
+    if file_name_path.file_name().and_then(|value| value.to_str()) != Some(file_name) {
+        return Err("Archive intake artifact file name must be a plain file name.".to_string());
+    }
+    Ok(())
+}
+
+fn archive_path_is_allowed(runtime: &ArchiveRuntime, normalized_path: &Path) -> bool {
+    runtime
+        .allowed_roots()
+        .into_iter()
+        .filter_map(|root| root.canonicalize().ok())
+        .any(|root| normalized_path == root || normalized_path.starts_with(&root))
+}
+
 fn resolve_source_path(runtime: &ArchiveRuntime, requested_path: &str) -> PathBuf {
     let candidate = PathBuf::from(requested_path);
     if candidate.is_absolute() {
@@ -725,6 +899,23 @@ fn resolve_source_path(runtime: &ArchiveRuntime, requested_path: &str) -> PathBu
     } else {
         runtime.vault_root.join(candidate)
     }
+}
+
+fn resolve_allowed_source_path(
+    runtime: &ArchiveRuntime,
+    requested_path: &str,
+) -> Result<PathBuf, String> {
+    let resolved = resolve_source_path(runtime, requested_path);
+    let normalized = resolved
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve archive source path: {error}"))?;
+    if !archive_path_is_allowed(runtime, &normalized) {
+        return Err(format!(
+            "Archive source path `{}` is outside the allowed archive roots.",
+            normalized.display()
+        ));
+    }
+    Ok(normalized)
 }
 
 fn relative_to_vault(runtime: &ArchiveRuntime, path: &PathBuf) -> String {
@@ -741,7 +932,7 @@ pub(crate) use archive_runtime::{query_archive_runtime_status, ArchiveRuntimeSta
 mod archive_review;
 pub(crate) use archive_review::{
     decide_archive_review_artifact, list_archive_review_artifacts, process_archive_ingest_request,
-    promote_archive_review_artifact,
+    promote_archive_review_artifact, run_archive_maintenance_cycle,
 };
 #[cfg(test)]
 use archive_review::{
@@ -763,9 +954,15 @@ pub(crate) use archive_source_library::{
 fn source_hash(path: &Path) -> Result<String, String> {
     let bytes = fs::read(path)
         .map_err(|error| format!("Failed to read source file {}: {error}", path.display()))?;
-    let mut hasher = DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    Ok(format!("fnv64:{:016x}", hasher.finish()))
+    Ok(format!("sha256:{}", sha256_hex(&bytes)))
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>()
 }
 
 fn system_time_label(value: SystemTime) -> String {
@@ -797,12 +994,71 @@ fn system_time_to_unix(time: SystemTime) -> Option<String> {
 
 fn open_archive_db(runtime: &ArchiveRuntime) -> Result<Option<Connection>, String> {
     let db_path = runtime.db_path();
-    if !db_path.exists() {
-        return Ok(None);
+    if let Some(parent) = db_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to create Living Archive database root: {error}"))?;
     }
-    Connection::open(db_path)
-        .map(Some)
-        .map_err(|error| format!("Failed to open Living Archive database: {error}"))
+    let connection = Connection::open(db_path)
+        .map_err(|error| format!("Failed to open Living Archive database: {error}"))?;
+    initialize_archive_db_schema(&connection)?;
+    Ok(Some(connection))
+}
+
+fn initialize_archive_db_schema(connection: &Connection) -> Result<(), String> {
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS pages (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                created TEXT NOT NULL,
+                updated TEXT NOT NULL,
+                stage TEXT DEFAULT 'stub',
+                frontmatter TEXT,
+                content TEXT,
+                search_vector BLOB,
+                UNIQUE(type, title)
+            );
+            CREATE TABLE IF NOT EXISTS sources (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                type TEXT NOT NULL,
+                raw_path TEXT NOT NULL UNIQUE,
+                hash TEXT,
+                added_at TEXT NOT NULL,
+                processed INTEGER DEFAULT 0,
+                metadata TEXT
+            );
+            CREATE TABLE IF NOT EXISTS links (
+                source_page_id TEXT NOT NULL,
+                target_page_id TEXT NOT NULL,
+                link_type TEXT DEFAULT 'wikilink',
+                created_at TEXT,
+                PRIMARY KEY (source_page_id, target_page_id, link_type)
+            );
+            CREATE TABLE IF NOT EXISTS page_sources (
+                page_id TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                PRIMARY KEY (page_id, source_id)
+            );
+            CREATE TABLE IF NOT EXISTS activity_log (
+                ts TEXT NOT NULL,
+                action TEXT NOT NULL,
+                page_id TEXT,
+                source_id TEXT,
+                agent_id TEXT,
+                details TEXT,
+                errors TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_pages_type ON pages(type);
+            CREATE INDEX IF NOT EXISTS idx_pages_updated ON pages(updated);
+            CREATE INDEX IF NOT EXISTS idx_sources_processed ON sources(processed);
+            CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(ts);
+            ",
+        )
+        .map_err(|error| format!("Failed to initialize Living Archive database schema: {error}"))
 }
 
 fn load_archive_stats(connection: &Connection) -> Result<ArchiveStats, String> {
@@ -888,6 +1144,871 @@ fn load_recent_activity(
         items.push(entry.map_err(|error| format!("Invalid archive activity entry: {error}"))?);
     }
     Ok(items)
+}
+
+struct ArchiveWikiNavigationPage {
+    page_id: String,
+    page_type: String,
+    title: String,
+    file_path: String,
+    stage: Option<String>,
+    updated: String,
+    content: String,
+    snippet: String,
+}
+
+struct ArchiveWikiNavigationLogEntry {
+    ts: String,
+    action: String,
+    page_id: Option<String>,
+    source_id: Option<String>,
+    agent_id: Option<String>,
+    errors: Option<String>,
+}
+
+fn markdown_escape_inline(value: &str) -> String {
+    value.replace('|', "\\|").replace('\n', " ")
+}
+
+fn collect_navigation_pages(
+    connection: &Connection,
+) -> Result<Vec<ArchiveWikiNavigationPage>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT id, type, title, file_path, stage, updated, content
+             FROM pages
+             ORDER BY type ASC, title ASC",
+        )
+        .map_err(|error| format!("Failed to prepare archive wiki index query: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            let content: String = row.get::<_, Option<String>>("content")?.unwrap_or_default();
+            Ok(ArchiveWikiNavigationPage {
+                page_id: row.get("id")?,
+                page_type: row.get("type")?,
+                title: row.get("title")?,
+                file_path: row.get("file_path")?,
+                stage: row.get("stage")?,
+                updated: row.get("updated")?,
+                snippet: content
+                    .lines()
+                    .filter(|line| !line.trim().is_empty())
+                    .take(2)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                content,
+            })
+        })
+        .map_err(|error| format!("Failed to query archive wiki index pages: {error}"))?;
+
+    let mut pages = Vec::new();
+    for row in rows {
+        pages.push(row.map_err(|error| format!("Invalid archive wiki index row: {error}"))?);
+    }
+    Ok(pages)
+}
+
+fn collect_navigation_log_entries(
+    connection: &Connection,
+) -> Result<Vec<ArchiveWikiNavigationLogEntry>, String> {
+    let mut statement = connection
+        .prepare(
+            "SELECT ts, action, page_id, source_id, agent_id, errors
+             FROM activity_log
+             ORDER BY ts DESC
+             LIMIT 200",
+        )
+        .map_err(|error| format!("Failed to prepare archive wiki log query: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ArchiveWikiNavigationLogEntry {
+                ts: row.get("ts")?,
+                action: row.get("action")?,
+                page_id: row.get("page_id")?,
+                source_id: row.get("source_id")?,
+                agent_id: row.get("agent_id")?,
+                errors: row.get("errors")?,
+            })
+        })
+        .map_err(|error| format!("Failed to query archive wiki log entries: {error}"))?;
+
+    let mut entries = Vec::new();
+    for row in rows {
+        entries.push(row.map_err(|error| format!("Invalid archive wiki log row: {error}"))?);
+    }
+    entries.reverse();
+    Ok(entries)
+}
+
+fn render_archive_index_markdown(
+    refreshed_at: &str,
+    pages: &[ArchiveWikiNavigationPage],
+) -> String {
+    let mut by_type = BTreeMap::<String, Vec<&ArchiveWikiNavigationPage>>::new();
+    for page in pages {
+        by_type
+            .entry(page.page_type.clone())
+            .or_default()
+            .push(page);
+    }
+
+    let mut output = format!(
+        "# Living Archive Index\n\nGenerated: `{refreshed_at}`  \nPages indexed: `{}`\n\nThis file is generated by ResonantOS from trusted AI Memory pages. Do not edit it manually; edit or promote wiki pages through the Living Archive flow.\n",
+        pages.len()
+    );
+
+    for (page_type, typed_pages) in by_type {
+        output.push_str(&format!("\n## {}\n\n", markdown_escape_inline(&page_type)));
+        output.push_str("| Page | ID | Stage | Updated | Summary |\n");
+        output.push_str("| --- | --- | --- | --- | --- |\n");
+        for page in typed_pages {
+            output.push_str(&format!(
+                "| [{}]({}) | `{}` | {} | `{}` | {} |\n",
+                markdown_escape_inline(&page.title),
+                page.file_path.replace(' ', "%20"),
+                markdown_escape_inline(&page.page_id),
+                markdown_escape_inline(page.stage.as_deref().unwrap_or("unknown")),
+                markdown_escape_inline(&page.updated),
+                markdown_escape_inline(&page.snippet.chars().take(220).collect::<String>())
+            ));
+        }
+    }
+
+    output
+}
+
+fn render_archive_log_markdown(
+    refreshed_at: &str,
+    entries: &[ArchiveWikiNavigationLogEntry],
+) -> String {
+    let mut output = format!(
+        "# Living Archive Log\n\nGenerated: `{refreshed_at}`  \nEntries shown: `{}`\n\nThis file is generated from the append-only archive activity log. It gives the LLM and the human a chronological trace of recent archive evolution.\n",
+        entries.len()
+    );
+
+    for entry in entries {
+        let target = entry
+            .page_id
+            .as_deref()
+            .or(entry.source_id.as_deref())
+            .unwrap_or("archive");
+        output.push_str(&format!(
+            "\n## [{}] {} | {}\n\n- actor: `{}`\n- target: `{}`\n",
+            markdown_escape_inline(&entry.ts),
+            markdown_escape_inline(&entry.action),
+            markdown_escape_inline(target),
+            markdown_escape_inline(entry.agent_id.as_deref().unwrap_or("system")),
+            markdown_escape_inline(target)
+        ));
+        if let Some(errors) = entry.errors.as_deref().filter(|value| !value.is_empty()) {
+            output.push_str(&format!("- errors: `{}`\n", markdown_escape_inline(errors)));
+        }
+    }
+
+    output
+}
+
+fn unix_seconds(value: &str) -> Option<u64> {
+    value.strip_prefix("unix:")?.parse::<u64>().ok()
+}
+
+fn extract_markdown_wikilinks(content: &str) -> Vec<String> {
+    let mut links = Vec::new();
+    let mut remaining = content;
+    while let Some(start) = remaining.find("[[") {
+        let after_start = &remaining[start + 2..];
+        let Some(end) = after_start.find("]]") else {
+            break;
+        };
+        let raw_target = &after_start[..end];
+        let target = raw_target
+            .split('|')
+            .next()
+            .unwrap_or(raw_target)
+            .split('#')
+            .next()
+            .unwrap_or(raw_target)
+            .trim();
+        if !target.is_empty() && !links.iter().any(|link| link == target) {
+            links.push(target.to_string());
+        }
+        remaining = &after_start[end + 2..];
+    }
+    links.sort();
+    links
+}
+
+fn finding(
+    severity: &str,
+    category: &str,
+    target: impl Into<String>,
+    detail: impl Into<String>,
+    recommended_action: impl Into<String>,
+) -> ArchiveLintFinding {
+    ArchiveLintFinding {
+        severity: severity.to_string(),
+        category: category.to_string(),
+        target: target.into(),
+        detail: detail.into(),
+        recommended_action: recommended_action.into(),
+    }
+}
+
+fn collect_lint_findings(
+    pages: &[ArchiveWikiNavigationPage],
+    sources_unprocessed: Vec<(String, String, String)>,
+    checked_at: &str,
+) -> Vec<ArchiveLintFinding> {
+    let mut findings = Vec::new();
+    let now = unix_seconds(checked_at).unwrap_or(0);
+    let mut normalized_titles = BTreeMap::<String, Vec<&ArchiveWikiNavigationPage>>::new();
+    let mut inbound_counts = BTreeMap::<String, usize>::new();
+    let mut title_to_page = BTreeMap::<String, &ArchiveWikiNavigationPage>::new();
+
+    for page in pages {
+        let normalized = slugify(&page.title);
+        normalized_titles
+            .entry(normalized.clone())
+            .or_default()
+            .push(page);
+        title_to_page.insert(normalized, page);
+    }
+
+    for page in pages {
+        for link in extract_markdown_wikilinks(&page.content) {
+            let target = slugify(&link);
+            *inbound_counts.entry(target).or_insert(0) += 1;
+        }
+    }
+
+    for page in pages {
+        let page_key = slugify(&page.title);
+        let inbound_count = inbound_counts.get(&page_key).copied().unwrap_or(0);
+        let outbound_links = extract_markdown_wikilinks(&page.content);
+        if inbound_count == 0 && outbound_links.is_empty() && pages.len() > 1 {
+            findings.push(finding(
+                "warning",
+                "orphan-page",
+                &page.file_path,
+                format!("`{}` has no detected inbound or outbound wikilinks.", page.title),
+                "Ask the archive lint/ingest agent to propose links to related pages or mark the page as intentionally standalone.",
+            ));
+        } else if outbound_links.is_empty() && !matches!(page.page_type.as_str(), "summary") {
+            findings.push(finding(
+                "info",
+                "missing-wikilinks",
+                &page.file_path,
+                format!("`{}` has no outgoing wikilinks in the indexed content.", page.title),
+                "Suggest Obsidian-style wikilinks for people, concepts, projects, protocols, and source pages.",
+            ));
+        }
+
+        if let Some(updated) = unix_seconds(&page.updated) {
+            let stale_after_seconds = 90 * 24 * 60 * 60;
+            if now.saturating_sub(updated) > stale_after_seconds {
+                findings.push(finding(
+                    "info",
+                    "stale-page",
+                    &page.file_path,
+                    format!("`{}` has not been updated in more than 90 days.", page.title),
+                    "Queue the page for refresh only if newer source material exists or the page is important to active work.",
+                ));
+            }
+        }
+
+        let lowered = page.content.to_ascii_lowercase();
+        if lowered.contains("contradict")
+            || lowered.contains("conflict")
+            || lowered.contains("tension")
+            || lowered.contains("disagree")
+        {
+            findings.push(finding(
+                "warning",
+                "contradiction-candidate",
+                &page.file_path,
+                format!("`{}` contains tension/conflict language in indexed content.", page.title),
+                "Run provider-backed contradiction review before promoting synthesis based on this page.",
+            ));
+        }
+    }
+
+    for (normalized, matches) in normalized_titles {
+        if matches.len() > 1 {
+            findings.push(finding(
+                "warning",
+                "duplicate-title",
+                normalized,
+                format!(
+                    "{} pages normalize to the same title: {}",
+                    matches.len(),
+                    matches
+                        .iter()
+                        .map(|page| page.file_path.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                "Review whether these pages should be merged, aliased, or made more specific.",
+            ));
+        }
+    }
+
+    for (source_id, title, raw_path) in sources_unprocessed {
+        findings.push(finding(
+            "warning",
+            "unprocessed-source",
+            raw_path,
+            format!("Source `{title}` remains unprocessed in the archive index."),
+            format!("Queue source `{source_id}` for ingest review or mark it intentionally out of scope."),
+        ));
+    }
+
+    for page in pages {
+        let page_key = slugify(&page.title);
+        if !title_to_page.contains_key(&page_key) {
+            findings.push(finding(
+                "info",
+                "index-mismatch",
+                &page.file_path,
+                format!(
+                    "`{}` could not be resolved in the lint title index.",
+                    page.title
+                ),
+                "Refresh wiki navigation and re-run lint.",
+            ));
+        }
+    }
+
+    findings
+}
+
+fn render_archive_lint_report(
+    checked_at: &str,
+    pages_checked: usize,
+    sources_checked: usize,
+    findings: &[ArchiveLintFinding],
+) -> String {
+    let mut output = format!(
+        "# Living Archive Lint Report\n\nChecked: `{checked_at}`  \nPages checked: `{pages_checked}`  \nSources checked: `{sources_checked}`  \nFindings: `{}`\n\nThis report is generated by ResonantOS. It identifies maintenance work; it does not mutate trusted wiki knowledge.\n",
+        findings.len()
+    );
+    for finding in findings {
+        output.push_str(&format!(
+            "\n## [{}] {} | {}\n\n- target: `{}`\n- detail: {}\n- recommended action: {}\n",
+            markdown_escape_inline(&finding.severity),
+            markdown_escape_inline(&finding.category),
+            markdown_escape_inline(&finding.target),
+            markdown_escape_inline(&finding.target),
+            markdown_escape_inline(&finding.detail),
+            markdown_escape_inline(&finding.recommended_action)
+        ));
+    }
+    output
+}
+
+pub(crate) fn lint_archive(app: &AppHandle) -> Result<ArchiveLintResult, String> {
+    let runtime = ArchiveRuntime::resolve(app)?;
+    let connection = open_archive_db(&runtime)?
+        .ok_or_else(|| "Living Archive database is unavailable.".to_string())?;
+    let checked_at = unix_timestamp();
+    let pages = collect_navigation_pages(&connection)?;
+    let mut source_statement = connection
+        .prepare(
+            "SELECT id, title, raw_path FROM sources WHERE processed = 0 ORDER BY added_at DESC LIMIT 200",
+        )
+        .map_err(|error| format!("Failed to prepare archive lint source query: {error}"))?;
+    let source_rows = source_statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>("id")?,
+                row.get::<_, String>("title")?,
+                row.get::<_, String>("raw_path")?,
+            ))
+        })
+        .map_err(|error| format!("Failed to run archive lint source query: {error}"))?;
+    let mut sources = Vec::new();
+    for row in source_rows {
+        sources.push(row.map_err(|error| format!("Invalid archive lint source row: {error}"))?);
+    }
+
+    let findings = collect_lint_findings(&pages, sources.clone(), &checked_at);
+    let report_root = runtime.review_queue_root().join("lint");
+    fs::create_dir_all(&report_root)
+        .map_err(|error| format!("Failed to create archive lint report root: {error}"))?;
+    let report_path = report_root.join(format!("{}-lint-report.md", checked_at.replace(':', "-")));
+    fs::write(
+        &report_path,
+        render_archive_lint_report(&checked_at, pages.len(), sources.len(), &findings),
+    )
+    .map_err(|error| format!("Failed to write archive lint report: {error}"))?;
+
+    let _ = connection.execute(
+        "INSERT INTO activity_log (ts, action, details, agent_id) VALUES (?1, ?2, ?3, ?4)",
+        params![
+            checked_at,
+            "archive_lint",
+            json!({
+                "reportPath": report_path.display().to_string(),
+                "pagesChecked": pages.len(),
+                "sourcesChecked": sources.len(),
+                "findings": findings.len(),
+            })
+            .to_string(),
+            "archive-maintenance.core"
+        ],
+    );
+
+    Ok(ArchiveLintResult {
+        checked_at,
+        report_path: report_path.display().to_string(),
+        pages_checked: pages.len(),
+        sources_checked: sources.len(),
+        findings,
+    })
+}
+
+fn semantic_lint_candidates<'a>(
+    pages: &'a [ArchiveWikiNavigationPage],
+    lint: &ArchiveLintResult,
+    max_candidates: usize,
+) -> Vec<&'a ArchiveWikiNavigationPage> {
+    let contradiction_targets = lint
+        .findings
+        .iter()
+        .filter(|finding| finding.category == "contradiction-candidate")
+        .map(|finding| finding.target.as_str())
+        .collect::<Vec<_>>();
+    let mut selected = Vec::new();
+    for page in pages {
+        let lowered = page.content.to_ascii_lowercase();
+        let is_target = contradiction_targets
+            .iter()
+            .any(|target| *target == page.file_path);
+        let has_signal = lowered.contains("contradict")
+            || lowered.contains("conflict")
+            || lowered.contains("tension")
+            || lowered.contains("disagree")
+            || lowered.contains("however")
+            || lowered.contains("but ");
+        if is_target || has_signal {
+            selected.push(page);
+        }
+        if selected.len() >= max_candidates {
+            break;
+        }
+    }
+    selected
+}
+
+fn trim_semantic_lint_content(content: &str) -> String {
+    const MAX_CHARS: usize = 4_000;
+    if content.chars().count() <= MAX_CHARS {
+        return content.to_string();
+    }
+    format!(
+        "{}\n[Semantic lint candidate truncated]",
+        content.chars().take(MAX_CHARS).collect::<String>()
+    )
+}
+
+fn parse_semantic_lint_findings(value: &Value) -> Vec<ArchiveSemanticLintFinding> {
+    value
+        .get("findings")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|finding| {
+            let target_pages = finding
+                .get("target_pages")
+                .or_else(|| finding.get("targetPages"))
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            ArchiveSemanticLintFinding {
+                severity: finding
+                    .get("severity")
+                    .and_then(Value::as_str)
+                    .unwrap_or("warning")
+                    .to_string(),
+                target_pages,
+                claim: finding
+                    .get("claim")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Semantic lint finding did not include a claim.")
+                    .to_string(),
+                conflicting_evidence: finding
+                    .get("conflicting_evidence")
+                    .or_else(|| finding.get("conflictingEvidence"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("No conflicting evidence was provided.")
+                    .to_string(),
+                confidence: finding
+                    .get("confidence")
+                    .and_then(Value::as_str)
+                    .unwrap_or("medium")
+                    .to_string(),
+                recommended_action: finding
+                    .get("recommended_action")
+                    .or_else(|| finding.get("recommendedAction"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("Review the candidate pages before using them in synthesis.")
+                    .to_string(),
+                requires_human_review: finding
+                    .get("requires_human_review")
+                    .or_else(|| finding.get("requiresHumanReview"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
+            }
+        })
+        .collect()
+}
+
+fn render_semantic_lint_report(result: &ArchiveSemanticLintResult) -> String {
+    let mut output = format!(
+        "# Living Archive Semantic Lint Report\n\nChecked: `{}`  \nProvider: `{}`  \nModel: `{}`  \nCandidates reviewed: `{}`  \nFindings: `{}`  \nSource deterministic lint: `{}`\n\n{}\n",
+        result.checked_at,
+        result.provider_id,
+        result.model,
+        result.candidates_reviewed,
+        result.findings.len(),
+        result.source_lint_report_path,
+        result.summary
+    );
+    for finding in &result.findings {
+        output.push_str(&format!(
+            "\n## [{}] {}\n\n- pages: `{}`\n- confidence: `{}`\n- requires human review: `{}`\n- conflicting evidence: {}\n- recommended action: {}\n",
+            markdown_escape_inline(&finding.severity),
+            markdown_escape_inline(&finding.claim),
+            markdown_escape_inline(&finding.target_pages.join(", ")),
+            markdown_escape_inline(&finding.confidence),
+            finding.requires_human_review,
+            markdown_escape_inline(&finding.conflicting_evidence),
+            markdown_escape_inline(&finding.recommended_action)
+        ));
+    }
+    output
+}
+
+pub(crate) async fn semantic_lint_archive(
+    app: &AppHandle,
+    request: ArchiveSemanticLintRequest,
+) -> Result<ArchiveSemanticLintResult, String> {
+    let runtime = ArchiveRuntime::resolve(app)?;
+    let connection = open_archive_db(&runtime)?
+        .ok_or_else(|| "Living Archive database is unavailable.".to_string())?;
+    let lint = lint_archive(app)?;
+    let pages = collect_navigation_pages(&connection)?;
+    let max_candidates = request.max_candidates.unwrap_or(6).clamp(1, 12);
+    let candidates = semantic_lint_candidates(&pages, &lint, max_candidates);
+    let checked_at = unix_timestamp();
+    let report_root = runtime.review_queue_root().join("lint").join("semantic");
+    fs::create_dir_all(&report_root)
+        .map_err(|error| format!("Failed to create semantic archive lint root: {error}"))?;
+    let report_path = report_root.join(format!(
+        "{}-semantic-lint-report.md",
+        checked_at.replace(':', "-")
+    ));
+
+    if candidates.is_empty() {
+        let result = ArchiveSemanticLintResult {
+            checked_at: checked_at.clone(),
+            report_path: report_path.display().to_string(),
+            provider_id: request.provider_id,
+            model: request.model,
+            source_lint_report_path: lint.report_path,
+            candidates_reviewed: 0,
+            findings: Vec::new(),
+            summary: "No contradiction candidates were identified by deterministic lint."
+                .to_string(),
+            repair_request_files: Vec::new(),
+        };
+        fs::write(&report_path, render_semantic_lint_report(&result))
+            .map_err(|error| format!("Failed to write semantic archive lint report: {error}"))?;
+        return Ok(result);
+    }
+
+    let candidate_payload = candidates
+        .iter()
+        .map(|page| {
+            json!({
+                "title": page.title,
+                "pageType": page.page_type,
+                "filePath": page.file_path,
+                "updated": page.updated,
+                "content": trim_semantic_lint_content(&page.content),
+            })
+        })
+        .collect::<Vec<_>>();
+    let system_prompt = [
+        "You are the Living Archive Semantic Lint Reviewer.",
+        "Your task is to challenge candidate wiki pages for real contradictions, stale claims, ambiguous synthesis, or claims that require human review.",
+        "Do not rewrite pages. Do not approve changes. Produce a reviewable report only.",
+        "Return strict JSON with keys: summary, findings.",
+        "Each finding must include: severity, target_pages, claim, conflicting_evidence, confidence, recommended_action, requires_human_review.",
+        "Use requires_human_review=true for identity-bearing, doctrine-sensitive, low-confidence, or broad synthesis conflicts.",
+    ]
+    .join("\n\n");
+    let reply = execute_provider_service_chat(
+        app,
+        ProviderServiceChatRequest {
+            provider_id: request.provider_id.clone(),
+            provider_type: request.provider_type,
+            api_base_url: request.api_base_url,
+            runtime_node_id: request.runtime_node_id,
+            runtime_node_kind: request.runtime_node_kind,
+            runtime_node_endpoint: request.runtime_node_endpoint,
+            auth_tier: request.auth_tier,
+            model: request.model.clone(),
+            reasoning_effort: "high".to_string(),
+            system_prompt,
+            messages: vec![ChatMessageInput {
+                role: "user".to_string(),
+                content: serde_json::to_string_pretty(&json!({
+                    "deterministicLintReport": lint.report_path,
+                    "deterministicFindings": lint.findings,
+                    "candidatePages": candidate_payload,
+                }))
+                .map_err(|error| format!("Failed to encode semantic lint prompt: {error}"))?,
+            }],
+        },
+    )
+    .await?;
+    let parsed = serde_json::from_str::<Value>(&reply).unwrap_or_else(|_| {
+        json!({
+            "summary": "Semantic lint provider did not return valid JSON.",
+            "findings": [{
+                "severity": "warning",
+                "target_pages": [],
+                "claim": "Provider response was not valid JSON.",
+                "conflicting_evidence": reply,
+                "confidence": "low",
+                "recommended_action": "Retry semantic lint or inspect the raw provider response.",
+                "requires_human_review": true
+            }]
+        })
+    });
+    let mut result = ArchiveSemanticLintResult {
+        checked_at: checked_at.clone(),
+        report_path: report_path.display().to_string(),
+        provider_id: request.provider_id,
+        model: request.model,
+        source_lint_report_path: lint.report_path,
+        candidates_reviewed: candidates.len(),
+        findings: parse_semantic_lint_findings(&parsed),
+        summary: parsed
+            .get("summary")
+            .and_then(Value::as_str)
+            .unwrap_or("Semantic lint completed.")
+            .to_string(),
+        repair_request_files: Vec::new(),
+    };
+    fs::write(&report_path, render_semantic_lint_report(&result))
+        .map_err(|error| format!("Failed to write semantic archive lint report: {error}"))?;
+
+    if !result.findings.is_empty() {
+        let repair_source_path = report_path.with_extension("repair-source.json");
+        fs::write(
+            &repair_source_path,
+            serde_json::to_string_pretty(&json!({
+                "schemaVersion": 1,
+                "artifactType": "semantic-lint-repair-source",
+                "checkedAt": result.checked_at,
+                "providerId": result.provider_id,
+                "model": result.model,
+                "sourceLintReportPath": result.source_lint_report_path,
+                "semanticReportPath": result.report_path,
+                "summary": result.summary,
+                "findings": result.findings,
+                "instruction": "Create conservative wiki repair proposals. Do not erase prior claims; add provenance-backed corrections, tensions, and open questions. Escalate identity-bearing, doctrine-sensitive, low-confidence, or destructive repairs to human review."
+            }))
+            .map_err(|error| format!("Failed to encode semantic repair source: {error}"))?,
+        )
+        .map_err(|error| format!("Failed to write semantic repair source: {error}"))?;
+
+        let repair_request = queue_archive_ingest_request(
+            app,
+            ArchiveIngestRequestRecord {
+                actor_id: "archive-semantic-lint.ai".to_string(),
+                source_path: repair_source_path.display().to_string(),
+                source_type: "semantic-lint".to_string(),
+                source_role: Some("ai-memory-maintenance".to_string()),
+                intent: "repair-wiki-pages".to_string(),
+                provenance: Some(json!({
+                    "origin": "archive-semantic-lint",
+                    "semanticReportPath": result.report_path,
+                    "findings": result.findings.len(),
+                })),
+            },
+        )?;
+        result
+            .repair_request_files
+            .push(repair_request.request_file);
+    }
+
+    let _ = connection.execute(
+        "INSERT INTO activity_log (ts, action, details, agent_id) VALUES (?1, ?2, ?3, ?4)",
+        params![
+            checked_at,
+            "archive_semantic_lint",
+            json!({
+                "reportPath": result.report_path,
+                "candidatesReviewed": result.candidates_reviewed,
+                "findings": result.findings.len(),
+                "providerId": result.provider_id,
+                "model": result.model,
+            })
+            .to_string(),
+            "archive-maintenance.ai"
+        ],
+    );
+
+    Ok(result)
+}
+
+pub(crate) fn refresh_archive_wiki_navigation(
+    app: &AppHandle,
+) -> Result<ArchiveWikiNavigationRefreshResult, String> {
+    let runtime = ArchiveRuntime::resolve(app)?;
+    fs::create_dir_all(&runtime.wiki_root)
+        .map_err(|error| format!("Failed to create archive wiki root: {error}"))?;
+    let connection = open_archive_db(&runtime)?
+        .ok_or_else(|| "Living Archive database is unavailable.".to_string())?;
+    let refreshed_at = unix_timestamp();
+    let pages = collect_navigation_pages(&connection)?;
+    let entries = collect_navigation_log_entries(&connection)?;
+    let index_path = runtime.wiki_root.join("index.md");
+    let log_path = runtime.wiki_root.join("log.md");
+    fs::write(
+        &index_path,
+        render_archive_index_markdown(&refreshed_at, &pages),
+    )
+    .map_err(|error| format!("Failed to write Living Archive index.md: {error}"))?;
+    fs::write(
+        &log_path,
+        render_archive_log_markdown(&refreshed_at, &entries),
+    )
+    .map_err(|error| format!("Failed to write Living Archive log.md: {error}"))?;
+
+    let _ = connection.execute(
+        "INSERT INTO activity_log (ts, action, details, agent_id) VALUES (?1, ?2, ?3, ?4)",
+        params![
+            refreshed_at,
+            "wiki_navigation_refresh",
+            json!({
+                "indexPath": index_path.display().to_string(),
+                "logPath": log_path.display().to_string(),
+                "pagesIndexed": pages.len(),
+                "activityEntries": entries.len(),
+            })
+            .to_string(),
+            "archive-maintenance.core"
+        ],
+    );
+
+    Ok(ArchiveWikiNavigationRefreshResult {
+        refreshed_at,
+        index_path: index_path.display().to_string(),
+        log_path: log_path.display().to_string(),
+        pages_indexed: pages.len(),
+        activity_entries: entries.len(),
+    })
+}
+
+pub(crate) async fn run_archive_background_cycle(
+    app: &AppHandle,
+    request: ArchiveBackgroundCycleRequest,
+) -> Result<ArchiveBackgroundCycleResult, String> {
+    let started_at = unix_timestamp();
+    let scan = scan_archive_source_folders(
+        app,
+        ArchiveSourceFolderScanRequest {
+            root_path: request.root_path.clone(),
+        },
+    )?;
+    let queued = list_archive_ingest_requests(app)?;
+    let mut already_queued = queued
+        .iter()
+        .map(|item| item.source_path.clone())
+        .collect::<HashSet<_>>();
+    let mut queued_request_files = Vec::new();
+    let mut skipped_queue_sources = Vec::new();
+
+    for record in scan
+        .records
+        .iter()
+        .filter(|record| record.status == "new" || record.status == "changed")
+    {
+        if already_queued.contains(&record.absolute_path) || already_queued.contains(&record.path) {
+            skipped_queue_sources.push(format!("Already queued: {}", record.path));
+            continue;
+        }
+        let result = queue_archive_ingest_request(
+            app,
+            ArchiveIngestRequestRecord {
+                actor_id: "archive-background-sync.core".to_string(),
+                source_path: record.absolute_path.clone(),
+                source_type: record.source_type.clone(),
+                source_role: Some(record.root_role.clone()),
+                intent: if record.status == "changed" {
+                    "review-and-reingest".to_string()
+                } else {
+                    "review-and-ingest".to_string()
+                },
+                provenance: Some(json!({
+                    "origin": "archive-background-cycle",
+                    "status": record.status,
+                    "hash": record.hash,
+                    "previousHash": record.previous_hash,
+                    "modifiedAt": record.modified_at,
+                    "rootRole": record.root_role,
+                    "rootSubtype": record.root_subtype,
+                })),
+            },
+        )?;
+        already_queued.insert(record.absolute_path.clone());
+        queued_request_files.push(result.request_file);
+    }
+
+    let maintenance = run_archive_maintenance_cycle(
+        app,
+        ArchiveMaintenanceCycleRequest {
+            provider_id: request.provider_id,
+            provider_type: request.provider_type,
+            api_base_url: request.api_base_url,
+            runtime_node_id: request.runtime_node_id,
+            runtime_node_kind: request.runtime_node_kind,
+            runtime_node_endpoint: request.runtime_node_endpoint,
+            auth_tier: request.auth_tier,
+            model: request.model,
+            verifier_provider_id: request.verifier_provider_id,
+            verifier_provider_type: request.verifier_provider_type,
+            verifier_api_base_url: request.verifier_api_base_url,
+            verifier_runtime_node_id: request.verifier_runtime_node_id,
+            verifier_runtime_node_kind: request.verifier_runtime_node_kind,
+            verifier_runtime_node_endpoint: request.verifier_runtime_node_endpoint,
+            verifier_auth_tier: request.verifier_auth_tier,
+            verifier_model: request.verifier_model,
+            max_requests: request.max_requests,
+            auto_promote: request.auto_promote,
+            actor_id: request.actor_id,
+        },
+    )
+    .await?;
+
+    Ok(ArchiveBackgroundCycleResult {
+        started_at,
+        finished_at: unix_timestamp(),
+        scan,
+        queued_request_files,
+        skipped_queue_sources,
+        maintenance,
+    })
 }
 
 fn manual_archive_search(
@@ -1155,6 +2276,7 @@ pub(crate) fn write_archive_intake_artifact(
     if file_name.is_empty() {
         return Err("Archive intake artifact must have a file name.".to_string());
     }
+    validate_intake_file_name(file_name)?;
 
     let bucket_root = runtime.intake_root().join(bucket.clone());
     fs::create_dir_all(&bucket_root)
@@ -1210,6 +2332,7 @@ pub(crate) fn queue_archive_ingest_request(
     request: ArchiveIngestRequestRecord,
 ) -> Result<ArchiveIngestRequestResult, String> {
     let runtime = ArchiveRuntime::resolve(app)?;
+    let resolved_source = resolve_allowed_source_path(&runtime, &request.source_path)?;
     let requests_root = runtime.review_queue_root().join("requests");
     fs::create_dir_all(&requests_root)
         .map_err(|error| format!("Failed to create archive review request root: {error}"))?;
@@ -1224,7 +2347,7 @@ pub(crate) fn queue_archive_ingest_request(
     let payload = json!({
         "queuedAt": queued_at,
         "actorId": request.actor_id,
-        "sourcePath": request.source_path,
+        "sourcePath": resolved_source.display().to_string(),
         "sourceType": request.source_type,
         "sourceRole": request.source_role,
         "intent": request.intent,
@@ -1324,7 +2447,11 @@ pub(crate) fn list_archive_ingest_requests(
 #[cfg(test)]
 mod tests {
     use super::{evaluate_approval_tier, render_promoted_page, slugify, wiki_page_subdir};
+    use super::{
+        parse_semantic_lint_findings, render_archive_index_markdown, render_archive_log_markdown,
+    };
     use super::{upsert_promoted_page_index, PromotedPageIndexInput};
+    use super::{ArchiveWikiNavigationLogEntry, ArchiveWikiNavigationPage};
     use rusqlite::{params, Connection};
     use serde_json::{json, Value};
     use std::fs;
@@ -1360,6 +2487,59 @@ mod tests {
     fn allows_narrow_refresh_auto_approval() {
         let (tier, _) = evaluate_approval_tier("summary", "summary-refresh", "high", "low", &[]);
         assert_eq!(tier, "auto-approve");
+    }
+
+    #[test]
+    fn renders_llm_wiki_index_and_log_markdown() {
+        let index = render_archive_index_markdown(
+            "2026-04-30T12:00:00Z",
+            &[ArchiveWikiNavigationPage {
+                page_id: "augmentatism".to_string(),
+                page_type: "concept".to_string(),
+                title: "Augmentatism".to_string(),
+                file_path: "WIKI/concepts/augmentatism.md".to_string(),
+                stage: Some("developing".to_string()),
+                updated: "2026-04-30T12:00:00Z".to_string(),
+                content: "A human-AI collaboration philosophy.".to_string(),
+                snippet: "A human-AI collaboration philosophy.".to_string(),
+            }],
+        );
+        assert!(index.contains("# Living Archive Index"));
+        assert!(index.contains("[Augmentatism](WIKI/concepts/augmentatism.md)"));
+
+        let log = render_archive_log_markdown(
+            "2026-04-30T12:00:00Z",
+            &[ArchiveWikiNavigationLogEntry {
+                ts: "2026-04-30T12:00:00Z".to_string(),
+                action: "trusted_wiki_promote".to_string(),
+                page_id: Some("augmentatism".to_string()),
+                source_id: None,
+                agent_id: Some("archive-maintenance.ai".to_string()),
+                errors: None,
+            }],
+        );
+        assert!(log.contains("# Living Archive Log"));
+        assert!(log.contains("trusted_wiki_promote | augmentatism"));
+    }
+
+    #[test]
+    fn parses_semantic_lint_findings_for_repair_queueing() {
+        let findings = parse_semantic_lint_findings(&json!({
+            "findings": [{
+                "severity": "warning",
+                "target_pages": ["AI_MEMORY/wiki/concepts/a.md"],
+                "claim": "A and B are both described as the primary model.",
+                "conflicting_evidence": "Page A says MiniMax; page B says GPT.",
+                "confidence": "high",
+                "recommended_action": "Create a repair artifact that preserves both claims and resolves the active strategy.",
+                "requires_human_review": false
+            }]
+        }));
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].confidence, "high");
+        assert!(!findings[0].requires_human_review);
+        assert_eq!(findings[0].target_pages[0], "AI_MEMORY/wiki/concepts/a.md");
     }
 
     #[test]
@@ -1558,6 +2738,77 @@ mod tests {
         assert_ne!(first_hash, second_hash);
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn archive_document_guard_rejects_portable_state_secrets() {
+        let root = std::env::temp_dir().join(format!(
+            "resonantos-archive-boundary-test-{}-{}",
+            std::process::id(),
+            super::unix_timestamp().replace(':', "-")
+        ));
+        let runtime = test_archive_runtime(&root);
+        let memory_page = runtime
+            .memory_domain_root("ai-memory")
+            .join("wiki")
+            .join("allowed.md");
+        let secret_file = runtime
+            .vault_root
+            .join("Secrets")
+            .join("provider-secrets.json");
+        fs::create_dir_all(
+            memory_page
+                .parent()
+                .expect("memory page should have parent"),
+        )
+        .expect("memory parent should write");
+        fs::create_dir_all(secret_file.parent().expect("secret should have parent"))
+            .expect("secret parent should write");
+        fs::write(&memory_page, "# Allowed").expect("memory page should write");
+        fs::write(&secret_file, "{\"shared-minimax\":\"secret\"}")
+            .expect("secret file should write");
+
+        assert!(super::resolve_document_path(&runtime, &memory_page.display().to_string()).is_ok());
+        assert!(
+            super::resolve_document_path(&runtime, &secret_file.display().to_string()).is_err(),
+            "Living Archive reads must not include the portable secrets root"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn archive_intake_file_name_rejects_path_traversal() {
+        assert!(super::validate_intake_file_name("artifact.md").is_ok());
+        assert!(super::validate_intake_file_name("../artifact.md").is_err());
+        assert!(super::validate_intake_file_name("nested/artifact.md").is_err());
+        assert!(super::validate_intake_file_name("nested\\artifact.md").is_err());
+    }
+
+    #[test]
+    fn opens_archive_database_with_required_wiki_schema() {
+        let root = std::env::temp_dir().join(format!(
+            "resonantos-archive-db-schema-test-{}-{}",
+            std::process::id(),
+            super::unix_timestamp().replace(':', "-")
+        ));
+        let runtime = test_archive_runtime(&root);
+
+        let connection = super::open_archive_db(&runtime)
+            .expect("archive db should initialize")
+            .expect("archive db connection should be present");
+        let table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('pages', 'sources', 'links', 'page_sources', 'activity_log')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("schema tables should be countable");
+
+        assert_eq!(table_count, 5);
+        assert!(runtime.db_path().exists());
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

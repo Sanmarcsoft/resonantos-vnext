@@ -15,13 +15,14 @@ const browserManifest = (): AddOnManifest => ({
   requestedCapabilities: [
     { capability: "network", granted: false, scope: "shared", revocationBehavior: "hard-stop" },
     { capability: "browser-control", granted: false, scope: "system", revocationBehavior: "hard-stop" },
+    { capability: "filesystem", granted: false, scope: "shared", revocationBehavior: "hard-stop" },
   ],
   providerRequirements: { sharedProfiles: [], supportsPrivateCredentials: false },
   archiveIntegration: { readScopes: [], intakeWriteScopes: [], canRequestIngest: false, canWriteKnowledgePages: false },
   health: { strategy: "browser-engine-ready" },
   service: {
-    protocol: "stdio-json-rpc",
-    entrypoint: "addons/resonant-browser-host/src/browser-host.mjs",
+    protocol: "host-command",
+    entrypoint: "addons/resonant-browser-native/native-browser-host.contract.json",
     healthCommand: "browser.health",
     shutdownCommand: "browser.close",
   },
@@ -50,6 +51,23 @@ const browserManifest = (): AddOnManifest => ({
       outputSchema: { type: "object" },
       audit: { logRequest: true, logResult: true, artifactTypes: ["log"] },
     },
+    {
+      name: "browser.extensions.load_unpacked",
+      description: "Load extension.",
+      requiredCapabilities: ["filesystem", "browser-control"],
+      inputSchema: { type: "object" },
+      outputSchema: { type: "object" },
+      audit: { logRequest: true, logResult: true, artifactTypes: ["log"] },
+      requiresHumanApproval: true,
+    },
+    {
+      name: "browser.extensions.disable",
+      description: "Disable extension.",
+      requiredCapabilities: ["browser-control"],
+      inputSchema: { type: "object" },
+      outputSchema: { type: "object" },
+      audit: { logRequest: true, logResult: true, artifactTypes: ["log"] },
+    },
   ],
   installHooks: {},
   compatibility: { shellVersion: "^0.1.0", platforms: ["macOS", "windows", "linux"] },
@@ -66,6 +84,7 @@ const installation = (granted = true): AddOnInstallation => ({
   grantedCapabilities: [
     { capability: "network", granted, scope: "shared", revocationBehavior: "hard-stop" },
     { capability: "browser-control", granted, scope: "system", revocationBehavior: "hard-stop" },
+    { capability: "filesystem", granted, scope: "shared", revocationBehavior: "hard-stop" },
   ],
   recommendedGrantPresetIds: [],
   privateProviderProfileIds: [],
@@ -124,6 +143,27 @@ describe("Browser tool runner", () => {
 
     await runner.run({ ...command, humanApproved: true });
     expect(call).toHaveBeenCalledWith("browser.type", command.params, { humanApproved: true });
+  });
+
+  it("requires explicit approval before loading a Browser extension", async () => {
+    const call = vi.fn();
+    const runner = createBrowserToolRunner({
+      manifest: browserManifest(),
+      installation: installation(),
+      transport: { call },
+    });
+
+    await expect(
+      runner.run({ type: "extensions_load_unpacked", params: { path: "/tmp/example-extension" } }),
+    ).rejects.toThrow("Loading a Browser extension requires explicit human approval.");
+    expect(call).not.toHaveBeenCalled();
+
+    await runner.run({ type: "extensions_load_unpacked", params: { path: "/tmp/example-extension" }, humanApproved: true });
+    expect(call).toHaveBeenCalledWith(
+      "browser.extensions.load_unpacked",
+      { path: "/tmp/example-extension" },
+      { humanApproved: true },
+    );
   });
 
   it("refuses Browser AI control when the manifest is not the local-service host contract", async () => {

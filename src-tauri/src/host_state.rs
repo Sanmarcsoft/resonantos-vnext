@@ -181,6 +181,19 @@ pub(crate) fn assert_addon_capabilities(
     assert_addon_capabilities_from_state(&state, addon_id, required_capabilities)
 }
 
+pub(crate) fn assert_living_archive_host_access(
+    app: &AppHandle,
+    required_capabilities: &[&str],
+) -> Result<(), String> {
+    let Some(state) = read_runtime_state_value(app)? else {
+        return Err(
+            "Living Archive is not active. Enable a memory-system add-on before running archive actions."
+                .to_string(),
+        );
+    };
+    assert_living_archive_host_access_from_state(&state, required_capabilities)
+}
+
 fn assert_addon_capabilities_from_state(
     state: &Value,
     addon_id: &str,
@@ -218,6 +231,21 @@ fn assert_addon_capabilities_from_state(
     Ok(())
 }
 
+fn assert_living_archive_host_access_from_state(
+    state: &Value,
+    required_capabilities: &[&str],
+) -> Result<(), String> {
+    let mut capabilities = Vec::with_capacity(required_capabilities.len() + 1);
+    capabilities.push("memory-provider");
+    capabilities.extend_from_slice(required_capabilities);
+    assert_addon_capabilities_from_state(state, "addon.living-archive", &capabilities)
+        .map_err(|error| {
+            format!(
+                "Living Archive host service is unavailable: {error} Enable Living Archive as the active memory-system provider or select another memory add-on."
+            )
+        })
+}
+
 pub(crate) fn addons_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app_state_dir(app)?.join("addons");
     fs::create_dir_all(&dir)
@@ -233,16 +261,51 @@ fn provider_secrets_file(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(secrets_root.join("provider-secrets.json"))
 }
 
-pub(crate) fn read_provider_secrets(app: &AppHandle) -> Result<HashMap<String, String>, String> {
-    let path = provider_secrets_file(app)?;
+fn legacy_provider_secrets_file(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_state_dir(app)?.join("provider-secrets.json"))
+}
+
+fn read_provider_secrets_file(path: &PathBuf) -> Result<HashMap<String, String>, String> {
     if !path.exists() {
         return Ok(HashMap::new());
     }
 
-    let raw = fs::read_to_string(&path)
+    let raw = fs::read_to_string(path)
         .map_err(|error| format!("Failed to read provider secrets: {error}"))?;
     serde_json::from_str::<HashMap<String, String>>(&raw)
         .map_err(|error| format!("Invalid provider secrets JSON: {error}"))
+}
+
+fn merge_legacy_provider_secrets(
+    mut portable: HashMap<String, String>,
+    legacy: HashMap<String, String>,
+) -> (HashMap<String, String>, bool) {
+    let mut changed = false;
+    for (provider_id, secret) in legacy {
+        if !secret.trim().is_empty() && !portable.contains_key(&provider_id) {
+            portable.insert(provider_id, secret);
+            changed = true;
+        }
+    }
+    (portable, changed)
+}
+
+pub(crate) fn read_provider_secrets(app: &AppHandle) -> Result<HashMap<String, String>, String> {
+    let path = provider_secrets_file(app)?;
+    let portable_secrets = read_provider_secrets_file(&path)?;
+    let legacy_path = legacy_provider_secrets_file(app)?;
+    let legacy_secrets = read_provider_secrets_file(&legacy_path)?;
+    let (merged_secrets, migrated) =
+        merge_legacy_provider_secrets(portable_secrets, legacy_secrets);
+
+    if migrated {
+        let payload = serde_json::to_string_pretty(&merged_secrets)
+            .map_err(|error| format!("Failed to encode migrated provider secrets: {error}"))?;
+        fs::write(&path, payload)
+            .map_err(|error| format!("Failed to migrate provider secrets: {error}"))?;
+    }
+
+    Ok(merged_secrets)
 }
 
 pub(crate) fn write_provider_secrets(
@@ -299,7 +362,12 @@ pub(crate) fn resolve_provider_secret(
 
 #[cfg(test)]
 mod tests {
-    use super::assert_addon_capabilities_from_state;
+    use super::{
+        assert_addon_capabilities_from_state, assert_living_archive_host_access_from_state,
+        merge_legacy_provider_secrets,
+    };
+    use std::collections::HashMap;
+
     use serde_json::json;
 
     #[test]
@@ -327,5 +395,76 @@ mod tests {
             assert_addon_capabilities_from_state(&state, "addon.browser", &["ui-embedding"])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn living_archive_host_access_requires_active_memory_provider_grants() {
+        let state = json!({
+            "installations": {
+                "addon.living-archive": {
+                    "enabled": true,
+                    "grantedCapabilities": [
+                        { "capability": "memory-provider", "granted": true },
+                        { "capability": "archive-read", "granted": true },
+                        { "capability": "archive-intake-write", "granted": false }
+                    ]
+                }
+            }
+        });
+
+        assert!(assert_living_archive_host_access_from_state(&state, &["archive-read"]).is_ok());
+        assert!(
+            assert_living_archive_host_access_from_state(&state, &["archive-intake-write"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn living_archive_host_access_stops_when_memory_provider_is_disabled() {
+        let state = json!({
+            "installations": {
+                "addon.living-archive": {
+                    "enabled": false,
+                    "grantedCapabilities": [
+                        { "capability": "memory-provider", "granted": true },
+                        { "capability": "archive-read", "granted": true }
+                    ]
+                }
+            }
+        });
+
+        assert!(assert_living_archive_host_access_from_state(&state, &["archive-read"]).is_err());
+    }
+
+    #[test]
+    fn provider_secret_migration_preserves_portable_values_and_adds_legacy_missing_keys() {
+        let portable = HashMap::from([(
+            "shared-openai".to_string(),
+            "portable-openai-secret".to_string(),
+        )]);
+        let legacy = HashMap::from([
+            (
+                "shared-openai".to_string(),
+                "legacy-openai-secret".to_string(),
+            ),
+            (
+                "shared-minimax".to_string(),
+                "legacy-minimax-secret".to_string(),
+            ),
+            ("empty-provider".to_string(), "   ".to_string()),
+        ]);
+
+        let (merged, changed) = merge_legacy_provider_secrets(portable, legacy);
+
+        assert!(changed);
+        assert_eq!(
+            merged.get("shared-openai"),
+            Some(&"portable-openai-secret".to_string())
+        );
+        assert_eq!(
+            merged.get("shared-minimax"),
+            Some(&"legacy-minimax-secret".to_string())
+        );
+        assert!(!merged.contains_key("empty-provider"));
     }
 }

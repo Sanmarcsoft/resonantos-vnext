@@ -27,6 +27,7 @@ import {
 } from "../../core/provider-service";
 import { canUseDictation } from "../chat/dictation";
 import type { ComposerAttachment } from "../chat/types";
+import { systemSlotAvailable } from "./system-slots";
 
 type ViewModelInput = {
   state: ResonantShellState;
@@ -41,6 +42,15 @@ type ViewModelInput = {
 
 const latestProviderUsageFor = (thread: ConversationThread | null): ProviderUsageTelemetry | undefined =>
   [...(thread?.messages ?? [])].reverse().find((message) => message.providerUsage)?.providerUsage;
+
+export const channelAllowedByOwningAddon = (state: ResonantShellState, channel: ChannelDefinition): boolean => {
+  const addonId = channel.metadata?.addonId;
+  if (!addonId) {
+    return true;
+  }
+  const installation = state.installations[addonId];
+  return Boolean(installation?.enabled);
+};
 
 const formatProviderUsageTitle = (usage: ProviderUsageTelemetry): string => {
   const lines = [`Last measured provider usage for ${usage.model} (${usage.source}).`];
@@ -137,15 +147,25 @@ export const buildShellViewModel = ({
     manifestMap.get(selectedAddonId) ?? filteredManifests[0] ?? bundled[0] ?? sideloaded[0] ?? null;
   const selectedInstallation = selectedManifest ? state.installations[selectedManifest.id] ?? null : null;
   const recoveryModeActive = state.recoverySession.active;
+  const chatSlotAvailable = systemSlotAvailable(state, allManifests, "chat-interface");
+  const engineerSettingsConsoleActive = !recoveryModeActive && !chatSlotAvailable && state.uiPreferences.activeSection === "settings";
+  const chatInterfaceAvailable = recoveryModeActive || chatSlotAvailable || engineerSettingsConsoleActive;
   const selectedChatThread = state.conversationThreads.find((thread) => thread.id === state.uiPreferences.activeChatThreadId);
   const visibleAgentId = recoveryModeActive
     ? state.recoverySession.engineerAgentId
+    : engineerSettingsConsoleActive
+      ? state.recoverySession.engineerAgentId
     : selectedChatThread?.owningAgentId ?? "strategist.core";
-  const visibleThreads = state.conversationThreads.filter((thread) => thread.owningAgentId === visibleAgentId);
-  const activeThread =
-    visibleThreads.find((thread) => thread.id === state.uiPreferences.activeChatThreadId) ??
-    visibleThreads[0] ??
-    null;
+  const visibleThreads = state.conversationThreads.filter((thread) => {
+    if (thread.owningAgentId !== visibleAgentId) {
+      return false;
+    }
+    const channel = state.channels.find((item) => item.id === thread.channelId);
+    return channel ? channelAllowedByOwningAddon(state, channel) : true;
+  });
+  const activeThread = chatInterfaceAvailable
+    ? visibleThreads.find((thread) => thread.id === state.uiPreferences.activeChatThreadId) ?? visibleThreads[0] ?? null
+    : null;
   const activeThreadChannel = activeThread
     ? state.channels.find((channel) => channel.id === activeThread.channelId) ?? null
     : null;

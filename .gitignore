@@ -7,6 +7,10 @@ dist/
 # Tauri/Rust build output and generated bundles
 src-tauri/target/
 src-tauri/gen/
+addons/resonant-browser-native/build/
+addons/resonant-browser-native/vendor/
+build/native-browser/*
+!build/native-browser/.gitkeep
 *.dmg
 *.app
 

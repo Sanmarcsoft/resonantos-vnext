@@ -32,6 +32,13 @@
   grid-template-columns: 76px minmax(0, 1fr) 60px;
 }
 
+.shell.chat-unavailable {
+  grid-template-columns: 76px minmax(0, 1fr);
+  grid-template-areas:
+    "topbar topbar"
+    "dock main";
+}
+
 .shell.layout-chat-main {
   grid-template-columns: 76px var(--chat-rail-width, 460px) minmax(0, 1fr);
   grid-template-areas:
@@ -41,6 +48,62 @@
 
 .shell.layout-chat-main.chat-closed {
   grid-template-columns: 76px 60px minmax(0, 1fr);
+}
+
+.shell.layout-chat-main.chat-unavailable {
+  grid-template-columns: 76px minmax(0, 1fr);
+  grid-template-areas:
+    "topbar topbar"
+    "dock main";
+}
+
+.shell.floating-chat-surface {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "chat";
+}
+
+.shell.floating-chat-surface .system-topbar,
+.shell.floating-chat-surface .app-dock,
+.shell.floating-chat-surface .main-shell,
+.shell.floating-chat-surface .chat-resize-handle {
+  display: none;
+}
+
+.shell.floating-chat-surface .chat-sidebar {
+  border: 0;
+  padding: 0.7rem;
+  background:
+    radial-gradient(circle at 18% 4%, rgba(16, 185, 129, 0.14), transparent 20rem),
+    rgba(14, 12, 10, 0.94);
+}
+
+.shell.floating-chat-surface .chat-workspace {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.62rem;
+}
+
+.shell.floating-chat-surface .chat-history-panel {
+  max-height: 190px;
+  padding: 0.45rem;
+  border-radius: 18px;
+  background: rgba(255, 248, 236, 0.035);
+}
+
+.shell.floating-chat-surface .message-bubble {
+  max-width: 100%;
+}
+
+.shell.floating-chat-surface .chat-toolbar {
+  flex-wrap: wrap;
+}
+
+.shell.floating-chat-surface .chat-toolbar-selects {
+  flex: 1 1 100%;
+}
+
+.shell.floating-chat-surface .composer-card {
+  padding: 0.62rem;
 }
 
 .system-topbar {
@@ -383,6 +446,10 @@
   overflow: hidden;
 }
 
+.main-shell.notes-shell-active {
+  gap: 0;
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;
@@ -442,6 +509,33 @@
   min-height: 0;
   overflow: auto;
   padding-right: 0.25rem;
+}
+
+.content-grid.notes-active {
+  display: block;
+  flex: 1 1 0;
+  width: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+  padding-right: 0;
+}
+
+.content-grid.notes-active > * {
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+}
+
+.full-pane-route {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .content-grid > * {

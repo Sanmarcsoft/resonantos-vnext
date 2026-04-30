@@ -37,6 +37,8 @@ export const ADDON_CAPABILITIES: readonly Capability[] = [
   "filesystem",
   "archive-read",
   "archive-intake-write",
+  "chat-interface",
+  "memory-provider",
   "providers",
   "shell",
   "network",

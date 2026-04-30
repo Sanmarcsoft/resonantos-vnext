@@ -1,6 +1,6 @@
 use std::env;
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -10,6 +10,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
 static BROWSER_HOST: OnceLock<Mutex<Option<BrowserHostProcess>>> = OnceLock::new();
+static BROWSER_VISIBLE_HOST: OnceLock<Mutex<Option<BrowserHostProcess>>> = OnceLock::new();
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,6 +47,10 @@ fn browser_host_slot() -> &'static Mutex<Option<BrowserHostProcess>> {
     BROWSER_HOST.get_or_init(|| Mutex::new(None))
 }
 
+fn browser_visible_host_slot() -> &'static Mutex<Option<BrowserHostProcess>> {
+    BROWSER_VISIBLE_HOST.get_or_init(|| Mutex::new(None))
+}
+
 pub fn browser_host_required_capabilities(method: &str) -> Result<Vec<&'static str>, String> {
     match method {
         "browser.health"
@@ -53,8 +58,12 @@ pub fn browser_host_required_capabilities(method: &str) -> Result<Vec<&'static s
         | "browser.click"
         | "browser.type"
         | "browser.capture_evidence"
+        | "browser.extensions.list"
+        | "browser.extensions.set_pinned"
+        | "browser.extensions.disable"
         | "browser.close"
         | "browser.close_session" => Ok(vec!["browser-control"]),
+        "browser.extensions.load_unpacked" => Ok(vec!["filesystem", "browser-control"]),
         "browser.start" | "browser.open_url" => Ok(vec!["network", "browser-control"]),
         _ => Err(format!("Unsupported Browser host method `{method}`.")),
     }
@@ -88,6 +97,34 @@ pub fn execute_browser_host_command(
     }
 }
 
+pub fn execute_browser_visible_host_command(
+    app: &AppHandle,
+    request: BrowserHostCommandRequest,
+) -> Result<Value, String> {
+    validate_browser_host_request(&request)?;
+    let mut slot = browser_visible_host_slot()
+        .lock()
+        .map_err(|_| "Visible Browser host process lock is poisoned.".to_string())?;
+    if slot.as_mut().map(process_alive).unwrap_or(false) == false {
+        *slot = Some(start_browser_visible_host_process(app)?);
+    }
+    let host = slot
+        .as_mut()
+        .ok_or_else(|| "Visible Browser host process failed to start.".to_string())?;
+    match send_rpc(host, &request) {
+        Ok(value) => Ok(value),
+        Err(first_error) => {
+            *slot = Some(start_browser_visible_host_process(app)?);
+            let host = slot
+                .as_mut()
+                .ok_or_else(|| "Visible Browser host process failed to restart.".to_string())?;
+            send_rpc(host, &request).map_err(|second_error| {
+                format!("Visible Browser host command failed after restart: {first_error}; {second_error}")
+            })
+        }
+    }
+}
+
 fn validate_browser_host_request(request: &BrowserHostCommandRequest) -> Result<(), String> {
     browser_host_required_capabilities(&request.method)?;
     if request.method == "browser.type"
@@ -99,6 +136,9 @@ fn validate_browser_host_request(request: &BrowserHostCommandRequest) -> Result<
         && !request.human_approved
     {
         return Err("Sensitive Browser typing requires explicit human approval.".to_string());
+    }
+    if request.method == "browser.extensions.load_unpacked" && !request.human_approved {
+        return Err("Loading a Browser extension requires explicit human approval.".to_string());
     }
     Ok(())
 }
@@ -178,6 +218,38 @@ fn start_browser_host_process(app: &AppHandle) -> Result<BrowserHostProcess, Str
     })
 }
 
+fn start_browser_visible_host_process(app: &AppHandle) -> Result<BrowserHostProcess, String> {
+    let script = resolve_browser_visible_host_script(app)?;
+    let electron = resolve_browser_visible_host_electron(app)?;
+    repair_macos_electron_framework_layout(&electron)?;
+    let mut child = Command::new(&electron)
+        .arg(&script)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| {
+            format!(
+                "Failed to start visible Browser host service with {} at {}: {error}",
+                electron.display(),
+                script.display()
+            )
+        })?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "Visible Browser host stdin was not available.".to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Visible Browser host stdout was not available.".to_string())?;
+    Ok(BrowserHostProcess {
+        child,
+        stdin,
+        stdout: BufReader::new(stdout),
+    })
+}
+
 fn resolve_browser_host_script(app: &AppHandle) -> Result<PathBuf, String> {
     if let Ok(path) = env::var("RESONANTOS_BROWSER_HOST_PATH") {
         return assert_browser_host_script(PathBuf::from(path));
@@ -190,6 +262,7 @@ fn resolve_browser_host_script(app: &AppHandle) -> Result<PathBuf, String> {
     }
     if let Ok(resource_dir) = app.path().resource_dir() {
         candidates.push(resource_dir.join(&relative));
+        candidates.push(resource_dir.join("_up_").join(&relative));
     }
     if let Ok(exe) = env::current_exe() {
         if let Some(parent) = exe.parent() {
@@ -207,6 +280,89 @@ fn resolve_browser_host_script(app: &AppHandle) -> Result<PathBuf, String> {
         })
 }
 
+fn resolve_browser_visible_host_script(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Ok(path) = env::var("RESONANTOS_BROWSER_VISIBLE_HOST_PATH") {
+        return assert_browser_host_script(PathBuf::from(path));
+    }
+
+    let relative = PathBuf::from("addons/resonant-browser-host/src/electron-visible-host.mjs");
+    let mut candidates = Vec::new();
+    if let Ok(current_dir) = env::current_dir() {
+        candidates.push(current_dir.join(&relative));
+    }
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join(&relative));
+        candidates.push(resource_dir.join("_up_").join(&relative));
+    }
+    if let Ok(exe) = env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join(&relative));
+            candidates.push(parent.join("../../../../").join(&relative));
+        }
+    }
+
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .map(Ok)
+        .unwrap_or_else(|| {
+            Err("Visible Browser host service was not found. Set RESONANTOS_BROWSER_VISIBLE_HOST_PATH or install the Browser add-on service.".to_string())
+        })
+}
+
+fn resolve_browser_visible_host_electron(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Ok(path) = env::var("RESONANTOS_ELECTRON") {
+        return assert_executable_path(PathBuf::from(path), "Electron");
+    }
+
+    let mut candidates = Vec::new();
+    if let Ok(current_dir) = env::current_dir() {
+        candidates.push(current_dir.join(
+            "addons/resonant-browser-host/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+        ));
+        candidates
+            .push(current_dir.join("addons/resonant-browser-host/node_modules/.bin/electron"));
+        candidates.push(current_dir.join("node_modules/.bin/electron"));
+    }
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join(
+            "addons/resonant-browser-host/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+        ));
+        candidates
+            .push(resource_dir.join("addons/resonant-browser-host/node_modules/.bin/electron"));
+        candidates.push(resource_dir.join("_up_").join(
+            "addons/resonant-browser-host/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+        ));
+        candidates.push(
+            resource_dir
+                .join("_up_")
+                .join("addons/resonant-browser-host/node_modules/.bin/electron"),
+        );
+    }
+    if let Ok(exe) = env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join(
+                "addons/resonant-browser-host/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+            ));
+            candidates.push(parent.join("addons/resonant-browser-host/node_modules/.bin/electron"));
+            candidates.push(parent.join(
+                "../../../../addons/resonant-browser-host/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+            ));
+            candidates.push(
+                parent.join("../../../../addons/resonant-browser-host/node_modules/.bin/electron"),
+            );
+        }
+    }
+
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .map(Ok)
+        .unwrap_or_else(|| {
+            Err("Electron runtime for Browser v2 was not found. Run `npm install` in addons/resonant-browser-host or set RESONANTOS_ELECTRON.".to_string())
+        })
+}
+
 fn assert_browser_host_script(path: PathBuf) -> Result<PathBuf, String> {
     if path.is_file() {
         Ok(path)
@@ -216,6 +372,71 @@ fn assert_browser_host_script(path: PathBuf) -> Result<PathBuf, String> {
             path.display()
         ))
     }
+}
+
+fn assert_executable_path(path: PathBuf, label: &str) -> Result<PathBuf, String> {
+    if path.is_file() {
+        Ok(path)
+    } else {
+        Err(format!("{label} path does not exist: {}", path.display()))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn repair_macos_electron_framework_layout(electron_binary: &Path) -> Result<(), String> {
+    let contents_dir = electron_binary
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| {
+            format!(
+                "Could not resolve Electron.app Contents directory from {}",
+                electron_binary.display()
+            )
+        })?;
+    let framework_dir = contents_dir
+        .join("Frameworks")
+        .join("Electron Framework.framework");
+    if !framework_dir.is_dir() {
+        return Ok(());
+    }
+
+    ensure_framework_link(&framework_dir, "Versions/Current", "A")?;
+    ensure_framework_link(
+        &framework_dir,
+        "Electron Framework",
+        "Versions/Current/Electron Framework",
+    )?;
+    ensure_framework_link(&framework_dir, "Libraries", "Versions/Current/Libraries")?;
+    ensure_framework_link(&framework_dir, "Resources", "Versions/Current/Resources")?;
+    ensure_framework_link(&framework_dir, "Helpers", "Versions/Current/Helpers")?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn ensure_framework_link(framework_dir: &Path, link: &str, target: &str) -> Result<(), String> {
+    let link_path = framework_dir.join(link);
+    if link_path.exists() {
+        return Ok(());
+    }
+    let target_path = link_path
+        .parent()
+        .map(|parent| parent.join(target))
+        .unwrap_or_else(|| framework_dir.join(target));
+    if !target_path.exists() {
+        return Ok(());
+    }
+    std::os::unix::fs::symlink(target, &link_path).map_err(|error| {
+        format!(
+            "Failed to repair packaged Electron framework symlink {} -> {}: {error}",
+            link_path.display(),
+            target
+        )
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn repair_macos_electron_framework_layout(_electron_binary: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 fn timestamp_millis() -> u128 {
@@ -240,6 +461,10 @@ mod tests {
             browser_host_required_capabilities("browser.read_page").unwrap(),
             vec!["browser-control"]
         );
+        assert_eq!(
+            browser_host_required_capabilities("browser.extensions.load_unpacked").unwrap(),
+            vec!["filesystem", "browser-control"]
+        );
         assert!(browser_host_required_capabilities("browser.shell").is_err());
     }
 
@@ -251,5 +476,49 @@ mod tests {
             human_approved: false,
         };
         assert!(validate_browser_host_request(&request).is_err());
+    }
+
+    #[test]
+    fn blocks_extension_loading_without_human_approval() {
+        let request = super::BrowserHostCommandRequest {
+            method: "browser.extensions.load_unpacked".to_string(),
+            params: json!({ "path": "/tmp/example-extension" }),
+            human_approved: false,
+        };
+        assert!(validate_browser_host_request(&request).is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn repairs_flattened_packaged_electron_framework_symlinks() {
+        let root = std::env::temp_dir().join(format!(
+            "resonantos-electron-framework-test-{}",
+            super::timestamp_millis()
+        ));
+        let electron_binary = root
+            .join("Electron.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("Electron");
+        let framework_dir = root
+            .join("Electron.app")
+            .join("Contents")
+            .join("Frameworks")
+            .join("Electron Framework.framework");
+        std::fs::create_dir_all(electron_binary.parent().unwrap()).unwrap();
+        std::fs::write(&electron_binary, "").unwrap();
+        std::fs::create_dir_all(framework_dir.join("Versions/A/Libraries")).unwrap();
+        std::fs::create_dir_all(framework_dir.join("Versions/A/Resources")).unwrap();
+        std::fs::create_dir_all(framework_dir.join("Versions/A/Helpers")).unwrap();
+        std::fs::write(framework_dir.join("Versions/A/Electron Framework"), "").unwrap();
+
+        super::repair_macos_electron_framework_layout(&electron_binary).unwrap();
+
+        assert!(framework_dir.join("Libraries").exists());
+        assert!(framework_dir.join("Resources").exists());
+        assert!(framework_dir.join("Helpers").exists());
+        assert!(framework_dir.join("Versions/Current").exists());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }

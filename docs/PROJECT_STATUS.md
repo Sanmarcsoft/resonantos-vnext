@@ -1,6 +1,6 @@
 # ResonantOS vNext Project Status
 
-Last updated: 2026-04-28
+Last updated: 2026-04-30
 
 This document is the operational checkpoint for what exists now, what is partially built, and what still needs to be done. It is intentionally shorter than the ADRs and backlog: use it to regain project state quickly before deciding the next work item.
 
@@ -8,12 +8,27 @@ This document is the operational checkpoint for what exists now, what is partial
 
 ResonantOS vNext is a desktop-first modular operating system for human-AI collaboration. It is not an OpenClaw dashboard. OpenClaw, Hermes, Obsidian, OpenCode, Audio2TOL, Shield, Logician, and similar systems are add-ons.
 
-The core product remains:
+The core product direction is now the no-lock-in model from `ADR-026`.
+
+The non-replaceable kernel is:
 
 - ResonantOS shell
-- Strategist agent, default name `Augmentor`
 - Resonant Engineer agent for setup, repair, recovery, and system maintenance
-- Living Archive
+- add-on registry, capability broker, provider fabric, secure local state, audit log, and privileged IPC mediation
+
+The recommended defaults are bundled add-ons, not mandatory core lock-ins:
+
+- Augmentor Chat as the default primary-agent/chat-interface add-on
+- Living Archive as the default memory-system add-on
+
+First-run setup should ask the user whether to enable these recommended defaults. The user may skip them and install replacements.
+
+Runtime enforcement now exists for this direction:
+
+- `chat-interface` and `memory-system` replacement slots are resolved from add-on manifests.
+- A first-run prompt asks whether to enable the recommended Augmentor Chat and Living Archive add-ons.
+- If no memory-system add-on is active, the Archive route prompts the user to choose a memory add-on instead of pretending the core archive is always present.
+- If Augmentor Chat is disabled, the Resonant Engineer remains reachable from Settings as a kernel-owned setup assistant; recovery mode remains independent from the chat add-on.
 
 The shell direction is a three-zone app:
 
@@ -25,14 +40,17 @@ The shell direction is a three-zone app:
 
 The latest deterministic check completed with:
 
-- `npm test -- --run`: 115 passed
+- `npm test -- --run`: 133 passed
 - `npm run build`: passed
-- `cargo fmt --check && cargo test`: 53 passed, 2 ignored Browser execution tests
-- `npm run tauri:build`: passed and generated the macOS app and DMG
+- `cargo fmt --check`: passed
+- `cargo test --quiet`: 81 passed, 3 ignored
+- `git diff --check`: passed
 
-Known validation note:
+Known validation notes:
 
 - Vite still reports the existing large chunk warning.
+- `npm run tauri:build` was not rerun after the latest Living Archive completion pass; run it before packaging a new alpha artifact.
+- Linux x86_64 Haswell local native packaging is partially blocked in one tech-team test by a rustc 1.95 / LLVM compiler ICE while compiling the GTK dependency path. The repo now pins Rust `1.94.1` for alpha builds; retest Linux native packaging through rustup-managed `1.94.1` before treating the failure as ResonantOS source breakage.
 
 This status document records that result as the current worktree checkpoint. Re-run the same commands before tagging a release or merging a large follow-up.
 
@@ -54,7 +72,7 @@ What the team should review:
 Known limits for reviewers:
 
 - Living Archive import is safe-copy oriented; move/reorganisation execution is intentionally blocked
-- add-ons are catalog entries and are not installed or trusted by default
+- add-ons are catalog entries and are not installed or trusted by default; the basic default catalog now exposes only recommended Augmentor Chat and Living Archive contracts
 - Browser, Obsidian, OpenCode, and Terminal add-ons are early foundations, not complete production integrations
 - wallet and encrypted vault implementation is architectural only
 - recovery mode exists, but the Engineer is not yet a complete autonomous repair operator
@@ -74,6 +92,8 @@ Known limits for reviewers:
 
 - Persistent right-side chat rail exists.
 - Chat supports agent selection between Augmentor and Resonant Engineer without automatically entering recovery mode.
+- Augmentor Chat can detach into a native floating Tauri window using the `floating-window` add-on surface contract.
+- Runtime-state updates are broadcast across windows so the main shell and floating chat can stay in sync after persisted state changes.
 - Chat history supports multiple conversations, pinning, deletion, branching/forking, and per-message actions.
 - Assistant replies render Markdown.
 - User messages and assistant messages use different visual treatment.
@@ -107,16 +127,42 @@ Known limits for reviewers:
 - Routing distinguishes normal provider use from recovery/resurrect behavior.
 - Cost-aware strategy is now recognized as a product requirement, but the full policy UI is not built.
 
-### Living Archive Host Service
+### Living Archive Memory System
 
-- Living Archive is implemented as a host-owned service boundary, not an add-on.
+- Living Archive is now treated as the bundled recommended `memory-system` add-on contract, while its current implementation still uses host-owned service boundaries for privileged filesystem, review, and indexing operations.
+- `src/core/memory-provider.ts` defines the first neutral memory-provider broker for status, search, read, intake write, ingest request, and review operations.
+- Augmentor chat memory retrieval, chat insight intake, and the stable Archive workspace flows route through the active memory-provider broker instead of directly depending on Living Archive.
+- The broker now supports sideloaded `http-json` memory providers via `POST /memory/{operation}` endpoints.
+- A working reference third-party memory provider exists at `examples/reference-memory-service.mjs` with sideload manifest `examples/addons/reference-memory.json`; automated tests spawn it and prove a non-Living Archive provider can satisfy the broker.
+- Native Living Archive IPC commands are now brokered by the active add-on contract: `addon.living-archive` must be enabled with `memory-provider` and the action-specific grant before the Rust host executes archive actions.
+- If another memory add-on owns the `memory-system` slot, the shell does not render the bundled Living Archive workspace as if it were core memory.
 - Runtime/config resolution, archive status, search, document reads, intake writes, ingest request queueing, and review queue operations are present.
 - Add-ons and non-core agents are constrained to scoped reads and intake writes.
 - Trusted knowledge page writes remain reserved to Strategist-owned ingest/review flows.
 - Approval decisions can promote reviewed artifacts into trusted wiki memory with backup/provenance behavior.
 - Source folder scanning and source manifests exist.
+- The host now initializes the SQLite `wiki.db` schema for pages, sources, links, page-source provenance, and activity logs instead of relying on a pre-existing database.
+- Archive document reads are guarded to Living Archive roots and mapped source roots, not the whole Portable User State root, so `Secrets` and other non-memory private data are outside the read boundary.
+- Intake artifact filenames are validated as plain filenames to prevent path traversal outside the managed intake bucket.
+- Source/version hashes now use SHA-256 for stable long-term provenance instead of process-local hashing.
 - Audio2TOL-style bundle detection and queueing exist only as an optional add-on bridge; TOL is not part of the base Living Archive workflow unless `addon.audio2tol` is installed and enabled.
 - System architecture memory exists under `Memory/AI_MEMORY/system` and is loaded into Augmentor and Engineer prompts.
+- `ADR-027` now defines Living Archive LLM Wiki compliance as the binding implementation standard.
+- The V1 LLM Wiki loop is implemented: source scan, queue, ingest, verifier approval, promotion, index/log refresh, deterministic lint, semantic lint, and semantic repair queueing.
+- `background-cycle` scans watched source roots, queues new/changed files, runs provider-backed maintenance, refreshes navigation, and returns a transparent summary of queued, skipped, processed, and promoted work.
+- Auto sync remains opt-in because provider usage can cost money.
+- Routine archive approval can be completed by a Strategist-owned AI verifier; human review is reserved for high-risk, doctrine-sensitive, low-confidence, destructive, or ambiguous cases.
+- Ingest writer and verifier routes can use separate provider/model fields, allowing premium ingest and cheaper/local verification when configured.
+- Semantic lint never mutates trusted memory directly; findings become repair-source artifacts that re-enter the normal ingest/review/promote path.
+- Large text sources are chunk-staged with manifests recorded in review artifacts.
+- Non-text sources become conservative attachment stubs unless a specialist add-on pipeline emits text/structured intake bundles.
+- Promotion now performs section-aware markdown merge for existing pages and keeps superseded sections with provenance, reducing append-only drift.
+
+Current Living Archive status:
+
+- Functionally complete for V1 architecture and ready for real-data validation.
+- Not yet production-grade until tested against the user's full ResonantOS Base and real provider routes.
+- Remaining work is hardening/productization: richer attachment add-ons, domain-specific merge policies, native filesystem event watchers, and UI refinement.
 
 ### Living Archive Memory Domains
 
@@ -228,6 +274,13 @@ The latest hardening/refactor pass is present in the worktree:
   - ResonantOS may implement Obsidian-compatible Markdown, frontmatter, tags, wikilinks, backlinks, and graph behavior
   - ResonantOS must not copy, de-minify, translate, or derive implementation from Obsidian's proprietary application code
   - the Obsidian add-on remains the bridge for existing vaults and external Obsidian handoff
+  - the V2 file explorer now defaults folders closed, persists expanded folders per vault, and creates notes/folders through inline audited controls
+  - rename/move is inline, the last selected note is restored per vault, and initial Obsidian-style shortcuts are wired
+  - note/folder context menus and persisted open-note tabs are implemented as the next Obsidian-familiar workspace layer
+  - Resonant Notes is lazy-loaded from the shell, and the CodeMirror editor engine is split into dedicated editor/core/markdown chunks
+  - shell route splitting now lazy-loads Living Archive, Browser, Add-ons, Settings, Delegation, Recovery, Overview, Strategist, Terminal, and Resonant Notes; OpenCode remains mounted until its active-service lifecycle is reviewed
+  - the public add-on name, dock label, and icon are now Resonant Notes; `addon.obsidian` remains the stable internal compatibility id
+  - the Resonant Notes workspace now opts into full-height shell layout so the editor uses the available center pane instead of leaving unused bottom space
 - First ADR-019 host boundary is implemented:
   - `obsidian_write_note` writes only existing markdown notes inside the approved vault
   - it rejects stale saves when the note changed on disk after opening
@@ -235,7 +288,7 @@ The latest hardening/refactor pass is present in the worktree:
   - it writes an audit record into `.resonantos/obsidian-note-audit`
   - the Tauri command requires the Obsidian add-on filesystem grant before execution
 - First ADR-019 central workspace shell is implemented:
-  - installed/enabled Obsidian add-on exposes an Obsidian dock workspace
+  - installed/enabled notes add-on exposes a Resonant Notes dock workspace
   - workspace gates on selected vault, filesystem grant, and `ui-embedding`
   - the workspace gate can now grant workspace access and open the native vault picker when no vault is configured
   - workspace loads the vault note list through host commands
@@ -262,7 +315,7 @@ Treat this as active current state. If committing, review the full diff first be
 - Local Git-style versioning or equivalent immutable history for imported knowledge.
 - AI-assisted classification beyond the deterministic first-pass rules.
 - Rich review UX for large mixed libraries, including paging and bulk approval.
-- Obsidian V2 graph view, richer editor controls, and Augmentor note actions.
+- Resonant Notes graph view, richer editor controls, and Augmentor note actions.
 - Full semantic merge and conflict handling for changed documents.
 
 ### Chat And Memory

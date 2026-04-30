@@ -1,6 +1,6 @@
 # Module Map
 
-Last updated: 2026-04-28
+Last updated: 2026-04-30
 
 ## Intent
 
@@ -12,6 +12,7 @@ This map defines which folder owns which feature area so contributors do not kee
   - application contracts
   - persistence/runtime helpers
   - provider and archive policy helpers
+  - neutral memory-provider broker in `memory-provider.ts`, including Living Archive and `http-json` memory adapters
   - Delegation Packet contracts, validation, and `TASK.md` rendering
   - cross-module state utilities
   - recovery routing and host-mediated Engineer service bridges
@@ -21,7 +22,9 @@ This map defines which folder owns which feature area so contributors do not kee
   - manifest validation for bundled and sideloaded add-ons
   - stable capability, service protocol, and tool contract exports
   - authority consistency checks for archive scopes, provider profiles, and embedded UI capabilities
+  - replacement-slot capability validation for `chat-interface` and `memory-provider`
   - architecture reference: `docs/architecture/ADR-018-addon-sdk-v0.md`
+  - no-lock-in kernel/add-on reference: `docs/architecture/ADR-026-minimal-kernel-replaceable-default-addons.md`
 
 - `src/components/`
   - small reusable shell-level presentational primitives
@@ -75,11 +78,15 @@ This map defines which folder owns which feature area so contributors do not kee
 
 - `src-tauri/src/archive_service.rs`
   - SQLite-backed archive stats and recent activity
+  - privileged IPC callers are gated in `src-tauri/src/lib.rs` by active `addon.living-archive` grants before this service executes
   - archive search
   - guarded archive document reads
   - intake artifact writes
   - ingest request queue writes
   - review queue reads
+  - generated `index.md` and `log.md` navigation refresh
+  - deterministic lint, provider-backed semantic lint, and semantic repair-source queueing
+  - `background-cycle` orchestration for source scan, queueing, maintenance, navigation refresh, and lint
 
 - `src-tauri/src/archive_service/archive_runtime.rs`
   - Living Archive runtime resolution from `ARCHIVE_CONFIG.json` + `VAULT_MAP.json`
@@ -106,9 +113,11 @@ This map defines which folder owns which feature area so contributors do not kee
 
 - `src-tauri/src/archive_service/archive_review.rs`
   - Strategist-owned ingest-review artifact generation for queued requests
+  - large text source chunk staging and conservative non-text attachment stubs
+  - separate ingest writer and verifier provider/model execution fields
   - archive approval-tier evaluation and persisted review decisions
   - approved review-artifact promotion into trusted wiki pages with backups
-  - trusted wiki page rendering, backups, and SQLite index updates
+  - trusted wiki page rendering, backups, section-aware markdown merge, superseded-section provenance, and SQLite index updates
 
 - `src-tauri/src/recovery_service.rs`
   - Engineer recovery turn loop
@@ -117,7 +126,9 @@ This map defines which folder owns which feature area so contributors do not kee
   - recovery workspace root resolution
 
 - `src/modules/chat/`
-  - Strategist chat rail
+  - current first-party implementation behind the `addon.augmentor-chat` slot
+  - Strategist/Augmentor chat rail gated by active `chat-interface`
+  - native floating chat surface loaded through `?surface=floating-chat`
   - message rendering
   - dictation support
   - chat execution controller
@@ -167,14 +178,22 @@ This map defines which folder owns which feature area so contributors do not kee
   - Strategist thread/channel controller
 
 - `src/modules/archive/`
-  - archive trust surfaces
+  - current first-party implementation behind the `addon.living-archive` slot
+  - archive trust surfaces gated by `addon.living-archive` as the active `memory-system`
+  - stable memory actions are called through the active memory-provider broker; Living Archive-only source import/TOL tools remain local to this workspace
+  - if another memory add-on owns the slot, the shell shows a replacement-provider message instead of rendering the Living Archive workspace
   - runtime status surface
   - `ArchiveSearchPanel` trusted wiki/source search and source queueing surface
   - `ArchiveSourceScanResults` mapped-source scan result and review queueing surface
   - `ArchiveAudio2TolIntake` optional Audio2TOL add-on bridge surface; hidden unless `addon.audio2tol` is installed and enabled
   - `ArchiveDocumentReader` guarded document read surface
   - `ArchiveRecentActivity` archive activity feed
-  - `ArchiveDiagnostics` runtime paths, permission matrix, and ingest route probe surface
+  - `ArchiveDiagnostics` runtime paths, permission matrix, ingest route probe, deterministic lint, and semantic lint surface
+
+- `examples/`
+  - sideloadable reference add-on manifests and local services used to prove replacement contracts
+  - `examples/addons/reference-memory.json`
+  - `examples/reference-memory-service.mjs`
   - `ArchiveReviewDesk` touch-friendly ingest queue, review artifact, approval, and promotion workflow
   - `ArchiveSourceRegistry` imported-library and mapped-source registry
   - `ArchiveLibraryImporter` folder/vault import surface
@@ -182,6 +201,7 @@ This map defines which folder owns which feature area so contributors do not kee
   - permission matrix
   - archive ingest probe controller
   - archive runtime/search/read/queue/approval controller
+  - background sync controller that runs source scan, queueing, maintenance, promotion, navigation refresh, and lint through the active memory-provider broker
   - Audio2TOL intake analysis reference for the optional Audio2TOL add-on bridge: `docs/architecture/AUDIO2TOL_INTAKE_ANALYSIS.md`
   - memory domain architecture reference: `docs/architecture/ADR-013-living-archive-memory-domains.md`
   - system architecture memory reference: `docs/architecture/ADR-014-system-architecture-memory.md`
@@ -242,6 +262,10 @@ This map defines which folder owns which feature area so contributors do not kee
   - shell boot and hydration controller
   - recovery runtime surface bootstrapping
   - shell view/selectors for threads, routes, manifests, and top-level layout state
+  - ADR-026 replacement-slot resolution in `system-slots.ts`
+  - first-run recommended add-on activation for Augmentor Chat and Living Archive
+  - `chat-interface` and `memory-system` availability gates used by the shell
+  - cross-window runtime-state event sync for main shell and floating chat surfaces
 
 ## Composition Rule
 

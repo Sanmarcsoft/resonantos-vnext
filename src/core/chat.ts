@@ -86,6 +86,8 @@ export const appendAssistantMessage = (
   const author =
     thread?.owningAgentId === state.recoverySession.engineerAgentId
       ? state.agents.find((agent) => agent.id === state.recoverySession.engineerAgentId)?.displayName ?? "Resonant Engineer Agent"
+      : thread?.owningAgentId && thread.owningAgentId !== "strategist.core"
+        ? state.agents.find((agent) => agent.id === thread.owningAgentId)?.displayName ?? "Agent"
       : strategistDisplayName(state);
   return appendMessage(state, threadId, "assistant", author, content.trim(), metadata);
 };

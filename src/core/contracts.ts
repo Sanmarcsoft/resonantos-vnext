@@ -5,6 +5,8 @@ export type Capability =
   | "filesystem"
   | "archive-read"
   | "archive-intake-write"
+  | "chat-interface"
+  | "memory-provider"
   | "providers"
   | "shell"
   | "network"
@@ -21,12 +23,15 @@ export type AddOnServiceProtocol = "stdio-json-rpc" | "http-json" | "websocket-j
 export type AddOnSurfaceType =
   | "page"
   | "panel"
+  | "rail"
+  | "floating-window"
   | "embedded-pane"
   | "modal"
   | "tool-action"
   | "background-task-monitor"
   | "channel";
 export type AddOnCategory = "agent" | "channel" | "memory" | "security" | "knowledge" | "tool" | "integration";
+export type SystemSlotId = "primary-agent" | "chat-interface" | "memory-system" | "communication-channel";
 export type TrustTier = "core" | "addon" | "external";
 export type WorkspaceBehavior = "primary" | "delegated" | "background";
 export type ChannelType = "desktop" | "telegram" | "voice" | "mobile";
@@ -196,6 +201,7 @@ export interface AddOnToolDefinition {
 export interface AddOnLocalServiceDefinition {
   protocol: AddOnServiceProtocol;
   entrypoint: string;
+  visibleEntrypoint?: string;
   healthCommand?: string;
   shutdownCommand?: string;
 }
@@ -223,6 +229,13 @@ export interface AddOnManifest {
     allowExperimentalAuth?: boolean;
     fallbackPolicyId?: string;
   };
+  systemSlots?: Array<{
+    id: SystemSlotId;
+    role: "default-provider" | "alternative-provider" | "supporting-provider";
+    replaceable: boolean;
+    requiredForFirstRun?: boolean;
+    recommended?: boolean;
+  }>;
   archiveIntegration: {
     readScopes: string[];
     intakeWriteScopes: string[];
@@ -348,6 +361,60 @@ export interface ProviderSmokeTestResult {
   usage?: ProviderUsageTelemetry;
   checkedAt: string;
   summary: string;
+}
+
+export interface HermesAuditFinding {
+  id: string;
+  severity: "ready" | "info" | "warning" | "blocked";
+  title: string;
+  detail: string;
+  suggestion: string;
+}
+
+export interface HermesGatewayStatus {
+  present: boolean;
+  running: boolean;
+  pid?: number;
+  state?: string;
+  channels: string[];
+  updatedAt?: string;
+  detail: string;
+}
+
+export interface HermesInventory {
+  skillsCount: number;
+  memoriesCount: number;
+  sessionsCount: number;
+  kbPresent: boolean;
+  kbIndexPresent: boolean;
+  stateDbPresent: boolean;
+  stateDbOk: boolean;
+  identityPresent: boolean;
+  envPresent: boolean;
+  configPresent: boolean;
+  channelDirectoryPresent: boolean;
+}
+
+export interface HermesInstallStatus {
+  detected: boolean;
+  home: string;
+  command?: string;
+  version?: string;
+  agentSourcePath?: string;
+  agentGitBranch?: string;
+  agentGitCommit?: string;
+  agentGitDirty: boolean;
+  gateway: HermesGatewayStatus;
+  inventory: HermesInventory;
+  findings: HermesAuditFinding[];
+  compatibility: "ready" | "degraded" | "blocked";
+  checkedAt: string;
+}
+
+export interface HermesChatResult {
+  reply: string;
+  command: string;
+  profileHome: string;
 }
 
 export interface ProviderRuntimeNode {
@@ -904,6 +971,80 @@ export interface ArchiveProcessIngestResult {
   reviewArtifact: ArchiveReviewArtifact;
 }
 
+export interface ArchiveMaintenanceCycleResult {
+  startedAt: string;
+  finishedAt: string;
+  processed: ArchiveProcessIngestResult[];
+  promoted: ArchivePromoteReviewArtifactResult[];
+  navigation: ArchiveWikiNavigationRefreshResult;
+  lint: ArchiveLintResult;
+  skipped: string[];
+  errors: string[];
+}
+
+export interface ArchiveBackgroundCycleResult {
+  startedAt: string;
+  finishedAt: string;
+  scan: ArchiveSourceFolderScanResult;
+  queuedRequestFiles: string[];
+  skippedQueueSources: string[];
+  maintenance: ArchiveMaintenanceCycleResult;
+}
+
+export interface ArchiveWikiNavigationRefreshResult {
+  refreshedAt: string;
+  indexPath: string;
+  logPath: string;
+  pagesIndexed: number;
+  activityEntries: number;
+}
+
+export interface ArchiveLintFinding {
+  severity: "info" | "warning" | "critical" | string;
+  category:
+    | "orphan-page"
+    | "missing-wikilinks"
+    | "stale-page"
+    | "unprocessed-source"
+    | "duplicate-title"
+    | "contradiction-candidate"
+    | "index-mismatch"
+    | string;
+  target: string;
+  detail: string;
+  recommendedAction: string;
+}
+
+export interface ArchiveLintResult {
+  checkedAt: string;
+  reportPath: string;
+  pagesChecked: number;
+  sourcesChecked: number;
+  findings: ArchiveLintFinding[];
+}
+
+export interface ArchiveSemanticLintFinding {
+  severity: "info" | "warning" | "critical" | string;
+  targetPages: string[];
+  claim: string;
+  conflictingEvidence: string;
+  confidence: ArchiveReviewConfidence | string;
+  recommendedAction: string;
+  requiresHumanReview: boolean;
+}
+
+export interface ArchiveSemanticLintResult {
+  checkedAt: string;
+  reportPath: string;
+  providerId: string;
+  model: string;
+  sourceLintReportPath: string;
+  candidatesReviewed: number;
+  findings: ArchiveSemanticLintFinding[];
+  summary: string;
+  repairRequestFiles: string[];
+}
+
 export interface ArchiveReviewDecisionResult {
   artifactFile: string;
   status: ArchiveReviewDecisionStatus;
@@ -1243,6 +1384,19 @@ export interface ObsidianWriteNoteResult {
   auditPath: string;
 }
 
+export interface ObsidianNoteOperationResult {
+  operation: "create-note" | "create-folder" | "move-note" | "archive-note";
+  notePath?: string;
+  previousNotePath?: string;
+  folderPath?: string;
+  archivedPath?: string;
+  title?: string;
+  sizeBytes?: number;
+  modifiedAt?: string;
+  versionPath?: string;
+  auditPath: string;
+}
+
 export interface ObsidianBacklink {
   sourcePath: string;
   sourceTitle: string;
@@ -1314,6 +1468,50 @@ export interface BrowserNativeWebviewResult {
   status: string;
 }
 
+export type NativeBrowserProbeStatus = "ready" | "partial" | "blocked";
+export type NativeBrowserCapabilityStatus = "ready" | "present-unverified" | "missing" | "blocked";
+
+export interface NativeBrowserProbeResult {
+  status: NativeBrowserProbeStatus;
+  engineCandidate: string;
+  hostBinaryStatus: NativeBrowserCapabilityStatus;
+  sourceScaffoldStatus: NativeBrowserCapabilityStatus;
+  embeddedViewStatus: NativeBrowserCapabilityStatus;
+  extensionCompatibilityStatus: NativeBrowserCapabilityStatus;
+  phantomStatus: NativeBrowserCapabilityStatus;
+  bitwardenStatus: NativeBrowserCapabilityStatus;
+  blockers: string[];
+  nextActions: string[];
+  checkedAt: string;
+}
+
+export type NativeBrowserAttachSmokeStatus = "attached" | "blocked" | "unsupported";
+
+export interface NativeBrowserAttachSmokeResult {
+  status: NativeBrowserAttachSmokeStatus;
+  platform: string;
+  parentHandleKind: string;
+  parentHandlePresent: boolean;
+  hostIntegrationMode: string;
+  blocker?: string | null;
+  nextActions: string[];
+  checkedAt: string;
+}
+
+export type NativeBrowserBridgeProbeStatus = "ready" | "partial" | "missing";
+
+export interface NativeBrowserBridgeProbeResult {
+  status: NativeBrowserBridgeProbeStatus;
+  integrationMode: string;
+  bridgeLibraryStatus: NativeBrowserCapabilityStatus;
+  cAbiStatus: NativeBrowserCapabilityStatus;
+  bridgeLibraryPath?: string | null;
+  exportedSymbols: string[];
+  blockers: string[];
+  nextActions: string[];
+  checkedAt: string;
+}
+
 export interface BrowserPageLink {
   text: string;
   href: string;
@@ -1352,9 +1550,12 @@ export interface BrowserHostAuditEvent {
 export interface BrowserHostHealthResult {
   ready: boolean;
   sessionId: string | null;
-  engine: "chromium";
-  headless: boolean;
+  engine: "chromium" | "electron-chromium";
+  headless?: boolean;
   url: string | null;
+  title?: string | null;
+  menuLabels?: string[];
+  extensionSupport?: "local-unpacked" | "none";
   audit: BrowserHostAuditEvent[];
 }
 
@@ -1388,8 +1589,43 @@ export interface BrowserHostEvidenceResult {
   audit: BrowserHostAuditEvent[];
 }
 
+export interface BrowserExtensionState {
+  extensionId: string;
+  name: string;
+  version: string;
+  installed: boolean;
+  pinned: boolean;
+  enabled: boolean;
+  source: "chrome-web-store" | "local-unpacked" | "resonantos-registry";
+  requestedCapabilities: string[];
+}
+
+export interface BrowserExtensionListResult {
+  sessionId: string | null;
+  extensions: BrowserExtensionState[];
+  audit: BrowserHostAuditEvent[];
+}
+
+export interface BrowserExtensionLoadResult {
+  sessionId: string | null;
+  extension: BrowserExtensionState;
+  audit: BrowserHostAuditEvent[];
+}
+
 export interface BrowserToolCommand {
-  type: "start" | "open_url" | "read_page" | "click" | "type" | "capture_evidence" | "close" | "health";
+  type:
+    | "start"
+    | "open_url"
+    | "read_page"
+    | "click"
+    | "type"
+    | "capture_evidence"
+    | "close"
+    | "health"
+    | "extensions_list"
+    | "extensions_load_unpacked"
+    | "extensions_set_pinned"
+    | "extensions_disable";
   params?: Record<string, unknown>;
   humanApproved?: boolean;
 }
@@ -1655,6 +1891,7 @@ export interface UiPreferences {
   workspaceLayout: "main-chat" | "chat-main";
   chatHistoryOpen: boolean;
   chatSidebarWidth: number;
+  recommendedAddOnsReviewed: boolean;
   windowZoom: number;
   browserWorkspace: BrowserWorkspaceState;
   theme: "resonant-dark";

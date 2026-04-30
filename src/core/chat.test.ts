@@ -75,4 +75,49 @@ describe("chat transcript ledger", () => {
       }),
     });
   });
+
+  it("uses the owning add-on agent display name for add-on assistant messages", () => {
+    const base = buildDefaultState([
+      {
+        id: "addon.hermes",
+        name: "Hermes",
+        version: "0.1.0",
+        author: "test",
+        category: "agent",
+        description: "test",
+        runtimeType: "agent-addon",
+        surfaces: [],
+        requestedCapabilities: [],
+        providerRequirements: { sharedProfiles: [], supportsPrivateCredentials: false },
+        archiveIntegration: {
+          readScopes: [],
+          intakeWriteScopes: [],
+          canRequestIngest: false,
+          canWriteKnowledgePages: false,
+        },
+        health: { strategy: "test" },
+        installHooks: {},
+        compatibility: { shellVersion: "^0.1.0", platforms: ["macOS"] },
+      },
+    ]);
+    const state = {
+      ...base,
+      conversationThreads: [
+        {
+          id: "thread-hermes-test",
+          title: "Hermes",
+          owningAgentId: "hermes.agent",
+          workspaceId: "workspace-hermes",
+          channelId: "desktop-hermes",
+          summary: "Hermes add-on test.",
+          messages: [],
+        },
+        ...base.conversationThreads,
+      ],
+    };
+    const next = appendAssistantMessage(state, "thread-hermes-test", "I am here.");
+
+    const message = next.conversationThreads.find((thread) => thread.id === "thread-hermes-test")?.messages.at(-1);
+    expect(message?.author).toBe("Hermes");
+  });
 });

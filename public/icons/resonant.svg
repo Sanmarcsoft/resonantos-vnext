@@ -58,10 +58,15 @@
       <path d="M7 8h.01" />
       <path d="M9.5 8h.01" />
     </symbol>
-    <symbol id="ros-obsidian" viewBox="0 0 24 24">
-      <path d="m12 3.5 6.5 5-2.5 11h-8L5.5 8.5z" />
-      <path d="m8 19.5 4-16 4 16" />
-      <path d="M7.2 9h9.6" />
+    <symbol id="ros-resonant-notes" viewBox="0 0 24 24">
+      <path d="M7 5.5h8.2l2.8 2.8v10.2H7z" />
+      <path d="M15 5.5v3h3" />
+      <path d="M4.8 8.5v10.8h10.4" />
+      <path d="M9.5 11.2h5" />
+      <path d="M9.5 14h6" />
+      <path d="M9.5 16.8h3.4" />
+      <path d="M17.6 15.3c1.25 0 2.2.95 2.2 2.15s-.95 2.15-2.2 2.15-2.2-.95-2.2-2.15.95-2.15 2.2-2.15z" />
+      <path d="M17.6 15.3v-2.1" />
     </symbol>
     <symbol id="ros-audio" viewBox="0 0 24 24">
       <path d="M6 14V10" />

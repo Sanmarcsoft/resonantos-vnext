@@ -1024,6 +1024,29 @@
   margin-bottom: 1rem;
 }
 
+.archive-review-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  justify-content: flex-end;
+}
+
+.archive-maintenance-summary {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 1rem;
+  padding: 0.9rem;
+  border-radius: 16px;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  background: rgba(16, 185, 129, 0.065);
+  overflow-wrap: anywhere;
+}
+
+.archive-maintenance-summary p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
 .archive-review-stat,
 .archive-review-signal,
 .archive-proposed-page-card {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AddOnCategory,
@@ -15,7 +15,7 @@ import { buildDefaultState } from "./core/defaults";
 
 const manifests: AddOnManifest[] = [
   createManifest("addon.telegram-channel", "Telegram Channel", "channel"),
-  createManifest("addon.obsidian", "Obsidian", "knowledge"),
+  createManifest("addon.obsidian", "Resonant Notes", "knowledge"),
   createBrowserManifest(),
   createOpenCodeManifest(),
   createManifest("addon.audio2tol", "Audio2TOL", "tool"),
@@ -44,6 +44,10 @@ const {
   requestArchiveReviewDecisionMock,
   requestArchivePromoteReviewArtifactMock,
   requestArchiveProcessIngestRequestMock,
+  requestArchiveMaintenanceCycleMock,
+  requestArchiveLintMock,
+  requestArchiveSemanticLintMock,
+  requestArchiveBackgroundCycleMock,
   requestArchiveTolBundleCandidatesMock,
   requestArchiveBuildTolBundleMock,
   requestArchiveSourceFolderScanMock,
@@ -59,6 +63,10 @@ const {
   requestObsidianNoteMock,
   requestObsidianOpenNoteMock,
   requestObsidianWriteNoteMock,
+  requestObsidianCreateNoteMock,
+  requestObsidianCreateFolderMock,
+  requestObsidianMoveNoteMock,
+  requestObsidianArchiveNoteMock,
   requestObsidianVaultIndexMock,
   requestOpenCodeWorkspaceFolderSelectionMock,
   requestOpenCodeStatusMock,
@@ -77,6 +85,11 @@ const {
   requestBrowserNativeWebviewShowMock,
   requestBrowserNativeWebviewResizeMock,
   requestBrowserNativeWebviewHideMock,
+  requestNativeBrowserProbeMock,
+  requestNativeBrowserAttachSmokeMock,
+  requestNativeBrowserBridgeProbeMock,
+  requestBrowserVisibleHostCommandMock,
+  requestBrowserExtensionFolderSelectionMock,
   createDesktopBrowserToolRunnerMock,
   browserToolRunMock,
   requestLocalRuntimeStatusMock,
@@ -84,6 +97,8 @@ const {
   requestRecoveryRouteCandidatesMock,
   requestProviderDiagnosticsMock,
   requestProviderSmokeTestMock,
+  openFloatingChatWindowMock,
+  persistStateMock,
 } = vi.hoisted(() => {
   const browserToolRunMock = vi.fn();
   return {
@@ -389,6 +404,85 @@ const {
       decision: { status: "pending" },
     },
   })),
+  requestArchiveMaintenanceCycleMock: vi.fn(async () => ({
+    startedAt: "unix:11",
+    finishedAt: "unix:12",
+    processed: [],
+    promoted: [],
+    navigation: {
+      refreshedAt: "unix:12",
+      indexPath: "/tmp/wiki/index.md",
+      logPath: "/tmp/wiki/log.md",
+      pagesIndexed: 0,
+      activityEntries: 0,
+    },
+    lint: {
+      checkedAt: "unix:12",
+      reportPath: "/tmp/review/lint/unix-12-lint-report.md",
+      pagesChecked: 0,
+      sourcesChecked: 0,
+      findings: [],
+    },
+    skipped: [],
+    errors: [],
+  })),
+  requestArchiveBackgroundCycleMock: vi.fn(async () => ({
+    startedAt: "unix:11",
+    finishedAt: "unix:12",
+    scan: {
+      scannedAt: "unix:9",
+      rootsScanned: 1,
+      filesSeen: 0,
+      newFiles: 0,
+      changedFiles: 0,
+      unchangedFiles: 0,
+      skippedFiles: 0,
+      records: [] as Array<Record<string, unknown>>,
+      indexPath: "/tmp/source-watch-index.json",
+    },
+    queuedRequestFiles: [],
+    skippedQueueSources: [],
+    maintenance: {
+      startedAt: "unix:11",
+      finishedAt: "unix:12",
+      processed: [],
+      promoted: [],
+      navigation: {
+        refreshedAt: "unix:12",
+        indexPath: "/tmp/wiki/index.md",
+        logPath: "/tmp/wiki/log.md",
+        pagesIndexed: 0,
+        activityEntries: 0,
+      },
+      lint: {
+        checkedAt: "unix:12",
+        reportPath: "/tmp/review/lint/unix-12-lint-report.md",
+        pagesChecked: 0,
+        sourcesChecked: 0,
+        findings: [],
+      },
+      skipped: [],
+      errors: [],
+    },
+  })),
+  requestArchiveLintMock: vi.fn(async () => ({
+    checkedAt: "unix:13",
+    reportPath: "/tmp/review/lint/unix-13-lint-report.md",
+    pagesChecked: 0,
+    sourcesChecked: 0,
+    findings: [],
+  })),
+  requestArchiveSemanticLintMock: vi.fn(async () => ({
+    checkedAt: "unix:14",
+    reportPath: "/tmp/review/lint/semantic/unix-14-semantic-lint-report.md",
+    providerId: "shared-openai",
+    model: "gpt-5.4",
+    sourceLintReportPath: "/tmp/review/lint/unix-13-lint-report.md",
+    candidatesReviewed: 0,
+    findings: [],
+    summary: "No contradiction candidates were identified.",
+    repairRequestFiles: [],
+  })),
   requestArchiveTolBundleCandidatesMock: vi.fn(async () => [] as Array<Record<string, unknown>>),
   requestArchiveBuildTolBundleMock: vi.fn(async () => ({
     sessionId: "2026-04-21-1003",
@@ -592,6 +686,35 @@ const {
     versionPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-versions/Architecture Note.1.md",
     auditPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-audit/1-write-note.json",
   })),
+  requestObsidianCreateNoteMock: vi.fn(async (input: { notePath: string; content?: string }) => ({
+    operation: "create-note",
+    notePath: input.notePath,
+    title: input.notePath.replace(/\.md$/i, "").split("/").at(-1) ?? "Untitled",
+    sizeBytes: input.content?.length ?? 0,
+    modifiedAt: "unix:15",
+    auditPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-audit/2-create-note.json",
+  })),
+  requestObsidianCreateFolderMock: vi.fn(async (input: { folderPath: string }) => ({
+    operation: "create-folder",
+    folderPath: input.folderPath,
+    auditPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-audit/3-create-folder.json",
+  })),
+  requestObsidianMoveNoteMock: vi.fn(async (input: { fromNotePath: string; toNotePath: string }) => ({
+    operation: "move-note",
+    previousNotePath: input.fromNotePath,
+    notePath: input.toNotePath,
+    title: input.toNotePath.replace(/\.md$/i, "").split("/").at(-1) ?? "Untitled",
+    sizeBytes: 42,
+    modifiedAt: "unix:16",
+    versionPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-versions/Architecture Note.2.md",
+    auditPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-audit/4-move-note.json",
+  })),
+  requestObsidianArchiveNoteMock: vi.fn(async (input: { notePath: string }) => ({
+    operation: "archive-note",
+    previousNotePath: input.notePath,
+    archivedPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-trash/1/Architecture Note.md",
+    auditPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-audit/5-archive-note.json",
+  })),
   requestObsidianVaultIndexMock: vi.fn(async (_vaultPath: string, query = "") => ({
     vaultPath: "/Users/augmentor/Documents/ResonantVault",
     noteCount: 2,
@@ -762,6 +885,79 @@ const {
     visible: false,
     status: "hidden",
   })),
+  requestNativeBrowserProbeMock: vi.fn(async () => ({
+    status: "blocked",
+    engineCandidate: "cef-chrome-runtime",
+    hostBinaryStatus: "missing",
+    sourceScaffoldStatus: "ready",
+    embeddedViewStatus: "blocked",
+    extensionCompatibilityStatus: "blocked",
+    phantomStatus: "blocked",
+    bitwardenStatus: "blocked",
+    blockers: [
+      "No product native Browser host is registered with ResonantOS yet.",
+      "Phantom Wallet and Bitwarden extension compatibility has not been proven in the embedded host.",
+    ],
+    nextActions: ["Build the native Browser host binary behind the ADR-025 IPC contract."],
+    checkedAt: "unix-ms:1",
+  })),
+  requestNativeBrowserAttachSmokeMock: vi.fn(async () => ({
+    status: "blocked",
+    platform: "macos",
+    parentHandleKind: "macos-ns-view",
+    parentHandlePresent: true,
+    hostIntegrationMode: "external-process",
+    blocker:
+      "External CEF executables cannot safely attach to a process-local macOS NSView. Product Browser embedding requires in-process CEF/native library integration owned by the Tauri process.",
+    nextActions: ["Move the CEF host from an external executable into an in-process Rust-owned native integration."],
+    checkedAt: "unix-ms:2",
+  })),
+  requestNativeBrowserBridgeProbeMock: vi.fn(async () => ({
+    status: "ready",
+    integrationMode: "in-process-native-library",
+    bridgeLibraryStatus: "ready",
+    cAbiStatus: "ready",
+    bridgeLibraryPath: "addons/resonant-browser-native/build/libResonantBrowserNativeBridge.a",
+    exportedSymbols: [
+      "_resonant_browser_native_contract_json",
+      "_resonant_browser_native_in_process_status_json",
+    ],
+    blockers: [],
+    nextActions: ["Wire CEF lifecycle calls behind this ABI."],
+    checkedAt: "unix-ms:3",
+  })),
+  requestBrowserVisibleHostCommandMock: vi.fn(async (command: { type: string }) =>
+    command.type === "extensions_list"
+      ? { sessionId: "electron-browser-test", extensions: [], audit: [] }
+      : command.type === "extensions_load_unpacked"
+        ? {
+            sessionId: "electron-browser-test",
+            extension: {
+              extensionId: "priority-extension",
+              name: "Priority Extension",
+              version: "0.1.0",
+              installed: true,
+              pinned: true,
+              enabled: true,
+              source: "local-unpacked",
+              requestedCapabilities: [],
+            },
+            audit: [],
+          }
+        : command.type === "close"
+          ? { sessionId: "electron-browser-test", closed: true, audit: [] }
+          : {
+              ready: true,
+              sessionId: "electron-browser-test",
+              engine: "electron-chromium",
+              url: "https://resonantos.com/",
+              title: "ResonantOS",
+              menuLabels: ["File", "Edit", "View", "History", "Bookmarks", "Profiles", "Tab", "Window", "Help"],
+              extensionSupport: "local-unpacked",
+              audit: [],
+            },
+  ),
+  requestBrowserExtensionFolderSelectionMock: vi.fn(async () => "/Users/augmentor/Extensions/Phantom"),
   browserToolRunMock,
   createDesktopBrowserToolRunnerMock: vi.fn(() => ({ run: browserToolRunMock })),
   requestLocalRuntimeStatusMock: vi.fn(async () => ({
@@ -866,6 +1062,8 @@ const {
     checkedAt: "unix:2",
     summary: "Provider smoke test passed.",
   })),
+  openFloatingChatWindowMock: vi.fn(async () => undefined),
+  persistStateMock: vi.fn(async () => undefined),
   };
 });
 
@@ -882,7 +1080,9 @@ vi.mock("./core/runtime", () => ({
         : profile,
     ),
   })),
-  persistState: vi.fn(async () => undefined),
+  persistState: persistStateMock,
+  openFloatingChatWindow: openFloatingChatWindowMock,
+  subscribeRuntimeStateUpdates: vi.fn(async () => () => undefined),
   requestEngineerRecoveryTurn: requestEngineerRecoveryTurnMock,
   requestCreateTaskWorkspace: requestCreateTaskWorkspaceMock,
   requestListTaskWorkspaces: requestListTaskWorkspacesMock,
@@ -904,6 +1104,10 @@ vi.mock("./core/runtime", () => ({
   requestArchiveReviewDecision: requestArchiveReviewDecisionMock,
   requestArchivePromoteReviewArtifact: requestArchivePromoteReviewArtifactMock,
   requestArchiveProcessIngestRequest: requestArchiveProcessIngestRequestMock,
+  requestArchiveMaintenanceCycle: requestArchiveMaintenanceCycleMock,
+  requestArchiveBackgroundCycle: requestArchiveBackgroundCycleMock,
+  requestArchiveLint: requestArchiveLintMock,
+  requestArchiveSemanticLint: requestArchiveSemanticLintMock,
   requestArchiveTolBundleCandidates: requestArchiveTolBundleCandidatesMock,
   requestArchiveBuildTolBundle: requestArchiveBuildTolBundleMock,
   requestArchiveSourceFolderScan: requestArchiveSourceFolderScanMock,
@@ -919,6 +1123,10 @@ vi.mock("./core/runtime", () => ({
   requestObsidianNote: requestObsidianNoteMock,
   requestObsidianOpenNote: requestObsidianOpenNoteMock,
   requestObsidianWriteNote: requestObsidianWriteNoteMock,
+  requestObsidianCreateNote: requestObsidianCreateNoteMock,
+  requestObsidianCreateFolder: requestObsidianCreateFolderMock,
+  requestObsidianMoveNote: requestObsidianMoveNoteMock,
+  requestObsidianArchiveNote: requestObsidianArchiveNoteMock,
   requestObsidianVaultIndex: requestObsidianVaultIndexMock,
   requestOpenCodeWorkspaceFolderSelection: requestOpenCodeWorkspaceFolderSelectionMock,
   requestOpenCodeStatus: requestOpenCodeStatusMock,
@@ -937,6 +1145,11 @@ vi.mock("./core/runtime", () => ({
   requestBrowserNativeWebviewShow: requestBrowserNativeWebviewShowMock,
   requestBrowserNativeWebviewResize: requestBrowserNativeWebviewResizeMock,
   requestBrowserNativeWebviewHide: requestBrowserNativeWebviewHideMock,
+  requestNativeBrowserProbe: requestNativeBrowserProbeMock,
+  requestNativeBrowserAttachSmoke: requestNativeBrowserAttachSmokeMock,
+  requestNativeBrowserBridgeProbe: requestNativeBrowserBridgeProbeMock,
+  requestBrowserVisibleHostCommand: requestBrowserVisibleHostCommandMock,
+  requestBrowserExtensionFolderSelection: requestBrowserExtensionFolderSelectionMock,
   createDesktopBrowserToolRunner: createDesktopBrowserToolRunnerMock,
   requestRecoveryRouteCandidates: requestRecoveryRouteCandidatesMock,
   requestProviderServiceChatCompletion: requestProviderServiceChatCompletionMock,
@@ -992,6 +1205,22 @@ describe("App boot flow", () => {
       disconnect() {}
     }
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+    const localStorageEntries = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: vi.fn((key: string) => localStorageEntries.get(key) ?? null),
+        setItem: vi.fn((key: string, value: string) => {
+          localStorageEntries.set(key, String(value));
+        }),
+        removeItem: vi.fn((key: string) => {
+          localStorageEntries.delete(key);
+        }),
+        clear: vi.fn(() => {
+          localStorageEntries.clear();
+        }),
+      },
+    });
     hydrateStateMock.mockReset();
     hydrateStateMock.mockResolvedValue(buildDefaultState(manifests));
     requestProviderServiceChatCompletionMock.mockReset();
@@ -1315,6 +1544,89 @@ describe("App boot flow", () => {
         decision: { status: "pending" },
       },
     });
+    requestArchiveMaintenanceCycleMock.mockReset();
+    requestArchiveMaintenanceCycleMock.mockResolvedValue({
+      startedAt: "unix:11",
+      finishedAt: "unix:12",
+      processed: [],
+      promoted: [],
+      navigation: {
+        refreshedAt: "unix:12",
+        indexPath: "/tmp/wiki/index.md",
+        logPath: "/tmp/wiki/log.md",
+        pagesIndexed: 0,
+        activityEntries: 0,
+      },
+      lint: {
+        checkedAt: "unix:12",
+        reportPath: "/tmp/review/lint/unix-12-lint-report.md",
+        pagesChecked: 0,
+        sourcesChecked: 0,
+        findings: [],
+      },
+      skipped: [],
+      errors: [],
+    });
+    requestArchiveBackgroundCycleMock.mockReset();
+    requestArchiveBackgroundCycleMock.mockResolvedValue({
+      startedAt: "unix:11",
+      finishedAt: "unix:12",
+      scan: {
+        scannedAt: "unix:9",
+        rootsScanned: 1,
+        filesSeen: 0,
+        newFiles: 0,
+        changedFiles: 0,
+        unchangedFiles: 0,
+        skippedFiles: 0,
+        records: [] as Array<Record<string, unknown>>,
+        indexPath: "/tmp/source-watch-index.json",
+      },
+      queuedRequestFiles: [],
+      skippedQueueSources: [],
+      maintenance: {
+        startedAt: "unix:11",
+        finishedAt: "unix:12",
+        processed: [],
+        promoted: [],
+        navigation: {
+          refreshedAt: "unix:12",
+          indexPath: "/tmp/wiki/index.md",
+          logPath: "/tmp/wiki/log.md",
+          pagesIndexed: 0,
+          activityEntries: 0,
+        },
+        lint: {
+          checkedAt: "unix:12",
+          reportPath: "/tmp/review/lint/unix-12-lint-report.md",
+          pagesChecked: 0,
+          sourcesChecked: 0,
+          findings: [],
+        },
+        skipped: [],
+        errors: [],
+      },
+    });
+    requestArchiveLintMock.mockReset();
+    requestArchiveLintMock.mockResolvedValue({
+      checkedAt: "unix:13",
+      reportPath: "/tmp/review/lint/unix-13-lint-report.md",
+      pagesChecked: 0,
+      sourcesChecked: 0,
+      findings: [],
+    });
+    requestArchiveSemanticLintMock.mockReset();
+    requestArchiveSemanticLintMock.mockResolvedValue({
+      checkedAt: "unix:14",
+      reportPath: "/tmp/review/lint/semantic/unix-14-semantic-lint-report.md",
+      providerId: "shared-openai",
+      model: "gpt-5.4",
+      sourceLintReportPath: "/tmp/review/lint/unix-13-lint-report.md",
+      candidatesReviewed: 0,
+      findings: [],
+      summary: "No contradiction candidates were identified.",
+      repairRequestFiles: [],
+    });
     requestArchiveTolBundleCandidatesMock.mockReset();
     requestArchiveTolBundleCandidatesMock.mockResolvedValue([]);
     requestArchiveBuildTolBundleMock.mockReset();
@@ -1534,6 +1846,39 @@ describe("App boot flow", () => {
       versionPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-versions/Architecture Note.1.md",
       auditPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-audit/1-write-note.json",
     }));
+    requestObsidianCreateNoteMock.mockReset();
+    requestObsidianCreateNoteMock.mockImplementation(async (input: { notePath: string; content?: string }) => ({
+      operation: "create-note",
+      notePath: input.notePath,
+      title: input.notePath.replace(/\.md$/i, "").split("/").at(-1) ?? "Untitled",
+      sizeBytes: input.content?.length ?? 0,
+      modifiedAt: "unix:15",
+      auditPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-audit/2-create-note.json",
+    }));
+    requestObsidianCreateFolderMock.mockReset();
+    requestObsidianCreateFolderMock.mockImplementation(async (input: { folderPath: string }) => ({
+      operation: "create-folder",
+      folderPath: input.folderPath,
+      auditPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-audit/3-create-folder.json",
+    }));
+    requestObsidianMoveNoteMock.mockReset();
+    requestObsidianMoveNoteMock.mockImplementation(async (input: { fromNotePath: string; toNotePath: string }) => ({
+      operation: "move-note",
+      previousNotePath: input.fromNotePath,
+      notePath: input.toNotePath,
+      title: input.toNotePath.replace(/\.md$/i, "").split("/").at(-1) ?? "Untitled",
+      sizeBytes: 42,
+      modifiedAt: "unix:16",
+      versionPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-versions/Architecture Note.2.md",
+      auditPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-audit/4-move-note.json",
+    }));
+    requestObsidianArchiveNoteMock.mockReset();
+    requestObsidianArchiveNoteMock.mockImplementation(async (input: { notePath: string }) => ({
+      operation: "archive-note",
+      previousNotePath: input.notePath,
+      archivedPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-trash/1/Architecture Note.md",
+      auditPath: "/Users/augmentor/Documents/ResonantVault/.resonantos/obsidian-note-audit/5-archive-note.json",
+    }));
     requestObsidianVaultIndexMock.mockReset();
     requestObsidianVaultIndexMock.mockImplementation(async (_vaultPath: string, query = "") => ({
       vaultPath: "/Users/augmentor/Documents/ResonantVault",
@@ -1722,6 +2067,84 @@ describe("App boot flow", () => {
       visible: false,
       status: "hidden",
     });
+    requestNativeBrowserProbeMock.mockReset();
+    requestNativeBrowserProbeMock.mockResolvedValue({
+      status: "blocked",
+      engineCandidate: "cef-chrome-runtime",
+      hostBinaryStatus: "missing",
+      sourceScaffoldStatus: "ready",
+      embeddedViewStatus: "blocked",
+      extensionCompatibilityStatus: "blocked",
+      phantomStatus: "blocked",
+      bitwardenStatus: "blocked",
+      blockers: [
+        "No product native Browser host is registered with ResonantOS yet.",
+        "Phantom Wallet and Bitwarden extension compatibility has not been proven in the embedded host.",
+      ],
+      nextActions: ["Build the native Browser host binary behind the ADR-025 IPC contract."],
+      checkedAt: "unix-ms:1",
+    });
+    requestNativeBrowserAttachSmokeMock.mockReset();
+    requestNativeBrowserAttachSmokeMock.mockResolvedValue({
+      status: "blocked",
+      platform: "macos",
+      parentHandleKind: "macos-ns-view",
+      parentHandlePresent: true,
+      hostIntegrationMode: "external-process",
+      blocker:
+        "External CEF executables cannot safely attach to a process-local macOS NSView. Product Browser embedding requires in-process CEF/native library integration owned by the Tauri process.",
+      nextActions: ["Move the CEF host from an external executable into an in-process Rust-owned native integration."],
+      checkedAt: "unix-ms:2",
+    });
+    requestNativeBrowserBridgeProbeMock.mockReset();
+    requestNativeBrowserBridgeProbeMock.mockResolvedValue({
+      status: "ready",
+      integrationMode: "in-process-native-library",
+      bridgeLibraryStatus: "ready",
+      cAbiStatus: "ready",
+      bridgeLibraryPath: "addons/resonant-browser-native/build/libResonantBrowserNativeBridge.a",
+      exportedSymbols: [
+        "_resonant_browser_native_contract_json",
+        "_resonant_browser_native_in_process_status_json",
+      ],
+      blockers: [],
+      nextActions: ["Wire CEF lifecycle calls behind this ABI."],
+      checkedAt: "unix-ms:3",
+    });
+    requestBrowserVisibleHostCommandMock.mockReset();
+    requestBrowserVisibleHostCommandMock.mockImplementation(async (command: { type: string }) =>
+      command.type === "extensions_list"
+        ? { sessionId: "electron-browser-test", extensions: [], audit: [] }
+        : command.type === "extensions_load_unpacked"
+          ? {
+              sessionId: "electron-browser-test",
+              extension: {
+                extensionId: "priority-extension",
+                name: "Priority Extension",
+                version: "0.1.0",
+                installed: true,
+                pinned: true,
+                enabled: true,
+                source: "local-unpacked",
+                requestedCapabilities: [],
+              },
+              audit: [],
+            }
+          : command.type === "close"
+            ? { sessionId: "electron-browser-test", closed: true, audit: [] }
+            : {
+                ready: true,
+                sessionId: "electron-browser-test",
+                engine: "electron-chromium",
+                url: "https://resonantos.com/",
+                title: "ResonantOS",
+                menuLabels: ["File", "Edit", "View", "History", "Bookmarks", "Profiles", "Tab", "Window", "Help"],
+                extensionSupport: "local-unpacked",
+                audit: [],
+              },
+    );
+    requestBrowserExtensionFolderSelectionMock.mockReset();
+    requestBrowserExtensionFolderSelectionMock.mockResolvedValue("/Users/augmentor/Extensions/Phantom");
     createDesktopBrowserToolRunnerMock.mockReset();
     browserToolRunMock.mockReset();
     browserToolRunMock.mockImplementation(async (command: { type: string; params?: Record<string, unknown> }) =>
@@ -1861,6 +2284,9 @@ describe("App boot flow", () => {
       checkedAt: "unix:2",
       summary: "Provider smoke test passed.",
     });
+    openFloatingChatWindowMock.mockReset();
+    openFloatingChatWindowMock.mockResolvedValue(undefined);
+    persistStateMock.mockClear();
     Element.prototype.scrollIntoView = vi.fn();
   });
 
@@ -1892,6 +2318,31 @@ describe("App boot flow", () => {
     expect(screen.getByRole("button", { name: "Move chat back to the right" })).toBeTruthy();
   });
 
+  it("detaches chat by opening the floating window and hiding the dashboard rail/history", async () => {
+    const { container } = render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show chat history" }));
+    expect(await screen.findByLabelText("Chat history")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Detach chat window" }));
+
+    await waitFor(() => expect(openFloatingChatWindowMock).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(persistStateMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          uiPreferences: expect.objectContaining({
+            chatSidebarOpen: false,
+            chatHistoryOpen: false,
+          }),
+        }),
+      ),
+    );
+    expect(container.querySelector(".shell.chat-closed")).toBeTruthy();
+    expect(screen.queryByLabelText("Chat history")).toBeNull();
+  });
+
   it("opens the Resonant Browser workspace from Home with a live viewport contract", async () => {
     const rect = (left: number, top: number, right: number, bottom: number): DOMRect => ({
       left,
@@ -1919,7 +2370,10 @@ describe("App boot flow", () => {
     browserInstallation.enabled = true;
     browserInstallation.status = "enabled";
     browserInstallation.grantedCapabilities = browserInstallation.grantedCapabilities.map((grant) =>
-      grant.capability === "network" || grant.capability === "ui-embedding" || grant.capability === "browser-control"
+      grant.capability === "network" ||
+      grant.capability === "ui-embedding" ||
+      grant.capability === "browser-control" ||
+      grant.capability === "filesystem"
         ? { ...grant, granted: true }
         : grant,
     );
@@ -1933,24 +2387,45 @@ describe("App boot flow", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /Resonant Browser.*Embedded app/i })[0]);
     fireEvent.click(screen.getByRole("button", { name: "Open Workspace" }));
 
-    expect(screen.getByTestId("browser-workspace")).toBeTruthy();
+    expect(await screen.findByTestId("browser-workspace")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "File menu" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "History menu" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Read active page with Augmentor" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Extensions" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Browser apps" })).toBeTruthy();
     expect(await screen.findByLabelText("Browser URL")).toBeTruthy();
-    expect(screen.getByLabelText("Live browser viewport")).toBeTruthy();
-    const browserSurface = screen.getByTitle("Resonant Browser native webview: resonantos.com");
-    expect(browserSurface).toBeTruthy();
-    expect(screen.getByText("Websites load in a host-owned webview, not an iframe.")).toBeTruthy();
-    await waitFor(() =>
-      expect(requestBrowserNativeWebviewShowMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          url: "https://resonantos.com",
-          navigate: true,
-          bounds: expect.objectContaining({ x: 81, y: 186, width: 998, height: 513 }),
-        }),
-      ),
-    );
+    expect(screen.getByLabelText("Native embedded Chromium target")).toBeTruthy();
+    expect(screen.getByText("Native embedded Chromium, not an Electron sidecar")).toBeTruthy();
+    expect(await screen.findByLabelText("Native Browser host probe")).toBeTruthy();
+    expect(screen.getByText("Native embedded host blocked")).toBeTruthy();
+    expect(screen.getByText("Phantom Wallet and Bitwarden extension compatibility has not been proven in the embedded host.")).toBeTruthy();
+    expect(screen.getAllByText("Native host compatibility required")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Run Attach Smoke Test" }));
+    expect(await screen.findByLabelText("Native Browser attach smoke test")).toBeTruthy();
+    expect(screen.getByText("Native attach blocked")).toBeTruthy();
+    expect(screen.getByText(/External CEF executables cannot safely attach/i)).toBeTruthy();
+    expect(requestNativeBrowserAttachSmokeMock).toHaveBeenCalledWith("external-process");
+    fireEvent.click(screen.getByRole("button", { name: "Run Bridge Probe" }));
+    expect(await screen.findByLabelText("Native Browser in-process bridge probe")).toBeTruthy();
+    expect(screen.getByText("In-process bridge ready")).toBeTruthy();
+    expect(screen.getByText(/resonant_browser_native_contract_json/i)).toBeTruthy();
+    expect(requestNativeBrowserBridgeProbeMock).toHaveBeenCalledWith("in-process-native-library");
     rectSpy.mockRestore();
+    await waitFor(() => expect(requestBrowserNativeWebviewShowMock).toHaveBeenCalled());
+    expect(requestBrowserNativeWebviewShowMock).toHaveBeenCalledWith({
+      url: "https://resonantos.com",
+      navigate: true,
+      bounds: {
+        x: 81,
+        y: 90,
+        width: 998,
+        height: 609,
+      },
+    });
+    expect(requestBrowserNativeWebviewHideMock).not.toHaveBeenCalled();
     expect(requestBrowserEngineStatusMock).not.toHaveBeenCalled();
     expect(requestBrowserStartSessionMock).not.toHaveBeenCalled();
+    expect(requestNativeBrowserProbeMock).toHaveBeenCalledWith("cef-chrome-runtime");
   });
 
   it("preserves Browser tabs and active URL when switching workspaces", async () => {
@@ -1960,7 +2435,10 @@ describe("App boot flow", () => {
     browserInstallation.enabled = true;
     browserInstallation.status = "enabled";
     browserInstallation.grantedCapabilities = browserInstallation.grantedCapabilities.map((grant) =>
-      grant.capability === "network" || grant.capability === "ui-embedding" || grant.capability === "browser-control"
+      grant.capability === "network" ||
+      grant.capability === "ui-embedding" ||
+      grant.capability === "browser-control" ||
+      grant.capability === "filesystem"
         ? { ...grant, granted: true }
         : grant,
     );
@@ -1979,13 +2457,8 @@ describe("App boot flow", () => {
     await waitFor(() =>
       expect(browserToolRunMock).toHaveBeenCalledWith({ type: "open_url", params: { url: "https://example.com" } }),
     );
-    await waitFor(() =>
-      expect(requestBrowserNativeWebviewShowMock).toHaveBeenCalledWith(
-        expect.objectContaining({ url: "https://example.com", navigate: true }),
-      ),
-    );
     expect(browserToolRunMock).toHaveBeenCalledWith({ type: "open_url", params: { url: "https://example.com" } });
-    expect((await screen.findAllByText(/Native Browser/i)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/Browser v2 target/i)).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "New tab" }));
     expect((screen.getByLabelText("Browser URL") as HTMLInputElement).value).toBe("https://resonantos.com");
@@ -2006,7 +2479,10 @@ describe("App boot flow", () => {
     browserInstallation.enabled = true;
     browserInstallation.status = "enabled";
     browserInstallation.grantedCapabilities = browserInstallation.grantedCapabilities.map((grant) =>
-      grant.capability === "network" || grant.capability === "ui-embedding" || grant.capability === "browser-control"
+      grant.capability === "network" ||
+      grant.capability === "ui-embedding" ||
+      grant.capability === "browser-control" ||
+      grant.capability === "filesystem"
         ? { ...grant, granted: true }
         : grant,
     );
@@ -2023,6 +2499,35 @@ describe("App boot flow", () => {
     expect(createDesktopBrowserToolRunnerMock).toHaveBeenCalledTimes(1);
     expect(browserToolRunMock).toHaveBeenCalledWith({ type: "health" });
     expect(browserToolRunMock).toHaveBeenCalledWith({ type: "read_page" });
+  });
+
+  it("does not launch the rejected Electron sidecar from the Browser workspace", async () => {
+    const state = buildDefaultState(manifests);
+    const browserInstallation = state.installations["addon.browser"];
+    browserInstallation.installed = true;
+    browserInstallation.enabled = true;
+    browserInstallation.status = "enabled";
+    browserInstallation.grantedCapabilities = browserInstallation.grantedCapabilities.map((grant) =>
+      grant.capability === "network" ||
+      grant.capability === "ui-embedding" ||
+      grant.capability === "browser-control" ||
+      grant.capability === "filesystem"
+        ? { ...grant, granted: true }
+        : grant,
+    );
+    hydrateStateMock.mockResolvedValueOnce(state);
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: /Resonant Browser.*Embedded app/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Workspace" }));
+    expect(await screen.findByLabelText("Native embedded Chromium target")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Open Chromium Host" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Load Phantom unpacked extension" })).toBeNull();
+    expect(requestBrowserVisibleHostCommandMock).not.toHaveBeenCalled();
+    expect(requestBrowserExtensionFolderSelectionMock).not.toHaveBeenCalled();
+    expect(requestNativeBrowserProbeMock).toHaveBeenCalledWith("cef-chrome-runtime");
   });
 
   it("grants the Browser controlled access preset from the Add-ons workspace", async () => {
@@ -2042,6 +2547,7 @@ describe("App boot flow", () => {
     expect(screen.getByText("network granted")).toBeTruthy();
     expect(screen.getByText("ui embedding granted")).toBeTruthy();
     expect(screen.getByText("browser control granted")).toBeTruthy();
+    expect(screen.getByText("filesystem granted")).toBeTruthy();
   });
 
   it("sets up Browser from the add-on card even when persisted grants are stale", async () => {
@@ -2066,6 +2572,7 @@ describe("App boot flow", () => {
     expect(screen.getByText("network granted")).toBeTruthy();
     expect(screen.getByText("ui embedding granted")).toBeTruthy();
     expect(screen.getByText("browser control granted")).toBeTruthy();
+    expect(screen.getByText("filesystem granted")).toBeTruthy();
   });
 
   it("sets up Browser directly from the gated Browser workspace", async () => {
@@ -2076,7 +2583,7 @@ describe("App boot flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Install and grant browser access" }));
 
     expect(await screen.findByLabelText("Browser URL")).toBeTruthy();
-    expect(screen.getByLabelText("Live browser viewport")).toBeTruthy();
+    expect(screen.getByLabelText("Native embedded Chromium target")).toBeTruthy();
   });
 
   it("opens OpenCode as an optional add-on workspace with scoped launch gates", async () => {
@@ -2861,14 +3368,17 @@ describe("App boot flow", () => {
     expect(await screen.findByText("Living Archive import plan")).toBeTruthy();
   });
 
-  it("connects the Obsidian add-on to a selected vault and previews a note", async () => {
+  it("connects Resonant Notes to a selected vault and previews a note", async () => {
     render(<App />);
 
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getAllByRole("button", { name: /Add-ons/i })[0]);
+    await waitFor(() => {
+      expect(Array.from(document.querySelectorAll(".addon-card")).some((element) => element.textContent?.includes("Resonant Notes"))).toBe(true);
+    });
     const obsidianCard = Array.from(document.querySelectorAll(".addon-card")).find((element) =>
-      element.textContent?.includes("Obsidian"),
+      element.textContent?.includes("Resonant Notes"),
     )!;
     fireEvent.click(obsidianCard);
     fireEvent.click(within(obsidianCard as HTMLElement).getByRole("button", { name: "Install" }));
@@ -2881,7 +3391,7 @@ describe("App boot flow", () => {
       );
     });
     expect(await screen.findByText(/1 markdown note/i)).toBeTruthy();
-    fireEvent.click(screen.getAllByRole("button").find((element) => element.textContent?.includes("Architecture Note.md"))!);
+    fireEvent.click(screen.getAllByRole("button").find((element) => element.textContent?.includes("Architecture Note"))!);
 
     expect(await screen.findByText(/ResonantOS note preview/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Open in Obsidian" }));
@@ -2976,8 +3486,11 @@ describe("App boot flow", () => {
 
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
     fireEvent.click(screen.getAllByRole("button", { name: /Add-ons/i })[0]);
+    await waitFor(() => {
+      expect(Array.from(document.querySelectorAll(".addon-card")).some((element) => element.textContent?.includes("Resonant Notes"))).toBe(true);
+    });
     const obsidianCard = Array.from(document.querySelectorAll(".addon-card")).find((element) =>
-      element.textContent?.includes("Obsidian"),
+      element.textContent?.includes("Resonant Notes"),
     )!;
     fireEvent.click(obsidianCard);
     fireEvent.click(within(obsidianCard as HTMLElement).getByRole("button", { name: "Install" }));
@@ -3085,7 +3598,10 @@ describe("App boot flow", () => {
 
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
     fireEvent.click(screen.getAllByRole("button", { name: /Add-ons/i })[0]);
-    fireEvent.click(Array.from(document.querySelectorAll(".addon-card")).find((element) => element.textContent?.includes("Obsidian"))!);
+    await waitFor(() => {
+      expect(Array.from(document.querySelectorAll(".addon-card")).some((element) => element.textContent?.includes("Resonant Notes"))).toBe(true);
+    });
+    fireEvent.click(Array.from(document.querySelectorAll(".addon-card")).find((element) => element.textContent?.includes("Resonant Notes"))!);
     fireEvent.click(await screen.findByRole("button", { name: "Scan" }));
 
     expect(await screen.findByText(/2 markdown note/i)).toBeTruthy();
@@ -3144,7 +3660,10 @@ describe("App boot flow", () => {
 
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
     fireEvent.click(screen.getAllByRole("button", { name: /Add-ons/i })[0]);
-    fireEvent.click(Array.from(document.querySelectorAll(".addon-card")).find((element) => element.textContent?.includes("Obsidian"))!);
+    await waitFor(() => {
+      expect(Array.from(document.querySelectorAll(".addon-card")).some((element) => element.textContent?.includes("Resonant Notes"))).toBe(true);
+    });
+    fireEvent.click(Array.from(document.querySelectorAll(".addon-card")).find((element) => element.textContent?.includes("Resonant Notes"))!);
     fireEvent.click(await screen.findByRole("button", { name: "Refresh changed notes" }));
 
     expect(await screen.findByText("Refresh complete: 1 new note(s), 1 changed note(s).")).toBeTruthy();
@@ -3162,7 +3681,7 @@ describe("App boot flow", () => {
     expect(requestArchiveIngestRequestMock).not.toHaveBeenCalled();
   });
 
-  it("opens the Obsidian V2 workspace and saves a note through the audited host command", async () => {
+  it("opens the Resonant Notes workspace and saves a note through the audited host command", async () => {
     const state = buildDefaultState(manifests);
     const obsidianInstallation = state.installations["addon.obsidian"];
     obsidianInstallation.installed = true;
@@ -3175,30 +3694,111 @@ describe("App boot flow", () => {
       grant.capability === "filesystem" || grant.capability === "ui-embedding" ? { ...grant, granted: true } : grant,
     );
     hydrateStateMock.mockResolvedValueOnce(state);
-    requestObsidianNoteMock.mockResolvedValueOnce({
-      title: "Architecture Note",
-      relativePath: "Architecture Note.md",
-      content: "---\ntype: architecture\nstatus: draft\n---\n# Architecture Note\nLinks to [[Living Archive]] #resonance/system",
-      sizeBytes: 116,
-      modifiedAt: "unix:12",
+    requestObsidianNoteListMock.mockResolvedValueOnce([
+      {
+        title: "Architecture Note",
+        relativePath: "_MANOLO_NOTES/Architecture Note.md",
+        sizeBytes: 116,
+        modifiedAt: "unix:12",
+      },
+    ]);
+    requestObsidianNoteMock.mockImplementation(async (...args: unknown[]) => {
+      const notePath = String(args[1] ?? "_MANOLO_NOTES/Architecture Note.md");
+      return {
+        title: notePath.includes("Research") ? "Research Note" : "Architecture Note",
+        relativePath: notePath,
+        content: notePath.includes("Research")
+        ? "# Research Note\nResearch links to [[Architecture Note]]."
+        : "---\ntype: architecture\nstatus: draft\n---\n# Architecture Note\nLinks to [[Living Archive]] #resonance/system",
+        sizeBytes: notePath.includes("Research") ? 88 : 116,
+        modifiedAt: notePath.includes("Research") ? "unix:13" : "unix:12",
+      };
     });
+    requestObsidianVaultIndexMock.mockImplementation(async (_vaultPath: string, query = "") => ({
+      vaultPath: "/Users/augmentor/Documents/ResonantVault",
+      noteCount: 2,
+      query: query || undefined,
+      notes: [
+        {
+          title: "Architecture Note",
+          relativePath: "_MANOLO_NOTES/Architecture Note.md",
+          sizeBytes: 116,
+          modifiedAt: "unix:12",
+          tags: ["#resonance/system"],
+          wikilinks: ["Living Archive"],
+          backlinks: [
+            {
+              sourcePath: "_MANOLO_NOTES/Research Note.md",
+              sourceTitle: "Research Note",
+            },
+          ],
+          excerpt: "Links to [[Living Archive]] #resonance/system",
+        },
+        {
+          title: "Research Note",
+          relativePath: "_MANOLO_NOTES/Research Note.md",
+          sizeBytes: 88,
+          modifiedAt: "unix:13",
+          tags: ["#archive"],
+          wikilinks: ["Architecture Note"],
+          backlinks: [],
+          excerpt: "Research links to [[Architecture Note]].",
+        },
+      ].filter((note) => !query || JSON.stringify(note).toLowerCase().includes(query.toLowerCase())),
+    }));
+    const folderStateKey = "resonantos.obsidian.openFolders./Users/augmentor/Documents/ResonantVault";
+    window.localStorage.setItem(folderStateKey, "[]");
 
     render(<App />);
 
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
-    fireEvent.click(await screen.findByRole("button", { name: "Obsidian" }));
+    expect(document.querySelector('use[href="/icons/resonant.svg#ros-resonant-notes"]')).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Resonant Notes" }));
 
     expect(await screen.findByTestId("obsidian-workspace")).toBeTruthy();
     expect(await screen.findByText("1 note(s)")).toBeTruthy();
-    fireEvent.click(screen.getAllByRole("button").find((element) => element.textContent?.includes("Architecture Note.md"))!);
+    expect(await screen.findByText("_MANOLO_NOTES")).toBeTruthy();
+    let fileExplorer = screen.getByLabelText("Resonant Notes file explorer");
+    const folderDetails = document.querySelector(".obsidian-tree-folder") as HTMLDetailsElement;
+    expect(folderDetails.hasAttribute("open")).toBe(false);
+    folderDetails.open = true;
+    fireEvent(folderDetails, new Event("toggle"));
+    await waitFor(() => {
+      expect(window.localStorage.getItem(folderStateKey)).toContain("_MANOLO_NOTES");
+    });
+    expect(folderDetails.hasAttribute("open")).toBe(true);
+    fireEvent.contextMenu(screen.getByText("_MANOLO_NOTES"), { clientX: 42, clientY: 84 });
+    let contextMenu = await screen.findByLabelText("Resonant Notes context menu");
+    fireEvent.click(within(contextMenu).getByRole("menuitem", { name: "New folder" }));
+    expect((screen.getByLabelText("New folder path") as HTMLInputElement).value).toBe("_MANOLO_NOTES/New Folder");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fileExplorer = screen.getByLabelText("Resonant Notes file explorer");
+    const architectureNoteButton = within(fileExplorer).getByRole("button", { name: "Architecture Note" });
+    fireEvent.contextMenu(architectureNoteButton, { clientX: 48, clientY: 96 });
+    contextMenu = await screen.findByLabelText("Resonant Notes context menu");
+    expect(within(contextMenu).getByRole("menuitem", { name: "Open" })).toBeTruthy();
+    expect(within(contextMenu).getByRole("menuitem", { name: "Rename / move" })).toBeTruthy();
+    expect(within(contextMenu).getByRole("menuitem", { name: "Archive" })).toBeTruthy();
+    fireEvent.click(architectureNoteButton);
+    await waitFor(() => {
+      expect(window.localStorage.getItem("resonantos.obsidian.selectedNote./Users/augmentor/Documents/ResonantVault")).toBe(
+        "_MANOLO_NOTES/Architecture Note.md",
+      );
+    });
+    await waitFor(() => {
+      expect(window.localStorage.getItem("resonantos.obsidian.openTabs./Users/augmentor/Documents/ResonantVault")).toContain(
+        "_MANOLO_NOTES/Architecture Note.md",
+      );
+    });
+    expect(screen.getByRole("button", { name: /Close Architecture Note/i })).toBeTruthy();
 
-    const editor = await screen.findByLabelText("Obsidian note editor");
+    let editor = await screen.findByLabelText("Resonant Notes note editor");
     const metadataPanel = screen.getByLabelText("Obsidian note metadata");
     expect(within(metadataPanel).getByText("type")).toBeTruthy();
     expect(within(metadataPanel).getByText("architecture")).toBeTruthy();
     expect(within(metadataPanel).getByText("#resonance/system")).toBeTruthy();
     expect(within(metadataPanel).getByText("[[Living Archive]]")).toBeTruthy();
-    expect(screen.getByLabelText("Obsidian workspace status")).toBeTruthy();
+    expect(screen.getByLabelText("Resonant Notes workspace status")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Show backlinks" }));
     expect(await screen.findByLabelText("Resonant Notes vault index")).toBeTruthy();
@@ -3206,7 +3806,10 @@ describe("App boot flow", () => {
     let vaultIndexPanel = await screen.findByLabelText("Resonant Notes vault index");
     fireEvent.click(within(vaultIndexPanel).getAllByRole("button", { name: /Research Note/i }).at(-1)!);
     await waitFor(() => {
-      expect(requestObsidianNoteMock).toHaveBeenLastCalledWith("/Users/augmentor/Documents/ResonantVault", "Research Note.md");
+      expect(requestObsidianNoteMock).toHaveBeenLastCalledWith(
+        "/Users/augmentor/Documents/ResonantVault",
+        "_MANOLO_NOTES/Research Note.md",
+      );
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Show search" }));
@@ -3214,7 +3817,10 @@ describe("App boot flow", () => {
     vaultIndexPanel = await screen.findByLabelText("Resonant Notes vault index");
     fireEvent.click(within(vaultIndexPanel).getByRole("button", { name: /Architecture Note.md/i }));
     await waitFor(() => {
-      expect(requestObsidianNoteMock).toHaveBeenLastCalledWith("/Users/augmentor/Documents/ResonantVault", "Architecture Note.md");
+      expect(requestObsidianNoteMock).toHaveBeenLastCalledWith(
+        "/Users/augmentor/Documents/ResonantVault",
+        "_MANOLO_NOTES/Architecture Note.md",
+      );
     });
 
     fireEvent.change(screen.getByLabelText("Search Obsidian-compatible vault"), {
@@ -3227,14 +3833,19 @@ describe("App boot flow", () => {
         200,
       );
     });
+    editor = await screen.findByLabelText("Resonant Notes note editor");
 
-    fireEvent.change(editor, {
-      target: {
-        value:
-          "---\ntype: architecture\nstatus: updated\n---\n# Architecture Note\nUpdated inside ResonantOS workspace with [[Augmentor]] #resonance/system.",
-      },
+    const updatedNote =
+      "---\ntype: architecture\nstatus: updated\n---\n# Architecture Note\nUpdated inside ResonantOS workspace with [[Augmentor]] #resonance/system.";
+    const editorHost = document.querySelector(".obsidian-editor-host") as
+      | (HTMLElement & { __resonantSetEditorValue?: (nextValue: string) => void })
+      | null;
+    act(() => {
+      editorHost?.__resonantSetEditorValue?.(updatedNote);
     });
-    expect(within(metadataPanel).getByText("updated")).toBeTruthy();
+    await waitFor(() => {
+      expect(within(metadataPanel).getByText("updated")).toBeTruthy();
+    });
     expect(within(metadataPanel).getByText("[[Augmentor]]")).toBeTruthy();
     expect(screen.getByText("unsaved")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -3242,18 +3853,72 @@ describe("App boot flow", () => {
     await waitFor(() =>
       expect(requestObsidianWriteNoteMock).toHaveBeenCalledWith({
         vaultPath: "/Users/augmentor/Documents/ResonantVault",
-        notePath: "Architecture Note.md",
-        content:
-          "---\ntype: architecture\nstatus: updated\n---\n# Architecture Note\nUpdated inside ResonantOS workspace with [[Augmentor]] #resonance/system.",
+        notePath: "_MANOLO_NOTES/Architecture Note.md",
+        content: updatedNote,
         expectedModifiedAt: "unix:12",
         actorId: "addon.obsidian",
       }),
     );
-    expect(await screen.findByText(/Saved with audit:/i)).toBeTruthy();
+    expect(await screen.findByText(/Saved with audit/i)).toBeTruthy();
     expect(screen.getByText("synced")).toBeTruthy();
+
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Show file explorer" }));
+    fireEvent.click(screen.getByRole("button", { name: "New note" }));
+    fireEvent.change(screen.getByLabelText("New note path"), {
+      target: { value: "_MANOLO_NOTES/New Strategy.md" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => {
+      expect(requestObsidianCreateNoteMock).toHaveBeenCalledWith({
+        vaultPath: "/Users/augmentor/Documents/ResonantVault",
+        notePath: "_MANOLO_NOTES/New Strategy.md",
+        content: "# New Strategy\n",
+        actorId: "addon.obsidian",
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "New folder" }));
+    fireEvent.change(screen.getByLabelText("New folder path"), {
+      target: { value: "_MANOLO_NOTES/Projects" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => {
+      expect(requestObsidianCreateFolderMock).toHaveBeenCalledWith({
+        vaultPath: "/Users/augmentor/Documents/ResonantVault",
+        folderPath: "_MANOLO_NOTES/Projects",
+        actorId: "addon.obsidian",
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    fireEvent.change(screen.getByLabelText("Rename note path"), {
+      target: { value: "_MANOLO_NOTES/Renamed Architecture.md" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply rename" }));
+    await waitFor(() => {
+      expect(requestObsidianMoveNoteMock).toHaveBeenCalledWith({
+        vaultPath: "/Users/augmentor/Documents/ResonantVault",
+        fromNotePath: "_MANOLO_NOTES/Architecture Note.md",
+        toNotePath: "_MANOLO_NOTES/Renamed Architecture.md",
+        expectedModifiedAt: "unix:14",
+        actorId: "addon.obsidian",
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    await waitFor(() => {
+      expect(requestObsidianArchiveNoteMock).toHaveBeenCalledWith({
+        vaultPath: "/Users/augmentor/Documents/ResonantVault",
+        notePath: "_MANOLO_NOTES/Architecture Note.md",
+        expectedModifiedAt: "unix:14",
+        actorId: "addon.obsidian",
+      });
+    });
+    expect(confirmSpy).toHaveBeenCalled();
   });
 
-  it("connects the Obsidian workspace from the gate before loading notes", async () => {
+  it("connects the Resonant Notes workspace from the gate before loading notes", async () => {
     const state = buildDefaultState(manifests);
     const obsidianInstallation = state.installations["addon.obsidian"];
     obsidianInstallation.installed = true;
@@ -3269,10 +3934,10 @@ describe("App boot flow", () => {
     render(<App />);
 
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
-    fireEvent.click(await screen.findByRole("button", { name: "Obsidian" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Resonant Notes" }));
 
     expect(await screen.findByText("Connect a vault before editing inside ResonantOS.")).toBeTruthy();
-    expect(screen.getByText(/Next: grant filesystem access, grant workspace embedding, choose an Obsidian vault or markdown folder/i)).toBeTruthy();
+    expect(screen.getByText(/Next: grant filesystem access, grant workspace embedding, choose a markdown vault or folder/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Connect workspace" }));
 
     await waitFor(() => {
@@ -3632,8 +4297,8 @@ describe("App boot flow", () => {
     expect(requestProviderServiceChatCompletionMock).not.toHaveBeenCalled();
     expect(requestLocalRuntimeStatusMock).toHaveBeenCalledWith("batiai/gemma4-e2b:q4");
     expect(requestRecoveryRouteCandidatesMock).toHaveBeenCalled();
-    expect(screen.getByText("Recovery floor")).toBeTruthy();
-    expect(screen.getByText("Better Brain Candidates")).toBeTruthy();
+    expect(await screen.findByText("Recovery floor")).toBeTruthy();
+    expect(await screen.findByText("Better Brain Candidates")).toBeTruthy();
     expect(screen.getAllByText("Shared MiniMax").length).toBeGreaterThan(0);
     expect(screen.getByText(/installed .* already loaded/i)).toBeTruthy();
     expect(screen.getAllByText("batiai/gemma4-e2b:q4").length).toBeGreaterThan(0);
@@ -3749,6 +4414,12 @@ function createBrowserManifest(): AddOnManifest {
         capability: "browser-control",
         granted: false,
         scope: "system",
+        revocationBehavior: "hard-stop",
+      },
+      {
+        capability: "filesystem",
+        granted: false,
+        scope: "shared",
         revocationBehavior: "hard-stop",
       },
       {

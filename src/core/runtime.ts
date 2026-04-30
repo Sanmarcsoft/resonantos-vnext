@@ -6,6 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   AddOnManifest,
+  ArchiveBackgroundCycleResult,
   ArchiveDocumentPayload,
   ArchivePromoteReviewArtifactResult,
   ArchiveProcessIngestResult,
@@ -22,18 +23,27 @@ import type {
   ArchiveLibraryReorganisationPlan,
   ArchiveLibraryImportMode,
   ArchiveLibraryImportResult,
+  ArchiveLintResult,
   ArchiveLibraryPreflightResult,
+  ArchiveMaintenanceCycleResult,
   ArchiveMemoryDomain,
   ArchiveRuntimeStatus,
   ArchiveSearchResult,
+  ArchiveSemanticLintResult,
   ArchiveSourceFolderScanResult,
   ArchiveSystemMemoryRefreshResult,
   ArchiveSystemMemoryStatus,
+  ArchiveWikiNavigationRefreshResult,
   BrowserEngineInstallResult,
   BrowserEngineStatus,
   BrowserNativeWebviewBounds,
   BrowserNativeWebviewResult,
+  NativeBrowserAttachSmokeResult,
+  NativeBrowserBridgeProbeResult,
+  NativeBrowserProbeResult,
   BrowserCloseSessionResult,
+  BrowserExtensionListResult,
+  BrowserExtensionLoadResult,
   BrowserInteractionResult,
   BrowserOpenUrlResult,
   BrowserReadPageResult,
@@ -43,7 +53,10 @@ import type {
   DelegationPacket,
   EngineerRecoveryTurnResult,
   FinishTaskWorkspaceResult,
+  HermesChatResult,
+  HermesInstallStatus,
   LocalRuntimeStatus,
+  ObsidianNoteOperationResult,
   ObsidianNotePayload,
   ObsidianNoteSummary,
   ObsidianOpenNoteResult,
@@ -225,6 +238,28 @@ export const requestRecoveryRouteCandidates = async (): Promise<RecoveryRouteCan
   throw new Error("Recovery route probing is available only in the desktop shell.");
 };
 
+export const requestHermesStatus = async (profileHome?: string): Promise<HermesInstallStatus> => {
+  if (hasTauri()) {
+    return (await invoke("hermes_status", { profileHome })) as HermesInstallStatus;
+  }
+  throw new Error("Hermes compatibility audit is available only in the desktop shell.");
+};
+
+export const requestHermesChatCompletion = async (input: {
+  prompt: string;
+  profileHome?: string;
+}): Promise<HermesChatResult> => {
+  if (hasTauri()) {
+    return (await invoke("hermes_chat", {
+      request: {
+        prompt: input.prompt,
+        profileHome: input.profileHome,
+      },
+    })) as HermesChatResult;
+  }
+  throw new Error("Hermes chat bridge is available only in the desktop shell.");
+};
+
 export const requestArchiveIngestProbe = async (input: {
   providerId: string;
   providerType: ProviderProfile["providerType"];
@@ -387,6 +422,54 @@ export const requestObsidianWriteNote = async (input: {
   throw new Error("Obsidian note writes are available only in the desktop shell.");
 };
 
+export const requestObsidianCreateNote = async (input: {
+  vaultPath: string;
+  notePath: string;
+  content?: string;
+  actorId?: string;
+}): Promise<ObsidianNoteOperationResult> => {
+  if (hasTauri()) {
+    return (await invoke("obsidian_create_note", { request: input })) as ObsidianNoteOperationResult;
+  }
+  throw new Error("Obsidian note creation is available only in the desktop shell.");
+};
+
+export const requestObsidianCreateFolder = async (input: {
+  vaultPath: string;
+  folderPath: string;
+  actorId?: string;
+}): Promise<ObsidianNoteOperationResult> => {
+  if (hasTauri()) {
+    return (await invoke("obsidian_create_folder", { request: input })) as ObsidianNoteOperationResult;
+  }
+  throw new Error("Obsidian folder creation is available only in the desktop shell.");
+};
+
+export const requestObsidianMoveNote = async (input: {
+  vaultPath: string;
+  fromNotePath: string;
+  toNotePath: string;
+  expectedModifiedAt?: string;
+  actorId?: string;
+}): Promise<ObsidianNoteOperationResult> => {
+  if (hasTauri()) {
+    return (await invoke("obsidian_move_note", { request: input })) as ObsidianNoteOperationResult;
+  }
+  throw new Error("Obsidian note moves are available only in the desktop shell.");
+};
+
+export const requestObsidianArchiveNote = async (input: {
+  vaultPath: string;
+  notePath: string;
+  expectedModifiedAt?: string;
+  actorId?: string;
+}): Promise<ObsidianNoteOperationResult> => {
+  if (hasTauri()) {
+    return (await invoke("obsidian_archive_note", { request: input })) as ObsidianNoteOperationResult;
+  }
+  throw new Error("Obsidian note archiving is available only in the desktop shell.");
+};
+
 export const requestObsidianVaultIndex = async (vaultPath: string, query = "", limit = 200): Promise<ObsidianVaultIndex> => {
   if (hasTauri()) {
     return (await invoke("obsidian_vault_index", { request: { vaultPath, query, limit } })) as ObsidianVaultIndex;
@@ -485,6 +568,74 @@ export const requestBrowserNativeWebviewHide = async (): Promise<BrowserNativeWe
   throw new Error("Native Browser webview hide is available only in the desktop shell.");
 };
 
+export const requestNativeBrowserProbe = async (engineCandidate = "cef-chrome-runtime"): Promise<NativeBrowserProbeResult> => {
+  if (hasTauri()) {
+    return (await invoke("browser_native_probe", {
+      request: { engineCandidate },
+    })) as NativeBrowserProbeResult;
+  }
+  return {
+    status: "blocked",
+    engineCandidate,
+    hostBinaryStatus: "missing",
+    sourceScaffoldStatus: "missing",
+    embeddedViewStatus: "blocked",
+    extensionCompatibilityStatus: "blocked",
+    phantomStatus: "blocked",
+    bitwardenStatus: "blocked",
+    blockers: [
+      "Native Browser probing is available only in the desktop shell.",
+      "Phantom Wallet and Bitwarden compatibility must be proven in the native host before Browser is ready.",
+    ],
+    nextActions: [
+      "Run this probe from the Tauri desktop shell.",
+      "Build the native embedded Browser host behind the ADR-025 contract.",
+    ],
+    checkedAt: "browser-probe:web-preview",
+  };
+};
+
+export const requestNativeBrowserAttachSmoke = async (
+  hostIntegrationMode = "external-process",
+): Promise<NativeBrowserAttachSmokeResult> => {
+  if (hasTauri()) {
+    return (await invoke("browser_native_attach_smoke", {
+      request: { hostIntegrationMode },
+    })) as NativeBrowserAttachSmokeResult;
+  }
+  return {
+    status: "blocked",
+    platform: "web-preview",
+    parentHandleKind: "none",
+    parentHandlePresent: false,
+    hostIntegrationMode,
+    blocker: "Native Browser attachment can only be smoke-tested inside the Tauri desktop shell.",
+    nextActions: ["Run the attach smoke test from the ResonantOS desktop shell."],
+    checkedAt: "browser-attach-smoke:web-preview",
+  };
+};
+
+export const requestNativeBrowserBridgeProbe = async (
+  integrationMode = "in-process-native-library",
+): Promise<NativeBrowserBridgeProbeResult> => {
+  if (hasTauri()) {
+    return (await invoke("browser_native_bridge_probe", {
+      request: { integrationMode },
+    })) as NativeBrowserBridgeProbeResult;
+  }
+  return {
+    status: "missing",
+    integrationMode,
+    bridgeLibraryStatus: "missing",
+    cAbiStatus: "blocked",
+    bridgeLibraryPath: null,
+    exportedSymbols: [],
+    blockers: ["Native Browser bridge probing is available only in the Tauri desktop shell."],
+    nextActions: ["Run the bridge probe from the ResonantOS desktop shell."],
+    checkedAt: "browser-bridge-probe:web-preview",
+  };
+};
+
 export const requestBrowserStartSession = async (url: string, viewport?: BrowserViewportInput): Promise<BrowserOpenUrlResult> => {
   if (hasTauri()) {
     return (await invoke("browser_start_session", { request: { url, ...viewport } })) as BrowserOpenUrlResult;
@@ -562,12 +713,64 @@ export const requestBrowserHostCommand = async (command: BrowserToolCommand): Pr
                   ? "browser.capture_evidence"
                   : type === "close"
                     ? "browser.close_session"
-                    : "browser.health";
+                    : type === "extensions_list"
+                      ? "browser.extensions.list"
+                      : type === "extensions_load_unpacked"
+                        ? "browser.extensions.load_unpacked"
+                        : type === "extensions_set_pinned"
+                          ? "browser.extensions.set_pinned"
+                          : type === "extensions_disable"
+                            ? "browser.extensions.disable"
+                          : "browser.health";
     return (await invoke("browser_host_command", {
       request: { method, params: params ?? {}, humanApproved: Boolean(humanApproved) },
     })) as BrowserToolResult;
   }
   throw new Error("Governed Browser host commands are available only in the desktop shell.");
+};
+
+export const requestBrowserVisibleHostCommand = async (command: BrowserToolCommand): Promise<BrowserToolResult> => {
+  if (hasTauri()) {
+    const { type, params, humanApproved } = command;
+    const method =
+      type === "start"
+        ? "browser.start"
+        : type === "open_url"
+          ? "browser.open_url"
+          : type === "read_page"
+            ? "browser.read_page"
+            : type === "click"
+              ? "browser.click"
+              : type === "type"
+                ? "browser.type"
+                : type === "close"
+                  ? "browser.close_session"
+                  : type === "extensions_list"
+                    ? "browser.extensions.list"
+                    : type === "extensions_load_unpacked"
+                      ? "browser.extensions.load_unpacked"
+                      : type === "extensions_set_pinned"
+                        ? "browser.extensions.set_pinned"
+                        : type === "extensions_disable"
+                          ? "browser.extensions.disable"
+                          : "browser.health";
+    return (await invoke("browser_visible_host_command", {
+      request: { method, params: params ?? {}, humanApproved: Boolean(humanApproved) },
+    })) as BrowserToolResult;
+  }
+  throw new Error("Visible Browser v2 host commands are available only in the desktop shell.");
+};
+
+export const requestBrowserExtensionFolderSelection = async (): Promise<string | null> => {
+  if (hasTauri()) {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "Choose an unpacked Chrome extension folder",
+    });
+    return typeof selected === "string" ? selected : null;
+  }
+  throw new Error("Native extension folder selection is available only in the desktop shell.");
 };
 
 export const createDesktopBrowserToolRunner = (input: {
@@ -719,11 +922,105 @@ export const requestArchiveProcessIngestRequest = async (input: {
   runtimeNodeEndpoint?: string;
   authTier?: string;
   model: string;
+  verifierProviderId?: string;
+  verifierProviderType?: ProviderProfile["providerType"];
+  verifierApiBaseUrl?: string;
+  verifierRuntimeNodeId?: string;
+  verifierRuntimeNodeKind?: string;
+  verifierRuntimeNodeEndpoint?: string;
+  verifierAuthTier?: string;
+  verifierModel?: string;
 }): Promise<ArchiveProcessIngestResult> => {
   if (hasTauri()) {
     return (await invoke("archive_process_ingest_request", { request: input })) as ArchiveProcessIngestResult;
   }
   throw new Error("Living Archive ingest processing is available only in the desktop shell.");
+};
+
+export const requestArchiveMaintenanceCycle = async (input: {
+  providerId: string;
+  providerType: ProviderProfile["providerType"];
+  apiBaseUrl?: string;
+  runtimeNodeId?: string;
+  runtimeNodeKind?: string;
+  runtimeNodeEndpoint?: string;
+  authTier?: string;
+  model: string;
+  verifierProviderId?: string;
+  verifierProviderType?: ProviderProfile["providerType"];
+  verifierApiBaseUrl?: string;
+  verifierRuntimeNodeId?: string;
+  verifierRuntimeNodeKind?: string;
+  verifierRuntimeNodeEndpoint?: string;
+  verifierAuthTier?: string;
+  verifierModel?: string;
+  maxRequests?: number;
+  autoPromote?: boolean;
+  actorId?: string;
+}): Promise<ArchiveMaintenanceCycleResult> => {
+  if (hasTauri()) {
+    return (await invoke("archive_maintenance_cycle", { request: input })) as ArchiveMaintenanceCycleResult;
+  }
+  throw new Error("Living Archive maintenance cycles are available only in the desktop shell.");
+};
+
+export const requestArchiveBackgroundCycle = async (input: {
+  providerId: string;
+  providerType: ProviderProfile["providerType"];
+  apiBaseUrl?: string;
+  runtimeNodeId?: string;
+  runtimeNodeKind?: string;
+  runtimeNodeEndpoint?: string;
+  authTier?: string;
+  model: string;
+  verifierProviderId?: string;
+  verifierProviderType?: ProviderProfile["providerType"];
+  verifierApiBaseUrl?: string;
+  verifierRuntimeNodeId?: string;
+  verifierRuntimeNodeKind?: string;
+  verifierRuntimeNodeEndpoint?: string;
+  verifierAuthTier?: string;
+  verifierModel?: string;
+  maxRequests?: number;
+  autoPromote?: boolean;
+  actorId?: string;
+  rootPath?: string;
+}): Promise<ArchiveBackgroundCycleResult> => {
+  if (hasTauri()) {
+    return (await invoke("archive_background_cycle", { request: input })) as ArchiveBackgroundCycleResult;
+  }
+  throw new Error("Living Archive background cycles are available only in the desktop shell.");
+};
+
+export const requestArchiveWikiNavigationRefresh = async (): Promise<ArchiveWikiNavigationRefreshResult> => {
+  if (hasTauri()) {
+    return (await invoke("archive_refresh_wiki_navigation")) as ArchiveWikiNavigationRefreshResult;
+  }
+  throw new Error("Living Archive wiki navigation refresh is available only in the desktop shell.");
+};
+
+export const requestArchiveLint = async (): Promise<ArchiveLintResult> => {
+  if (hasTauri()) {
+    return (await invoke("archive_lint")) as ArchiveLintResult;
+  }
+  throw new Error("Living Archive lint is available only in the desktop shell.");
+};
+
+export const requestArchiveSemanticLint = async (input: {
+  providerId: string;
+  providerType: ProviderProfile["providerType"];
+  apiBaseUrl?: string;
+  runtimeNodeId?: string;
+  runtimeNodeKind?: string;
+  runtimeNodeEndpoint?: string;
+  authTier?: string;
+  model: string;
+  maxCandidates?: number;
+}): Promise<ArchiveSemanticLintResult> => {
+  if (hasTauri()) {
+    return (await invoke("archive_semantic_lint", { request: input })) as ArchiveSemanticLintResult;
+  }
+  throw new Error("Living Archive semantic lint is available only in the desktop shell.");
 };
 
 export const requestArchiveReviewDecision = async (input: {
@@ -788,6 +1085,55 @@ export const persistState = async (state: ResonantShellState): Promise<void> => 
     return;
   }
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+};
+
+export const openFloatingChatWindow = async (): Promise<void> => {
+  if (!hasTauri()) {
+    throw new Error("Floating chat windows are available only in the desktop shell.");
+  }
+  const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  const label = "floating-chat";
+  const existing = await WebviewWindow.getByLabel(label);
+  if (existing) {
+    await existing.setFocus();
+    return;
+  }
+
+  const currentUrl = new URL(window.location.href);
+  currentUrl.searchParams.set("surface", "floating-chat");
+
+  const floatingWindow = new WebviewWindow(label, {
+    url: `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`,
+    title: "Augmentor Chat",
+    width: 620,
+    height: 860,
+    minWidth: 420,
+    minHeight: 620,
+    resizable: true,
+    decorations: true,
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    const unlistenCreated = floatingWindow.once("tauri://created", () => {
+      void unlistenCreated.then((unlisten) => unlisten());
+      void unlistenError.then((unlisten) => unlisten());
+      resolve();
+    });
+    const unlistenError = floatingWindow.once<string>("tauri://error", (event) => {
+      void unlistenCreated.then((unlisten) => unlisten());
+      void unlistenError.then((unlisten) => unlisten());
+      reject(new Error(event.payload || "Failed to open floating chat window."));
+    });
+  });
+};
+
+export const subscribeRuntimeStateUpdates = async (
+  onState: (state: ResonantShellState) => void,
+): Promise<() => void> => {
+  if (!hasTauri()) {
+    return () => undefined;
+  }
+  return listen<ResonantShellState>("runtime-state-updated", (event) => onState(event.payload));
 };
 
 export const requestCreateTaskWorkspace = async (packet: DelegationPacket): Promise<TaskWorkspace> => {
@@ -997,17 +1343,21 @@ const normalizeAgents = (
 };
 
 const normalizeChannels = (
+  installations: ResonantShellState["installations"],
   persisted: ResonantShellState["channels"] | undefined,
   defaults: ResonantShellState["channels"],
 ): ResonantShellState["channels"] =>
   defaults.map((channel) => {
     const current = persisted?.find((item) => item.id === channel.id);
+    const addonId = channel.metadata.addonId ?? current?.metadata?.addonId;
+    const addonEnabled = addonId ? installations[addonId]?.enabled === true : true;
     return {
       ...channel,
       ...(current ?? {}),
       owningAgentId: channel.owningAgentId,
       workspaceId: channel.workspaceId,
       label: channel.label,
+      enabled: addonId ? Boolean((current ?? channel).enabled && addonEnabled) : (current?.enabled ?? channel.enabled),
       metadata: { ...channel.metadata, ...(current?.metadata ?? {}) },
     };
   });
@@ -1112,8 +1462,9 @@ const normalizeArchivePolicy = (
   notes: persisted?.notes?.length ? persisted.notes : defaults.notes,
 });
 
-export const normalizeState = (state: ResonantShellState, base: ResonantShellState): ResonantShellState =>
-  ({
+export const normalizeState = (state: ResonantShellState, base: ResonantShellState): ResonantShellState => {
+  const installations = mergeInstallations(state.installations, base.installations);
+  return {
     ...base,
     ...state,
     strategistIdentity: { ...base.strategistIdentity, ...state.strategistIdentity },
@@ -1132,6 +1483,8 @@ export const normalizeState = (state: ResonantShellState, base: ResonantShellSta
       workspaceLayout: state.uiPreferences?.workspaceLayout ?? base.uiPreferences.workspaceLayout,
       chatSidebarWidth: state.uiPreferences?.chatSidebarWidth ?? base.uiPreferences.chatSidebarWidth,
       chatHistoryOpen: state.uiPreferences?.chatHistoryOpen ?? base.uiPreferences.chatHistoryOpen,
+      recommendedAddOnsReviewed:
+        state.uiPreferences?.recommendedAddOnsReviewed ?? base.uiPreferences.recommendedAddOnsReviewed,
       windowZoom: state.uiPreferences?.windowZoom ?? base.uiPreferences.windowZoom,
       browserWorkspace: {
         ...base.uiPreferences.browserWorkspace,
@@ -1148,7 +1501,7 @@ export const normalizeState = (state: ResonantShellState, base: ResonantShellSta
     providerRouting: normalizeProviderRouting(state.providerRouting, base.providerRouting),
     modelStrategy: normalizeModelStrategy(state.modelStrategy, base.modelStrategy),
     agents: normalizeAgents(state.agents, base.agents),
-    channels: normalizeChannels(state.channels, base.channels),
+    channels: normalizeChannels(installations, state.channels, base.channels),
     workspaces: normalizeWorkspaces(state.workspaces, base.workspaces),
     archivePolicy: normalizeArchivePolicy(state.archivePolicy, base.archivePolicy),
     chatProjects: state.chatProjects ?? base.chatProjects,
@@ -1163,5 +1516,6 @@ export const normalizeState = (state: ResonantShellState, base: ResonantShellSta
       checklist: state.recoverySession?.checklist ?? base.recoverySession.checklist,
       changeLog: state.recoverySession?.changeLog ?? base.recoverySession.changeLog,
     },
-    installations: mergeInstallations(state.installations, base.installations),
-  });
+    installations,
+  };
+};

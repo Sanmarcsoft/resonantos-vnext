@@ -17,6 +17,7 @@ import {
   ArchiveIcon,
   BranchIcon,
   CopyIcon,
+  DetachIcon,
   EditIcon,
   HideIcon,
   HistoryIcon,
@@ -111,6 +112,7 @@ type StrategistChatRailProps = {
   onFileAttach: (files: FileList | null) => void | Promise<void>;
   onRemoveAttachment: (attachmentId: string) => void;
   onStartResize: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onDetachChat?: () => void;
 };
 
 export function StrategistChatRail(props: StrategistChatRailProps) {
@@ -484,6 +486,11 @@ export function StrategistChatRail(props: StrategistChatRailProps) {
           {props.mode !== "emergency" && (
             <button type="button" className="chat-icon-button prominent" aria-label="New chat" title="New chat" onClick={() => openAgentPicker()}>
               <PlusIcon />
+            </button>
+          )}
+          {props.mode !== "emergency" && props.onDetachChat && (
+            <button type="button" className="chat-icon-button" aria-label="Detach chat window" title="Detach chat window" onClick={props.onDetachChat}>
+              <DetachIcon />
             </button>
           )}
           {props.activeThread && !props.historyOpen && (

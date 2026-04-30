@@ -3,12 +3,8 @@
 
 import type { Dispatch, SetStateAction } from "react";
 import type { ArchiveQueuedIngestRequest, ArchiveReviewArtifact, ConversationMessage, ConversationThread } from "../../core/contracts";
-import {
-  requestArchiveIngestRequest,
-  requestArchiveIntakeWrite,
-  requestArchiveReviewArtifacts,
-  requestArchiveReviewQueue,
-} from "../../core/runtime";
+import type { MemoryProviderBroker } from "../../core/memory-provider";
+import { livingArchiveMemoryProvider } from "../../core/memory-provider";
 
 type SaveChatMessageToArchiveInput = {
   thread: ConversationThread;
@@ -17,6 +13,7 @@ type SaveChatMessageToArchiveInput = {
   setArchiveQueueBusy: Dispatch<SetStateAction<boolean>>;
   setArchiveQueue: Dispatch<SetStateAction<ArchiveQueuedIngestRequest[]>>;
   setArchiveReviewArtifacts: Dispatch<SetStateAction<ArchiveReviewArtifact[]>>;
+  memoryProvider?: MemoryProviderBroker;
   errorMessageOf: (error: unknown, fallback: string) => string;
 };
 
@@ -73,6 +70,7 @@ export const saveChatMessageToArchiveIntake = async ({
   setArchiveQueueBusy,
   setArchiveQueue,
   setArchiveReviewArtifacts,
+  memoryProvider = livingArchiveMemoryProvider(),
   errorMessageOf,
 }: SaveChatMessageToArchiveInput): Promise<void> => {
   if (message.role !== "assistant") {
@@ -83,9 +81,12 @@ export const saveChatMessageToArchiveIntake = async ({
   setArchiveQueueBusy(true);
   setChatNotice("Saving chat insight to Living Archive intake...");
   try {
+    if (!memoryProvider.supports.intakeWrite || !memoryProvider.supports.ingestRequest || !memoryProvider.supports.review) {
+      throw new Error(`${memoryProvider.label} does not support chat insight intake yet.`);
+    }
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const fileName = `${stamp}-${safeSlug(thread.title)}.md`;
-    const intake = await requestArchiveIntakeWrite({
+    const intake = await memoryProvider.intakeWrite({
       actorId: "strategist.core",
       bucket: "chat-insights",
       fileName,
@@ -101,7 +102,7 @@ export const saveChatMessageToArchiveIntake = async ({
       },
     });
 
-    await requestArchiveIngestRequest({
+    await memoryProvider.ingestRequest({
       actorId: "strategist.core",
       sourcePath: intake.artifactPath,
       sourceType: "chat_insight",
@@ -116,7 +117,7 @@ export const saveChatMessageToArchiveIntake = async ({
       },
     });
 
-    const [queue, artifacts] = await Promise.all([requestArchiveReviewQueue(), requestArchiveReviewArtifacts()]);
+    const [queue, artifacts] = await Promise.all([memoryProvider.reviewQueue(), memoryProvider.reviewArtifacts()]);
     setArchiveQueue(queue);
     setArchiveReviewArtifacts(artifacts);
     setChatNotice("Saved chat insight to Living Archive intake and queued it for review.");

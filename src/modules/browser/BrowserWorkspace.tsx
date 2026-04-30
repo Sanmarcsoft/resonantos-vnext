@@ -5,10 +5,14 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import type {
   AddOnInstallation,
   AddOnManifest,
+  BrowserExtensionState,
   BrowserNativeWebviewBounds,
   BrowserWorkspaceState,
   BrowserWorkspaceTabState,
   CapabilityGrant,
+  NativeBrowserAttachSmokeResult,
+  NativeBrowserBridgeProbeResult,
+  NativeBrowserProbeResult,
 } from "../../core/contracts";
 
 type BrowserWorkspaceProps = {
@@ -23,11 +27,25 @@ type BrowserWorkspaceProps = {
   onHideNativeWebview?: () => Promise<void>;
   onSyncControlledSession?: (url: string) => Promise<string>;
   onReadActivePage?: (url: string) => Promise<string>;
+  onProbeNativeBrowser?: () => Promise<NativeBrowserProbeResult>;
+  onSmokeTestNativeAttach?: () => Promise<NativeBrowserAttachSmokeResult>;
+  onProbeNativeBridge?: () => Promise<NativeBrowserBridgeProbeResult>;
+  onLoadPriorityExtension?: (target: "phantom" | "bitwarden") => Promise<string>;
+  onListVisibleExtensions?: () => Promise<BrowserExtensionState[]>;
+  onSetExtensionPinned?: (extensionId: string, pinned: boolean) => Promise<BrowserExtensionState[]>;
+  onDisableExtension?: (extensionId: string) => Promise<BrowserExtensionState[]>;
 };
 
 const DEFAULT_BROWSER_URL = "https://resonantos.com";
-const NATIVE_WEBVIEW_CHROME_GUARD_PX = 56;
-
+const CHROME_WEB_STORE_URL = "https://chromewebstore.google.com/category/extensions";
+const BROWSER_MENU_ITEMS = ["File", "Edit", "View", "History", "Bookmarks", "Profiles", "Tab", "Window", "Help"] as const;
+type BrowserMenuName = (typeof BROWSER_MENU_ITEMS)[number];
+const BROWSER_BOOKMARK_ITEMS = [
+  { label: "ResonantOS", url: "https://resonantos.com" },
+  { label: "Search", url: "https://google.com" },
+  { label: "Chrome Web Store", url: CHROME_WEB_STORE_URL },
+  { label: "Manolo Remiddi", url: "https://manoloremiddi.com" },
+];
 const createBrowserTab = (id: string, url = DEFAULT_BROWSER_URL): BrowserWorkspaceTabState => ({
   id,
   label: labelFromUrl(url),
@@ -76,20 +94,34 @@ export function BrowserWorkspace({
   onHideNativeWebview,
   onSyncControlledSession,
   onReadActivePage,
+  onProbeNativeBrowser,
+  onSmokeTestNativeAttach,
+  onProbeNativeBridge,
+  onLoadPriorityExtension,
+  onListVisibleExtensions,
+  onSetExtensionPinned,
+  onDisableExtension,
 }: BrowserWorkspaceProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const toolbarRef = useRef<HTMLFormElement | null>(null);
+  const urlInputRef = useRef<HTMLInputElement | null>(null);
   const tabs = workspaceState.tabs.length ? workspaceState.tabs : [createBrowserTab("tab-1")];
   const activeTabId = tabs.some((tab) => tab.id === workspaceState.activeTabId) ? workspaceState.activeTabId : tabs[0].id;
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const [draftUrl, setDraftUrl] = useState(activeTab?.url ?? DEFAULT_BROWSER_URL);
   const [error, setError] = useState("");
   const [controlledActionStatus, setControlledActionStatus] = useState("");
+  const [openMenu, setOpenMenu] = useState<BrowserMenuName | null>(null);
+  const [extensions, setExtensions] = useState<BrowserExtensionState[]>([]);
+  const [nativeProbe, setNativeProbe] = useState<NativeBrowserProbeResult | null>(null);
+  const [nativeAttachSmoke, setNativeAttachSmoke] = useState<NativeBrowserAttachSmokeResult | null>(null);
+  const [nativeBridgeProbe, setNativeBridgeProbe] = useState<NativeBrowserBridgeProbeResult | null>(null);
 
   const networkGranted = hasGrant(installation, "network");
   const embeddingGranted = hasGrant(installation, "ui-embedding");
   const browserControlGranted = hasGrant(installation, "browser-control");
-  const browserReady = networkGranted && embeddingGranted && browserControlGranted;
+  const filesystemGranted = hasGrant(installation, "filesystem");
+  const browserReady = networkGranted && embeddingGranted && browserControlGranted && filesystemGranted;
   const canGoBack = Boolean(activeTab && activeTab.historyIndex > 0);
   const canGoForward = Boolean(activeTab && activeTab.historyIndex < activeTab.history.length - 1);
 
@@ -99,11 +131,10 @@ export function BrowserWorkspace({
       return null;
     }
     const rect = element.getBoundingClientRect();
-    const toolbarRect = toolbarRef.current?.getBoundingClientRect();
-    // Intent citation: ADR-017. Native child webviews are positioned by the host,
-    // and macOS can report a Y origin that lands above the React browser chrome.
-    // Keep a defensive guard so the live surface never covers tabs or the URL bar.
-    const safeTop = Math.max(rect.top, toolbarRect?.bottom ?? rect.top) + NATIVE_WEBVIEW_CHROME_GUARD_PX;
+    // Intent citation: ADR-017. The native child webview is mounted inside this
+    // viewport. Adding browser-chrome padding here creates the false top margin
+    // and oversized page feel the user reported.
+    const safeTop = rect.top;
     const safeLeft = rect.left + 1;
     return {
       x: safeLeft,
@@ -168,6 +199,34 @@ export function BrowserWorkspace({
     };
   }, [activeTab?.id, browserReady]);
 
+  useEffect(() => {
+    if (browserReady || !onHideNativeWebview) {
+      return;
+    }
+    void onHideNativeWebview().catch(() => undefined);
+  }, [browserReady, onHideNativeWebview]);
+
+  useEffect(() => {
+    if (!browserReady || !onProbeNativeBrowser) {
+      return;
+    }
+    let cancelled = false;
+    void onProbeNativeBrowser()
+      .then((result) => {
+        if (!cancelled) {
+          setNativeProbe(result);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setError(error instanceof Error ? error.message : "Native Browser probe failed.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [browserReady, onProbeNativeBrowser]);
+
   const commitBrowserState = (nextTabs: BrowserWorkspaceTabState[], nextActiveTabId = activeTabId) => {
     onWorkspaceStateChange({
       activeTabId: nextTabs.some((tab) => tab.id === nextActiveTabId) ? nextActiveTabId : nextTabs[0]?.id ?? "tab-1",
@@ -216,9 +275,10 @@ export function BrowserWorkspace({
       }),
     );
     if (onSyncControlledSession) {
-      void onSyncControlledSession(nextUrl).catch((error) => {
-        setError(error instanceof Error ? error.message : "Controlled Browser session sync failed.");
-      });
+      // Intent citation: ADR-025. The native webview is the visible Browser.
+      // Legacy controlled-session sync is telemetry only and must not overlay
+      // false error toasts on a working page.
+      void onSyncControlledSession(nextUrl).catch(() => undefined);
     }
     navigateNativeWebview(nextUrl);
   };
@@ -274,6 +334,214 @@ export function BrowserWorkspace({
     }
   };
 
+  const openBrowserUrl = (url: string) => {
+    navigateTo(url, "push");
+  };
+
+  const focusAddressBar = () => {
+    urlInputRef.current?.focus();
+    urlInputRef.current?.select();
+  };
+
+  const copyCurrentUrl = async () => {
+    if (!activeTab) {
+      return;
+    }
+    setOpenMenu(null);
+    setError("");
+    try {
+      await navigator.clipboard?.writeText(activeTab.url);
+      setControlledActionStatus("Current URL copied.");
+    } catch {
+      focusAddressBar();
+      setControlledActionStatus("Current URL selected.");
+    }
+  };
+
+  const openMenuUrl = (url: string) => {
+    setOpenMenu(null);
+    openBrowserUrl(url);
+  };
+
+  const runBrowserMenuCommand = (command: string) => {
+    setOpenMenu(null);
+    switch (command) {
+      case "new-tab":
+        addTab();
+        break;
+      case "close-tab":
+        if (activeTab) {
+          closeTab(activeTab.id);
+        }
+        break;
+      case "open-location":
+        focusAddressBar();
+        break;
+      case "copy-url":
+        void copyCurrentUrl();
+        break;
+      case "reload":
+        navigateTo(activeTab?.url ?? draftUrl, "replace");
+        break;
+      case "back":
+        goToHistoryOffset(-1);
+        break;
+      case "forward":
+        goToHistoryOffset(1);
+        break;
+      case "home":
+        openBrowserUrl(DEFAULT_BROWSER_URL);
+        break;
+      case "zoom-reset":
+        setControlledActionStatus("Browser viewport reset to 100%.");
+        break;
+      case "extensions":
+        openMenuUrl(CHROME_WEB_STORE_URL);
+        break;
+      case "help":
+        openMenuUrl("https://support.google.com/chrome");
+        break;
+      default:
+        setControlledActionStatus("This command requires the native Chromium host.");
+    }
+  };
+
+  const runNativeProbe = async () => {
+    if (!onProbeNativeBrowser) {
+      return;
+    }
+    setError("");
+    setControlledActionStatus("Checking native embedded Chromium readiness...");
+    try {
+      const result = await onProbeNativeBrowser();
+      setNativeProbe(result);
+      setControlledActionStatus(
+        result.status === "ready"
+          ? "Native embedded Browser host is ready."
+          : result.status === "partial"
+            ? "Native Browser host is present but not verified."
+            : "Native embedded Browser host is blocked.",
+      );
+    } catch (error) {
+      setControlledActionStatus("");
+      setError(error instanceof Error ? error.message : "Native Browser probe failed.");
+    }
+  };
+
+  const runNativeAttachSmoke = async () => {
+    if (!onSmokeTestNativeAttach) {
+      return;
+    }
+    setError("");
+    setControlledActionStatus("Running native Browser attach smoke test...");
+    try {
+      const result = await onSmokeTestNativeAttach();
+      setNativeAttachSmoke(result);
+      setControlledActionStatus(
+        result.status === "attached"
+          ? "Native Browser attach smoke passed."
+          : "Native Browser attach smoke blocked product embedding.",
+      );
+    } catch (error) {
+      setControlledActionStatus("");
+      setError(error instanceof Error ? error.message : "Native Browser attach smoke test failed.");
+    }
+  };
+
+  const runNativeBridgeProbe = async () => {
+    if (!onProbeNativeBridge) {
+      return;
+    }
+    setError("");
+    setControlledActionStatus("Checking in-process native Browser bridge...");
+    try {
+      const result = await onProbeNativeBridge();
+      setNativeBridgeProbe(result);
+      setControlledActionStatus(
+        result.status === "ready"
+          ? "In-process native Browser bridge is ready."
+          : "In-process native Browser bridge is not ready.",
+      );
+    } catch (error) {
+      setControlledActionStatus("");
+      setError(error instanceof Error ? error.message : "Native Browser bridge probe failed.");
+    }
+  };
+
+  const loadPriorityExtension = async (target: "phantom" | "bitwarden") => {
+    if (!onLoadPriorityExtension) {
+      return;
+    }
+    setError("");
+    setControlledActionStatus(`Choose the unpacked ${target === "phantom" ? "Phantom" : "Bitwarden"} extension folder.`);
+    try {
+      const status = await onLoadPriorityExtension(target);
+      setControlledActionStatus(status);
+      if (onListVisibleExtensions) {
+        setExtensions(await onListVisibleExtensions());
+      }
+    } catch (error) {
+      setControlledActionStatus("");
+      setError(error instanceof Error ? error.message : "Extension load failed.");
+    }
+  };
+
+  const refreshExtensions = async () => {
+    if (!onListVisibleExtensions) {
+      return;
+    }
+    setError("");
+    try {
+      setExtensions(await onListVisibleExtensions());
+      setControlledActionStatus("Browser v2 extensions refreshed.");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to list Browser v2 extensions.");
+    }
+  };
+
+  const setExtensionPinned = async (extension: BrowserExtensionState, pinned: boolean) => {
+    if (!onSetExtensionPinned) {
+      return;
+    }
+    setError("");
+    try {
+      setExtensions(await onSetExtensionPinned(extension.extensionId, pinned));
+      setControlledActionStatus(`${extension.name} ${pinned ? "pinned" : "unpinned"}.`);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to update extension pin state.");
+    }
+  };
+
+  const disableExtension = async (extension: BrowserExtensionState) => {
+    if (!onDisableExtension) {
+      return;
+    }
+    setError("");
+    try {
+      setExtensions(await onDisableExtension(extension.extensionId));
+      setControlledActionStatus(`${extension.name} disabled for this Browser v2 session.`);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to disable extension.");
+    }
+  };
+
+  const extensionCompatibility = [
+    {
+      id: "phantom",
+      name: "Phantom Wallet",
+      purpose: "Solana DAO onboarding and wallet connection.",
+      source: "Official Phantom download only. Fake wallet extensions can steal funds.",
+      installed: extensions.some((extension) => /phantom/i.test(extension.name)),
+    },
+    {
+      id: "bitwarden",
+      name: "Bitwarden",
+      purpose: "Password autofill and secure credential access.",
+      source: "Official Bitwarden browser extension source only.",
+      installed: extensions.some((extension) => /bitwarden/i.test(extension.name)),
+    },
+  ] as const;
+
   if (!browserReady) {
     return (
       <div className="browser-workspace" data-testid="browser-workspace">
@@ -282,8 +550,8 @@ export function BrowserWorkspace({
             <span className="eyebrow">Capability gate</span>
             <h4>Enable Browser before opening web sessions.</h4>
             <p>
-              Browser needs network, UI embedding, and browser-control grants before a live browser surface can be
-              attached to the ResonantOS workspace.
+              Browser v2 needs network, UI embedding, browser-control, and reviewed filesystem grants before the
+              extension-compatible Chromium host can be launched.
             </p>
           </div>
           <button type="button" className="button-primary touch-action" onClick={onGrantVisibleAccess ?? onConfigureAddon}>
@@ -300,6 +568,111 @@ export function BrowserWorkspace({
   return (
     <div className="browser-workspace" data-testid="browser-workspace">
       <section className="browser-live-session" aria-label="Resonant Browser live session">
+        <div className="browser-menu-bar" aria-label="Browser application menu">
+          <strong>{manifest?.name ?? "Resonant Browser"}</strong>
+          {BROWSER_MENU_ITEMS.map((item) => (
+            <div key={item} className="browser-menu-item">
+              <button
+                type="button"
+                aria-label={`${item} menu`}
+                aria-expanded={openMenu === item}
+                onClick={() => setOpenMenu(openMenu === item ? null : item)}
+              >
+                {item}
+              </button>
+              {openMenu === item ? (
+                <div className="browser-menu-popover" role="menu" aria-label={`${item} commands`}>
+                  {item === "File" ? (
+                    <>
+                      <button type="button" role="menuitem" onClick={() => runBrowserMenuCommand("new-tab")}>
+                        New Tab
+                      </button>
+                      <button type="button" role="menuitem" onClick={() => runBrowserMenuCommand("open-location")}>
+                        Open Location
+                      </button>
+                      <button type="button" role="menuitem" onClick={() => runBrowserMenuCommand("close-tab")}>
+                        Close Tab
+                      </button>
+                    </>
+                  ) : null}
+                  {item === "Edit" ? (
+                    <>
+                      <button type="button" role="menuitem" onClick={() => runBrowserMenuCommand("open-location")}>
+                        Edit Address
+                      </button>
+                      <button type="button" role="menuitem" onClick={() => void copyCurrentUrl()}>
+                        Copy Current URL
+                      </button>
+                    </>
+                  ) : null}
+                  {item === "View" ? (
+                    <>
+                      <button type="button" role="menuitem" onClick={() => runBrowserMenuCommand("reload")}>
+                        Reload Page
+                      </button>
+                      <button type="button" role="menuitem" onClick={() => runBrowserMenuCommand("zoom-reset")}>
+                        Actual Size
+                      </button>
+                    </>
+                  ) : null}
+                  {item === "History" ? (
+                    <>
+                      <button type="button" role="menuitem" onClick={() => runBrowserMenuCommand("back")} disabled={!canGoBack}>
+                        Back
+                      </button>
+                      <button type="button" role="menuitem" onClick={() => runBrowserMenuCommand("forward")} disabled={!canGoForward}>
+                        Forward
+                      </button>
+                    </>
+                  ) : null}
+                  {item === "Bookmarks" ? (
+                    BROWSER_BOOKMARK_ITEMS.map((bookmark) => (
+                      <button key={bookmark.url} type="button" role="menuitem" onClick={() => openMenuUrl(bookmark.url)}>
+                        {bookmark.label}
+                      </button>
+                    ))
+                  ) : null}
+                  {item === "Profiles" ? (
+                    <button type="button" role="menuitem" onClick={() => runBrowserMenuCommand("profiles")}>
+                      Profiles require native Chromium profile support
+                    </button>
+                  ) : null}
+                  {item === "Tab" ? (
+                    <>
+                      <button type="button" role="menuitem" onClick={() => runBrowserMenuCommand("new-tab")}>
+                        New Tab
+                      </button>
+                      <button type="button" role="menuitem" onClick={() => runBrowserMenuCommand("reload")}>
+                        Reload Tab
+                      </button>
+                    </>
+                  ) : null}
+                  {item === "Window" ? (
+                    <button type="button" role="menuitem" onClick={() => runBrowserMenuCommand("window")}>
+                      Window commands are owned by ResonantOS shell
+                    </button>
+                  ) : null}
+                  {item === "Help" ? (
+                    <>
+                      <button type="button" role="menuitem" onClick={() => runBrowserMenuCommand("help")}>
+                        Chrome Help
+                      </button>
+                      <button type="button" role="menuitem" onClick={() => runBrowserMenuCommand("extensions")}>
+                        Chrome Web Store
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ))}
+          {error || controlledActionStatus ? (
+            <span className={`browser-menu-status ${error ? "browser-menu-status-error" : ""}`} role={error ? "alert" : "status"}>
+              {error || controlledActionStatus}
+            </span>
+          ) : null}
+        </div>
+
         <div className="browser-tab-strip" aria-label="Browser tabs">
           {tabs.map((tab) => (
             <div key={tab.id} className={`browser-tab ${tab.id === activeTabId ? "active" : ""}`}>
@@ -333,23 +706,33 @@ export function BrowserWorkspace({
             </button>
           </div>
           <input
+            ref={urlInputRef}
             value={draftUrl}
             onChange={(event) => setDraftUrl(event.target.value)}
             aria-label="Browser URL"
             placeholder="https://resonantos.com"
           />
           <div className="browser-nav-cluster browser-nav-cluster-right">
+            <button
+              type="button"
+              className="browser-ai-mode-pill"
+              aria-label="Read active page with Augmentor"
+              onClick={() => void readActivePageWithHost()}
+              disabled={!onReadActivePage}
+            >
+              AI Mode
+            </button>
             <button type="button" className="browser-icon-button" aria-label="Reload" onClick={() => navigateTo(activeTab?.url ?? draftUrl, "replace")}>
               ↻
             </button>
             <button
               type="button"
-              className="browser-icon-button browser-ai-button"
-              aria-label="Read active page with Augmentor"
-              onClick={() => void readActivePageWithHost()}
-              disabled={!onReadActivePage}
+              className="browser-icon-button browser-extension-button"
+              aria-label="Extensions"
+              onClick={() => setOpenMenu(openMenu === "Help" ? null : "Help")}
+              title="Open Browser extension commands."
             >
-              A
+              ◧
             </button>
             <button type="submit" className="browser-icon-button browser-go-button" aria-label="Open address">
               →
@@ -357,34 +740,205 @@ export function BrowserWorkspace({
           </div>
         </form>
 
-        <div className="browser-native-host" aria-label="Live browser viewport">
-          {activeTab ? (
-            <div
-              ref={viewportRef}
-              className="browser-native-webview-mount"
-              title={`${manifest?.name ?? "Resonant Browser"} native webview: ${activeTab.label}`}
-            >
-              <div className="browser-native-webview-placeholder">
-                Native Browser surface
-                <span>Websites load in a host-owned webview, not an iframe.</span>
+        <div className="browser-bookmarks-bar" aria-label="Browser bookmarks bar">
+          <button type="button" className="browser-apps-button" aria-label="Browser apps" onClick={() => openBrowserUrl(CHROME_WEB_STORE_URL)}>
+            ▦
+          </button>
+          {BROWSER_BOOKMARK_ITEMS.map((bookmark) => (
+            <button key={bookmark.url} type="button" onClick={() => openBrowserUrl(bookmark.url)}>
+              {bookmark.label}
+            </button>
+          ))}
+          <span className="browser-extension-note">Extensions require the native Chromium host.</span>
+        </div>
+
+        <div ref={viewportRef} className="browser-v2-host browser-native-webview-mount" aria-label="Native embedded Chromium target">
+          <section className="browser-v2-hero browser-native-placeholder">
+            <span className="eyebrow">Browser v2 target</span>
+            <h3>Native embedded Chromium, not an Electron sidecar</h3>
+            <p>
+              Resonant Browser must render inside this center workspace and support the same live session for the human
+              and Augmentor. The previous Electron sidecar is no longer treated as product Browser because it opens a
+              separate window instead of embedding in ResonantOS.
+            </p>
+            <div className="browser-v2-actions">
+              <button type="button" className="button-primary touch-action" onClick={() => openBrowserUrl(CHROME_WEB_STORE_URL)}>
+                Open Chrome Web Store
+              </button>
+              <button type="button" className="button-secondary touch-action" onClick={() => void runNativeProbe()}>
+                Run Native Host Probe
+              </button>
+              <button type="button" className="button-secondary touch-action" onClick={() => void runNativeAttachSmoke()}>
+                Run Attach Smoke Test
+              </button>
+              <button type="button" className="button-secondary touch-action" onClick={() => void runNativeBridgeProbe()}>
+                Run Bridge Probe
+              </button>
+            </div>
+          </section>
+
+          {nativeProbe ? (
+            <section className={`browser-native-probe browser-native-probe-${nativeProbe.status}`} aria-label="Native Browser host probe">
+              <div>
+                <span className="eyebrow">Host probe</span>
+                <h4>
+                  Native embedded host{" "}
+                  {nativeProbe.status === "ready" ? "ready" : nativeProbe.status === "partial" ? "partial" : "blocked"}
+                </h4>
+                <p>
+                  Candidate: {nativeProbe.engineCandidate} · source {nativeProbe.sourceScaffoldStatus} · host{" "}
+                  {nativeProbe.hostBinaryStatus} · embedded view {nativeProbe.embeddedViewStatus} · extensions{" "}
+                  {nativeProbe.extensionCompatibilityStatus}
+                </p>
               </div>
-            </div>
+              <div className="browser-native-probe-grid">
+                <span>Phantom: {nativeProbe.phantomStatus}</span>
+                <span>Bitwarden: {nativeProbe.bitwardenStatus}</span>
+              </div>
+              {nativeProbe.blockers.length ? (
+                <ul>
+                  {nativeProbe.blockers.map((blocker) => (
+                    <li key={blocker}>{blocker}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </section>
           ) : null}
-          {error ? (
-            <div className="browser-error" role="alert">
-              {error}
-            </div>
+
+          {nativeAttachSmoke ? (
+            <section
+              className={`browser-native-probe browser-native-probe-${nativeAttachSmoke.status}`}
+              aria-label="Native Browser attach smoke test"
+            >
+              <div>
+                <span className="eyebrow">Attach smoke</span>
+                <h4>
+                  Native attach{" "}
+                  {nativeAttachSmoke.status === "attached"
+                    ? "passed"
+                    : nativeAttachSmoke.status === "unsupported"
+                      ? "unsupported"
+                      : "blocked"}
+                </h4>
+                <p>
+                  Platform: {nativeAttachSmoke.platform} · parent {nativeAttachSmoke.parentHandleKind}{" "}
+                  {nativeAttachSmoke.parentHandlePresent ? "present" : "missing"} · mode{" "}
+                  {nativeAttachSmoke.hostIntegrationMode}
+                </p>
+              </div>
+              {nativeAttachSmoke.blocker ? <p>{nativeAttachSmoke.blocker}</p> : null}
+              {nativeAttachSmoke.nextActions.length ? (
+                <ul>
+                  {nativeAttachSmoke.nextActions.map((action) => (
+                    <li key={action}>{action}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </section>
           ) : null}
-          {controlledActionStatus ? <div className="browser-engine-status">{controlledActionStatus}</div> : null}
-          {workspaceState.controlledSession.status !== "idle" ? (
-            <div className={`browser-engine-status browser-engine-status-${workspaceState.controlledSession.status}`}>
-              {workspaceState.controlledSession.status === "starting"
-                ? "Syncing controlled Chromium session..."
-                : workspaceState.controlledSession.status === "ready"
-                  ? `Controlled Chromium ready: ${workspaceState.controlledSession.title || workspaceState.controlledSession.url || "active session"}`
-                  : `Controlled Chromium error: ${workspaceState.controlledSession.error || "session unavailable"}`}
-            </div>
+
+          {nativeBridgeProbe ? (
+            <section
+              className={`browser-native-probe browser-native-probe-${nativeBridgeProbe.status}`}
+              aria-label="Native Browser in-process bridge probe"
+            >
+              <div>
+                <span className="eyebrow">Bridge probe</span>
+                <h4>
+                  In-process bridge{" "}
+                  {nativeBridgeProbe.status === "ready"
+                    ? "ready"
+                    : nativeBridgeProbe.status === "partial"
+                      ? "partial"
+                      : "missing"}
+                </h4>
+                <p>
+                  Mode: {nativeBridgeProbe.integrationMode} · library {nativeBridgeProbe.bridgeLibraryStatus} · C ABI{" "}
+                  {nativeBridgeProbe.cAbiStatus}
+                </p>
+                {nativeBridgeProbe.bridgeLibraryPath ? <p>{nativeBridgeProbe.bridgeLibraryPath}</p> : null}
+              </div>
+              {nativeBridgeProbe.exportedSymbols.length ? (
+                <div className="browser-native-probe-grid">
+                  {nativeBridgeProbe.exportedSymbols.slice(0, 4).map((symbol) => (
+                    <span key={symbol}>{symbol}</span>
+                  ))}
+                </div>
+              ) : null}
+              {nativeBridgeProbe.blockers.length ? (
+                <ul>
+                  {nativeBridgeProbe.blockers.map((blocker) => (
+                    <li key={blocker}>{blocker}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </section>
           ) : null}
+
+          <section className="browser-extension-manager" aria-label="Browser extension manager">
+            <div className="browser-extension-manager-head">
+              <div>
+                <span className="eyebrow">Extension Manager</span>
+                <h4>Priority compatibility targets</h4>
+              </div>
+              <p>
+                Phantom and Bitwarden are acceptance requirements, not demo placeholders. CEF/native Chromium work must
+                prove extension API compatibility before this add-on can be marked ready.
+              </p>
+            </div>
+            <div className="browser-extension-priority-grid" aria-label="Priority Browser extension compatibility">
+              {extensionCompatibility.map((target) => (
+                <article key={target.id} className={target.installed ? "installed" : ""}>
+                  <div className="browser-extension-target-title">
+                    <strong>{target.name}</strong>
+                    <span className={`tone tone-${target.installed ? "active" : "neutral"}`}>
+                      {target.installed ? "loaded" : "needed"}
+                    </span>
+                  </div>
+                  <p>{target.purpose}</p>
+                  <small>{target.source}</small>
+                  <span className="browser-extension-target-status">Native host compatibility required</span>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="browser-extension-list" aria-label="Loaded Browser extensions">
+            <span className="eyebrow">Loaded extensions</span>
+            {extensions.length ? (
+              <ul>
+                {extensions.map((extension) => (
+                  <li key={extension.extensionId}>
+                    <div>
+                      <strong>{extension.name}</strong>
+                      <span>
+                        {extension.version} · {extension.pinned ? "pinned" : "not pinned"} · {extension.source}
+                      </span>
+                    </div>
+                    <div className="browser-extension-row-actions">
+                      <button
+                        type="button"
+                        className="button-secondary touch-action"
+                        onClick={() => void setExtensionPinned(extension, !extension.pinned)}
+                      >
+                        {extension.pinned ? "Unpin" : "Pin"}
+                      </button>
+                      <button
+                        type="button"
+                        className="button-secondary touch-action"
+                        onClick={() => void disableExtension(extension)}
+                      >
+                        Disable
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>No Browser v2 extensions loaded in the current host session.</p>
+            )}
+          </section>
+
         </div>
       </section>
     </div>

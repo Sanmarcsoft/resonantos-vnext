@@ -32,6 +32,15 @@ Reference:
 
 ## How To Build Locally
 
+Use the repository Rust toolchain pin before native builds:
+
+```bash
+rustup toolchain install 1.94.1
+rustup override set 1.94.1
+```
+
+The repo also includes `rust-toolchain.toml`, so rustup-aware shells should select `1.94.1` automatically.
+
 macOS local build:
 
 ```bash
@@ -64,6 +73,24 @@ Expected artifacts:
 - `resonantos-alpha-linux`
 
 Artifacts are retained for 14 days.
+
+## Linux Toolchain Note
+
+Linux native Tauri builds compile GTK/WebKitGTK Rust bindings through the Tauri dependency graph.
+
+Known alpha blocker:
+
+- Linux x86_64 on an Intel Haswell GT70 test machine passed Vitest, Vite production build, and Rust unit tests.
+- Native Tauri packaging was blocked by a rustc internal compiler error / SIGSEGV while compiling the `gtk` crate.
+- The reported failing environment used Rust 1.95 with LLVM 20 on Haswell-class hardware.
+- Repeated local build-flag workarounds did not resolve it, which points to an upstream compiler/toolchain issue rather than a ResonantOS source error.
+
+Current alpha policy:
+
+- Use Rust `1.94.1` for reproducible alpha packaging.
+- GitHub `alpha-build` is pinned to Rust `1.94.1`.
+- If Linux native packaging fails with Rust `1.95+`, first retest with rustup-managed `1.94.1` before debugging ResonantOS code.
+- If `1.94.1` still fails on that hardware, treat Haswell Linux native packaging as blocked and use GitHub-hosted Linux artifacts until the upstream compiler path is fixed.
 
 ## Current Signing Status
 

@@ -3,13 +3,12 @@
 
 use std::env;
 use std::fs;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager};
 
 use super::{
-    dedupe_paths, source_hash, system_time_label, unix_timestamp, ArchiveRuntime,
+    dedupe_paths, sha256_hex, source_hash, system_time_label, unix_timestamp, ArchiveRuntime,
     ArchiveSystemMemoryManifest, ArchiveSystemMemoryPage, ArchiveSystemMemorySource,
     ArchiveSystemMemoryStatus,
 };
@@ -130,9 +129,7 @@ pub(super) const SYSTEM_MEMORY_SOURCE_SPECS: &[SystemMemorySourceSpec] = &[
 ];
 
 pub(super) fn hash_text(value: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    value.hash(&mut hasher);
-    format!("fnv64:{:016x}", hasher.finish())
+    format!("sha256:{}", sha256_hex(value.as_bytes()))
 }
 
 pub(super) fn system_memory_project_root_candidates(app: &AppHandle) -> Vec<PathBuf> {

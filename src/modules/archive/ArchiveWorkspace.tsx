@@ -13,6 +13,8 @@ import type {
   ArchiveLibraryImportMode,
   ArchiveLibraryImportResult,
   ArchiveLibraryPreflightResult,
+  ArchiveLintResult,
+  ArchiveMaintenanceCycleResult,
   ArchiveMemoryDomain,
   ArchiveQueuedIngestRequest,
   ArchiveReviewArtifact,
@@ -20,6 +22,7 @@ import type {
   ArchiveRuntimeStatus,
   ArchiveSearchResult,
   ArchiveSearchSourceHit,
+  ArchiveSemanticLintResult,
   ArchiveSourceFolderScanResult,
   ArchiveSourceWatchRecord,
   ArchiveTolBundleBuildResult,
@@ -55,6 +58,9 @@ type ArchiveWorkspaceProps = {
   archiveProcessResult: ArchiveProcessIngestResult | null;
   archiveReviewDecisionResult: ArchiveReviewDecisionResult | null;
   archivePromotionResult: ArchivePromoteReviewArtifactResult | null;
+  archiveMaintenanceResult: ArchiveMaintenanceCycleResult | null;
+  archiveLintResult: ArchiveLintResult | null;
+  archiveSemanticLintResult: ArchiveSemanticLintResult | null;
   archiveTolBundles: ArchiveTolBundleCandidate[];
   archiveTolBundleResult: ArchiveTolBundleBuildResult | null;
   archiveSourceScanBusy: boolean;
@@ -96,6 +102,9 @@ type ArchiveWorkspaceProps = {
   onEscalateReviewArtifact: (artifactFile: string) => void;
   onRejectReviewArtifact: (artifactFile: string) => void;
   onPromoteReviewArtifact: (artifactFile: string) => void;
+  onRunArchiveMaintenance: () => void;
+  onRunArchiveLint: () => void;
+  onRunArchiveSemanticLint: () => void;
   onRefreshTolBundles: () => void;
   onBuildTolBundle: (sessionId: string) => void;
   onRunIngestProbe: () => void;
@@ -116,6 +125,9 @@ export function ArchiveWorkspace({
   archiveProcessResult,
   archiveReviewDecisionResult,
   archivePromotionResult,
+  archiveMaintenanceResult,
+  archiveLintResult,
+  archiveSemanticLintResult,
   archiveTolBundles,
   archiveTolBundleResult,
   archiveSourceScanBusy,
@@ -146,6 +158,9 @@ export function ArchiveWorkspace({
   onEscalateReviewArtifact,
   onRejectReviewArtifact,
   onPromoteReviewArtifact,
+  onRunArchiveMaintenance,
+  onRunArchiveLint,
+  onRunArchiveSemanticLint,
   onRefreshTolBundles,
   onBuildTolBundle,
   onRunIngestProbe,
@@ -153,7 +168,9 @@ export function ArchiveWorkspace({
   const archiveReady = archiveStatus?.status === "ready";
   const reviewDeskRef = useRef<HTMLDivElement | null>(null);
   const importerRef = useRef<HTMLDivElement | null>(null);
+  const runMaintenanceRef = useRef(onRunArchiveMaintenance);
   const [activeTab, setActiveTab] = useState<ArchiveWorkspaceTab>("start");
+  const [autoMaintenanceEnabled, setAutoMaintenanceEnabled] = useState(false);
 
   useEffect(() => {
     if (focusTarget !== "review") {
@@ -170,6 +187,26 @@ export function ArchiveWorkspace({
   const audio2TolInstallation = state.installations["addon.audio2tol"];
   const audio2TolEnabled = Boolean(audio2TolInstallation?.installed && audio2TolInstallation.enabled);
   const needsWork = archiveQueue.length + pendingArtifacts + unprocessedSources;
+
+  useEffect(() => {
+    runMaintenanceRef.current = onRunArchiveMaintenance;
+  }, [onRunArchiveMaintenance]);
+
+  useEffect(() => {
+    if (!autoMaintenanceEnabled) {
+      return;
+    }
+
+    const runIfWorkExists = () => {
+      if (archiveQueueBusy) {
+        return;
+      }
+      runMaintenanceRef.current();
+    };
+
+    const intervalId = window.setInterval(runIfWorkExists, 120_000);
+    return () => window.clearInterval(intervalId);
+  }, [archiveQueueBusy, autoMaintenanceEnabled]);
 
   const scrollToImporter = () => {
     setActiveTab("start");
@@ -258,12 +295,16 @@ export function ArchiveWorkspace({
             archiveProcessResult={archiveProcessResult}
             archiveReviewDecisionResult={archiveReviewDecisionResult}
             archivePromotionResult={archivePromotionResult}
+            archiveMaintenanceResult={archiveMaintenanceResult}
+            autoMaintenanceEnabled={autoMaintenanceEnabled}
             onRefreshArchiveQueue={onRefreshArchiveQueue}
             onProcessArchiveRequest={onProcessArchiveRequest}
             onApproveReviewArtifact={onApproveReviewArtifact}
             onEscalateReviewArtifact={onEscalateReviewArtifact}
             onRejectReviewArtifact={onRejectReviewArtifact}
             onPromoteReviewArtifact={onPromoteReviewArtifact}
+            onToggleAutoMaintenance={() => setAutoMaintenanceEnabled((current) => !current)}
+            onRunArchiveMaintenance={onRunArchiveMaintenance}
           />
           {archiveClassificationReview ? (
             <ArchiveClassificationReviewPanel
@@ -342,8 +383,13 @@ export function ArchiveWorkspace({
           <ArchiveDiagnostics
             state={state}
             archiveStatus={archiveStatus}
+            archiveQueueBusy={archiveQueueBusy}
+            archiveLintResult={archiveLintResult}
+            archiveSemanticLintResult={archiveSemanticLintResult}
             ingestProbeBusy={ingestProbeBusy}
             ingestProbeResult={ingestProbeResult}
+            onRunArchiveLint={onRunArchiveLint}
+            onRunArchiveSemanticLint={onRunArchiveSemanticLint}
             onRunIngestProbe={onRunIngestProbe}
           />
         </>

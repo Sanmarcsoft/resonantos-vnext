@@ -1,9 +1,21 @@
 # ResonantOS vNext Feature Backlog
 
-Last updated: 2026-04-28
+Last updated: 2026-04-30
 
 ## Core Shell
 
+- Accepted no-lock-in kernel/add-on direction on 2026-04-30:
+  - `ADR-026` defines the minimal non-replaceable ResonantOS kernel
+  - Augmentor Chat is now a recommended bundled add-on contract, not a mandatory core assumption
+  - Living Archive is now a recommended bundled memory-system add-on contract, not a mandatory core assumption
+  - default bundled catalog now starts clean with only `addon.augmentor-chat` and `addon.living-archive`
+  - Browser, Resonant Notes, Terminal, OpenCode, Hermes, Audio2TOL, OpenClaw, Shield, Logician, R-Awareness, and Telegram remain available as development/registry manifests but are not in the basic default catalog
+- Implemented first ADR-026 runtime enforcement on 2026-04-30:
+  - first-run prompt asks whether to enable Augmentor Chat and Living Archive
+  - chat rail is gated by an active `chat-interface` add-on except for the kernel-owned Engineer setup/recovery console
+  - Archive route is gated by an active `memory-system` add-on and prompts the user to choose a memory add-on when disabled
+  - Augmentor Chat can detach into a native floating Tauri window through the `floating-window` surface
+  - next work is deeper add-on replacement management and production-grade cross-window session coordination
 - Added UI/UX product direction on 2026-04-25:
   - documented the ResonantOS app-shell target in `docs/product/UX-001-resonantos-app-shell.md`
   - default experience should become Home / Apps, not a settings-style overview
@@ -98,6 +110,18 @@ Last updated: 2026-04-28
 
 ## Living Archive
 
+- Completed V1 LLM Wiki compliance on 2026-04-30:
+  - `ADR-027` records the Living Archive / LLM Wiki compliance baseline
+  - implemented the full control loop: source scan, queue, ingest, verifier approval, promotion, index/log refresh, deterministic lint, semantic lint, and semantic repair queueing
+  - added `background-cycle` as the V1 automation primitive for app-open scheduled sync
+  - auto sync is opt-in because provider usage can cost money
+  - semantic lint reports do not mutate trusted memory directly; repair-worthy findings become repair-source artifacts that re-enter the normal ingest/review/promote path
+  - large text sources are chunk-staged with chunk manifests recorded in review artifacts
+  - non-text sources become conservative attachment stubs unless a specialist add-on emits text/structured intake bundles
+  - ingest writer and verifier model/provider fields can be split so the verifier can use a different configured route
+  - trusted wiki promotion now uses section-aware markdown merge with superseded-section provenance instead of pure append-only drift
+  - memory-provider broker and reference third-party memory service now include `background-cycle`, `lint`, and `semantic-lint`
+
 - Completed on 2026-04-23:
   - added a real host-mediated archive service in `src-tauri/src/archive_service.rs`
   - added archive runtime resolution from `ARCHIVE_CONFIG.json` + `VAULT_MAP.json`
@@ -176,14 +200,15 @@ Last updated: 2026-04-28
   - extracted source folder scanning, source-watch indexing, and library import into `src-tauri/src/archive_service/archive_source_library.rs`
   - extracted review artifact generation, approval decisions, and trusted wiki promotion into `src-tauri/src/archive_service/archive_review.rs`
   - kept Tauri command behavior unchanged while reducing the main archive service surface
-- Continue Library Importer:
+- Continue Living Archive hardening:
+  - run real-data validation against the full ResonantOS Base folder and configured MiniMax/OpenAI routes
   - add a dedicated audited execution flow before move-on-import or source reorganisation can move files
   - upgrade the JSONL source-version ledger into local Git-style source history where appropriate
   - expose imported libraries as first-class cards with rescan/sync controls using the host registry
   - upgrade deterministic host-owned classification artifacts into Strategist-owned model review artifacts
-- Add optional background folder watching on top of the deterministic source scan command.
-- Scoped add-on archive read/write flow.
-- Replace append-only provenance merge with deeper section-level semantic merge logic.
+  - add richer attachment processors through add-ons for PDF, DOCX, audio, image, and web captures
+  - add long-running native filesystem event watchers; current V1 auto-sync is an app-open scheduled background cycle
+  - add richer domain-specific merge policies for specialized page types
 - Continue archive host modularization:
   - completed first split pass for System Architecture Memory, source library/imports, optional Audio2TOL add-on bundle bridging, and review/promotion
   - split runtime/config resolution into an archive runtime module
@@ -272,6 +297,9 @@ Last updated: 2026-04-28
   - kept the bundled Browser manifest, grants, and delegation metadata as the add-on contract shell
   - replaced the screenshot UI with a live Tauri child WebView so the user can actually browse inside the center workspace
   - kept the final Chromium-class AI-control engine as a separate implementation step
+- Browser chrome update on 2026-04-29:
+  - added browser-style top menus, tabs, address bar controls, AI Mode, extension-slot controls, and a bookmarks bar to move toward a real Chromium browser shape
+  - extension controls are explicit placeholders until the final Chromium BrowserView/CEF host exists; Tauri OS WebView cannot provide Chrome extension install/pin/profile compatibility
 - Hardened Add-on SDK V0 validation on 2026-04-27:
   - archive read scopes now require `archive-read`
   - archive intake write scopes now require `archive-intake-write`
@@ -281,7 +309,7 @@ Last updated: 2026-04-28
 - Build add-on launcher UX from `docs/product/UX-001-resonantos-app-shell.md`.
 - Continue Delegation Monitor with artifact previews and explicit archive-intake review requests for approved results.
 - Add center-workspace app opening state for installed add-ons.
-- Build Obsidian V2 from `docs/architecture/ADR-019-obsidian-addon-embedded-workspace.md`:
+- Build Resonant Notes from `docs/architecture/ADR-019-obsidian-addon-embedded-workspace.md` and ADR-020:
   - `docs/architecture/ADR-020-resonant-notes-clean-room-workspace.md` defines the clean-room Resonant Notes direction
   - central vault workspace now has a first shell with note list, editor, preview toggle, dirty-state, and audited save
   - workspace connect gate now grants required access and opens the native vault picker before loading notes
@@ -291,6 +319,16 @@ Last updated: 2026-04-28
   - search results and backlinks now navigate to notes through the guarded workspace open path
   - workspace UI now follows the Obsidian reference with a compact tab strip, left ribbon, one active sidebar view, central document surface, and bottom status bar
   - search and backlinks now live behind ribbon-selected sidebar modes so the page does not render every knowledge panel at once
+  - central note editing now uses a dedicated CodeMirror 6 markdown editor module
+  - host-mediated note operations now cover new note, new folder, rename/move note, and recoverable archive with audit records
+  - file explorer folders now default closed, remember user expansion per vault, and new note/folder creation uses an inline Obsidian-style row instead of browser prompts
+  - rename/move now uses the same inline audited row, selected note is remembered per vault, and first keyboard shortcuts are active (`Cmd/Ctrl+S`, `Cmd/Ctrl+N`, `Cmd/Ctrl+Shift+N`, `F2`, `Esc`)
+  - file/folder context menus now expose Obsidian-style local actions, and open note tabs are tracked/persisted per vault
+  - Resonant Notes and the CodeMirror editor are now lazy-loaded; Vite emits separate `ObsidianWorkspace`, `ObsidianEditor`, `codemirror-core`, and `codemirror-markdown` chunks
+  - Living Archive, Browser, Add-ons, Settings, Delegation, Recovery, Overview, Strategist, Terminal, Resonant Notes, and CodeMirror editor routes are now lazy-loaded from the shell
+  - OpenCode intentionally remains mounted for now because its workspace controls service lifecycle through an `active` prop; split it only after a lifecycle review
+  - remaining production bundle warning now belongs to the reduced base shell chunk and should be handled by moving shell orchestration/controllers out of `App.tsx`
+  - user-facing add-on identity is now Resonant Notes, with a custom ResonantOS notes icon and a full-height center workspace; `addon.obsidian` remains the internal compatibility id for existing state and host commands
   - graph view and richer editor controls remain next
   - Augmentor actions over selected note/text
 - Add workspace renderers for add-on runtime types:
@@ -305,9 +343,13 @@ Last updated: 2026-04-28
   - workspace chrome must stay minimal: OpenCode's UI owns the page, and setup/status details live behind a compact settings control
   - next work is SDK/API task dispatch, diff capture, and safe versioning before pointing it at a real Obsidian vault
 - Build the live Browser add-on host:
-  - choose Electron BrowserView/WebContentsView or CEF child-view host
+  - selected product path: native embedded Chromium host per `ADR-025`
+  - first native contract exists at `addons/resonant-browser-native/native-browser-host.contract.json`
+  - Electron sidecar is retained only as a research harness and must not be presented as embedded Browser
   - fill the ResonantOS center workspace with a live Chromium-class browser surface
   - implement tabs, address bar, back/forward, reload, scroll, click, type, and 100% page scale
+  - prove Phantom Wallet and Bitwarden compatibility before expanding Browser UI
+  - implement Chrome extension install/enable/disable/pin management through the native embedded host, not through Electron sidecar or Tauri WebView
   - attach Augmentor browser tools to the same live session the user sees
   - add page read/extract, evidence capture, audit log, and archive-intake artifact export after the live surface exists
 - Runtime lifecycle manager.
@@ -340,6 +382,10 @@ Last updated: 2026-04-28
   - `.github/workflows/alpha-build.yml` builds native macOS, Windows, and Ubuntu artifacts on GitHub Actions
   - `docs/ALPHA_DISTRIBUTION.md` documents reviewer instructions, unsigned-build caveats, privacy boundary, and release gates
   - production distribution still needs code signing, notarization, updater signing, and cross-platform QA
+- Added Linux Haswell toolchain mitigation on 2026-04-29:
+  - local tech-team Linux x86_64 Haswell native packaging passed frontend/Rust tests but hit a rustc 1.95 compiler ICE while compiling the GTK dependency path
+  - repo alpha builds are pinned to Rust `1.94.1` through `rust-toolchain.toml` and GitHub Actions
+  - Haswell Linux packaging should be retested on rustup-managed `1.94.1` before debugging ResonantOS source code
 - Wallet integration architecture.
 - Secure signing flow in Rust.
 - Capability separation for blockchain actions.

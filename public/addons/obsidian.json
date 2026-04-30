@@ -1,10 +1,10 @@
 {
   "id": "addon.obsidian",
-  "name": "Obsidian",
+  "name": "Resonant Notes",
   "version": "0.1.0",
   "author": "Resonant Alpha",
   "category": "knowledge",
-  "description": "Connects an Obsidian vault or markdown folder so ResonantOS can inspect notes now and later open an Obsidian-compatible workspace inside the shell.",
+  "description": "Opens an Obsidian-compatible markdown vault inside ResonantOS as a native Resonant Notes workspace.",
   "runtimeType": "ui-module",
   "surfaces": [
     {
@@ -16,8 +16,8 @@
     {
       "id": "obsidian-workspace",
       "type": "embedded-pane",
-      "label": "Obsidian Workspace",
-      "description": "Planned V2 ResonantOS-hosted markdown workspace for operating an Obsidian-compatible vault."
+      "label": "Resonant Notes Workspace",
+      "description": "ResonantOS-hosted markdown workspace for operating an Obsidian-compatible vault."
     }
   ],
   "requestedCapabilities": [
@@ -94,7 +94,7 @@
     "defaultTargetRuntime": "embedded-workspace",
     "requiresHumanApprovalBeforeExecution": true,
     "notes": [
-      "Obsidian is primarily a user workspace in v1.",
+      "Resonant Notes is primarily a user workspace in v1.",
       "Delegated organization proposals must not move or rewrite vault content without user approval."
     ]
   },

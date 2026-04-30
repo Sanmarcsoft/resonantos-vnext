@@ -11,6 +11,7 @@ import type {
 import { Panel } from "../../components/Panel";
 import { requestBrowserEngineStatus, requestBrowserInstallEngine } from "../../core/runtime";
 import { createAddOnRegistryEntry } from "../../sdk/addons";
+import { HermesAddonPanel } from "./HermesAddonPanel";
 import { ObsidianAddonPanel } from "./ObsidianAddonPanel";
 
 type AddOnsWorkspaceProps = {
@@ -55,10 +56,13 @@ const isBrowserVisibleReady = (installation: AddOnInstallation | null): boolean 
     installation?.enabled &&
       hasGrant(installation, "network") &&
       hasGrant(installation, "ui-embedding") &&
-      hasGrant(installation, "browser-control"),
+      hasGrant(installation, "browser-control") &&
+      hasGrant(installation, "filesystem"),
   );
 const isTerminalVisibleReady = (installation: AddOnInstallation | null): boolean =>
   Boolean(installation?.enabled && hasGrant(installation, "shell") && hasGrant(installation, "ui-embedding"));
+const isHermesBridgeReady = (installation: AddOnInstallation | null): boolean =>
+  Boolean(installation?.enabled && hasGrant(installation, "shell"));
 
 const addonPrimaryActionLabel = (manifest: AddOnManifest, installation: AddOnInstallation | null): string => {
   if (manifest.id === "addon.browser" && !isBrowserVisibleReady(installation)) {
@@ -66,6 +70,9 @@ const addonPrimaryActionLabel = (manifest: AddOnManifest, installation: AddOnIns
   }
   if (manifest.id === "addon.terminal" && !isTerminalVisibleReady(installation)) {
     return "Install and grant terminal access";
+  }
+  if (manifest.id === "addon.hermes" && !isHermesBridgeReady(installation)) {
+    return "Install and grant Hermes access";
   }
   if (!installation?.installed) {
     return "Install";
@@ -135,12 +142,25 @@ export function AddOnsWorkspace(props: AddOnsWorkspaceProps) {
                     event.stopPropagation();
                     if (manifest.id === "addon.browser" && !isBrowserVisibleReady(effectiveInstallation)) {
                       props.onSelectManifest(manifest.id);
-                      props.onGrantCapabilities(manifest.id, ["network", "ui-embedding", "browser-control"], manifest.requestedCapabilities);
+                      props.onGrantCapabilities(
+                        manifest.id,
+                        ["network", "ui-embedding", "browser-control", "filesystem"],
+                        manifest.requestedCapabilities,
+                      );
                       return;
                     }
                     if (manifest.id === "addon.terminal" && !isTerminalVisibleReady(effectiveInstallation)) {
                       props.onSelectManifest(manifest.id);
                       props.onGrantTerminalWorkspaceAccess(manifest);
+                      return;
+                    }
+                    if (manifest.id === "addon.hermes" && !isHermesBridgeReady(effectiveInstallation)) {
+                      props.onSelectManifest(manifest.id);
+                      props.onGrantCapabilities(
+                        manifest.id,
+                        ["shell", "providers", "archive-read", "archive-intake-write"],
+                        manifest.requestedCapabilities,
+                      );
                       return;
                     }
                     props.onToggleAddonInstall(manifest);
@@ -280,10 +300,21 @@ function AddOnDetailPanel(props: AddOnDetailPanelProps) {
           onGrantVisibleAccess={() =>
             props.onGrantCapabilities(
               props.selectedManifest.id,
-              ["network", "ui-embedding", "browser-control"],
+              ["network", "ui-embedding", "browser-control", "filesystem"],
               props.selectedManifest.requestedCapabilities,
             )
           }
+        />
+      )}
+
+      {props.selectedManifest.id === "addon.hermes" && (
+        <HermesAddonPanel
+          installation={props.selectedInstallation}
+          requestedCapabilities={props.selectedManifest.requestedCapabilities}
+          onGrantCapabilities={(capabilities, requestedCapabilities) =>
+            props.onGrantCapabilities(props.selectedManifest.id, capabilities, requestedCapabilities)
+          }
+          onConfigChange={(config) => props.onUpdateAddonConfig(props.selectedManifest.id, config)}
         />
       )}
 
@@ -317,7 +348,8 @@ function BrowserAddonSetupPanel({
   const networkGranted = installation.grantedCapabilities.some((grant) => grant.capability === "network" && grant.granted);
   const embeddingGranted = installation.grantedCapabilities.some((grant) => grant.capability === "ui-embedding" && grant.granted);
   const browserControlGranted = installation.grantedCapabilities.some((grant) => grant.capability === "browser-control" && grant.granted);
-  const ready = installation.enabled && networkGranted && embeddingGranted && browserControlGranted;
+  const filesystemGranted = installation.grantedCapabilities.some((grant) => grant.capability === "filesystem" && grant.granted);
+  const ready = installation.enabled && networkGranted && embeddingGranted && browserControlGranted && filesystemGranted;
   const installerReady = installation.enabled && networkGranted && browserControlGranted;
 
   useEffect(() => {
@@ -367,8 +399,8 @@ function BrowserAddonSetupPanel({
         <span className="eyebrow">Browser setup</span>
         <h3>Controlled Chromium access</h3>
         <p>
-          Install Browser and grant network, UI embedding, and browser control to launch Chromium through the
-          ResonantOS host boundary.
+          Install Browser and grant network, UI embedding, browser control, and reviewed filesystem access to launch
+          the native embedded Chromium host with trusted extension flows for Phantom and Bitwarden.
         </p>
       </div>
       <div className="browser-addon-grant-box">
@@ -378,6 +410,9 @@ function BrowserAddonSetupPanel({
         </span>
         <span className={`tone tone-${browserControlGranted ? "active" : "neutral"}`}>
           browser control {browserControlGranted ? "granted" : "needed"}
+        </span>
+        <span className={`tone tone-${filesystemGranted ? "active" : "neutral"}`}>
+          filesystem {filesystemGranted ? "granted" : "needed"}
         </span>
         <span className={`tone tone-${engineStatus?.installed ? "active" : "neutral"}`}>
           chromium {engineStatus?.installed ? "installed" : "needed"}

@@ -1,7 +1,14 @@
 // Intent citation: docs/architecture/ADR-002-modular-codebase.md
 // Intent citation: docs/architecture/ADR-007-living-archive-boundaries.md
 
-import type { ArchiveActorPolicy, ArchiveIngestProbeResult, ArchiveRuntimeStatus, ResonantShellState } from "../../core/contracts";
+import type {
+  ArchiveActorPolicy,
+  ArchiveIngestProbeResult,
+  ArchiveLintResult,
+  ArchiveRuntimeStatus,
+  ArchiveSemanticLintResult,
+  ResonantShellState,
+} from "../../core/contracts";
 import { canPerformArchiveAction } from "../../core/policies";
 import { resolveArchiveIngestRoute, routedProviderLabel } from "../../core/provider-service";
 import { Panel } from "../../components/Panel";
@@ -9,6 +16,9 @@ import { Panel } from "../../components/Panel";
 type ArchiveDiagnosticsProps = {
   state: ResonantShellState;
   archiveStatus: ArchiveRuntimeStatus | null;
+  archiveQueueBusy: boolean;
+  archiveLintResult: ArchiveLintResult | null;
+  archiveSemanticLintResult: ArchiveSemanticLintResult | null;
   ingestProbeBusy: boolean;
   ingestProbeResult: {
     probe: ArchiveIngestProbeResult;
@@ -16,14 +26,21 @@ type ArchiveDiagnosticsProps = {
     model: string;
     resolutionReason: string;
   } | null;
+  onRunArchiveLint: () => void;
+  onRunArchiveSemanticLint: () => void;
   onRunIngestProbe: () => void;
 };
 
 export function ArchiveDiagnostics({
   state,
   archiveStatus,
+  archiveQueueBusy,
+  archiveLintResult,
+  archiveSemanticLintResult,
   ingestProbeBusy,
   ingestProbeResult,
+  onRunArchiveLint,
+  onRunArchiveSemanticLint,
   onRunIngestProbe,
 }: ArchiveDiagnosticsProps) {
   const ingestRoute = resolveArchiveIngestRoute(state);
@@ -114,6 +131,81 @@ export function ArchiveDiagnostics({
               </tbody>
             </table>
           </div>
+        </details>
+
+        <details className="archive-details">
+          <summary>Wiki lint and health report</summary>
+          <div className="provider-toolbar">
+            <div className="provider-toolbar-copy">
+              <strong>Deterministic wiki health check</strong>
+              <p>Finds orphan pages, missing wikilinks, stale pages, unprocessed sources, duplicate-like titles, and contradiction candidates.</p>
+            </div>
+            <button type="button" className="button-secondary touch-action" onClick={onRunArchiveLint} disabled={archiveQueueBusy}>
+              {archiveQueueBusy ? "Running lint..." : "Run Archive Lint"}
+            </button>
+            <button type="button" className="button-secondary touch-action" onClick={onRunArchiveSemanticLint} disabled={archiveQueueBusy}>
+              {archiveQueueBusy ? "Reviewing..." : "Run Semantic Review"}
+            </button>
+          </div>
+          {archiveLintResult ? (
+            <article className="provider-card">
+              <div className="provider-head">
+                <div>
+                  <strong>{archiveLintResult.findings.length} finding(s)</strong>
+                  <p>
+                    {archiveLintResult.pagesChecked} pages · {archiveLintResult.sourcesChecked} sources · {archiveLintResult.checkedAt}
+                  </p>
+                </div>
+                <span className={`tone ${archiveLintResult.findings.length ? "tone-warning" : "tone-active"}`}>
+                  {archiveLintResult.findings.length ? "needs attention" : "clean"}
+                </span>
+              </div>
+              <p className="mono-inline">{archiveLintResult.reportPath}</p>
+              {archiveLintResult.findings.length ? (
+                <ul className="mono-list">
+                  {archiveLintResult.findings.slice(0, 8).map((finding) => (
+                    <li key={`${finding.category}:${finding.target}:${finding.detail}`}>
+                      {finding.severity} · {finding.category} · {finding.target} · {finding.recommendedAction}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </article>
+          ) : (
+            <div className="inline-notice">No archive lint report has run yet.</div>
+          )}
+          {archiveSemanticLintResult ? (
+            <article className="provider-card">
+              <div className="provider-head">
+                <div>
+                  <strong>{archiveSemanticLintResult.findings.length} semantic finding(s)</strong>
+                  <p>
+                    {archiveSemanticLintResult.candidatesReviewed} candidates · {archiveSemanticLintResult.model} ·{" "}
+                    {archiveSemanticLintResult.checkedAt}
+                  </p>
+                </div>
+                <span className={`tone ${archiveSemanticLintResult.findings.length ? "tone-warning" : "tone-active"}`}>
+                  semantic review
+                </span>
+              </div>
+              <p>{archiveSemanticLintResult.summary}</p>
+              {archiveSemanticLintResult.repairRequestFiles.length ? (
+                <p className="provider-scope">
+                  {archiveSemanticLintResult.repairRequestFiles.length} repair request(s) queued through the normal ingest review path.
+                </p>
+              ) : null}
+              <p className="mono-inline">{archiveSemanticLintResult.reportPath}</p>
+              {archiveSemanticLintResult.findings.length ? (
+                <ul className="mono-list">
+                  {archiveSemanticLintResult.findings.slice(0, 6).map((finding) => (
+                    <li key={`${finding.claim}:${finding.targetPages.join(",")}`}>
+                      {finding.severity} · {finding.confidence} · {finding.claim} · {finding.recommendedAction}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </article>
+          ) : null}
         </details>
 
         <details className="archive-details">

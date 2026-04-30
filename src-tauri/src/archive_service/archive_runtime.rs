@@ -233,7 +233,6 @@ impl ArchiveRuntime {
 
     pub(super) fn allowed_roots(&self) -> Vec<PathBuf> {
         let mut roots = vec![
-            self.vault_root.clone(),
             self.managed_root.clone(),
             self.wiki_root.clone(),
             self.data_root.clone(),

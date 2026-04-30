@@ -10,6 +10,8 @@ import type {
   BrowserHostHealthResult,
   BrowserHostOpenUrlResult,
   BrowserHostReadPageResult,
+  BrowserExtensionListResult,
+  BrowserExtensionLoadResult,
   BrowserToolCommand,
   Capability,
 } from "./contracts";
@@ -20,7 +22,9 @@ export type BrowserToolResult =
   | BrowserHostOpenUrlResult
   | BrowserHostReadPageResult
   | BrowserHostActionResult
-  | BrowserHostEvidenceResult;
+  | BrowserHostEvidenceResult
+  | BrowserExtensionListResult
+  | BrowserExtensionLoadResult;
 
 export type BrowserToolTransport = {
   call: (
@@ -45,6 +49,10 @@ const commandToToolName: Record<BrowserToolCommand["type"], string> = {
   capture_evidence: "browser.capture_evidence",
   close: "browser.close_session",
   health: "browser.health",
+  extensions_list: "browser.extensions.list",
+  extensions_load_unpacked: "browser.extensions.load_unpacked",
+  extensions_set_pinned: "browser.extensions.set_pinned",
+  extensions_disable: "browser.extensions.disable",
 };
 
 const privilegedTypingMessage =
@@ -66,8 +74,8 @@ function assertBrowserManifest(manifest: AddOnManifest | undefined): AddOnManife
   if (manifest.runtimeType !== "local-service") {
     throw new Error("Resonant Browser must run as a local-service add-on before AI control is allowed.");
   }
-  if (manifest.service?.protocol !== "stdio-json-rpc") {
-    throw new Error("Resonant Browser must expose a stdio-json-rpc service before AI control is allowed.");
+  if (manifest.service?.protocol !== "stdio-json-rpc" && manifest.service?.protocol !== "host-command") {
+    throw new Error("Resonant Browser must expose a host-mediated service before AI control is allowed.");
   }
   return manifest;
 }
@@ -86,6 +94,9 @@ function assertRequiredCapabilities(installation: AddOnInstallation | undefined,
 function assertHumanApproval(command: BrowserToolCommand): void {
   if (command.type === "type" && command.params?.sensitive === true && !command.humanApproved) {
     throw new Error(privilegedTypingMessage);
+  }
+  if (command.type === "extensions_load_unpacked" && !command.humanApproved) {
+    throw new Error("Loading a Browser extension requires explicit human approval.");
   }
 }
 

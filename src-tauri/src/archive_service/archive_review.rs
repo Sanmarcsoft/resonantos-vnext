@@ -13,13 +13,20 @@ use crate::provider_service::{
 };
 
 use super::{
-    open_archive_db, parse_frontmatter, resolve_document_path, resolve_source_path, slugify,
-    source_id_from_path, string_field, unix_timestamp, ArchiveProcessIngestRequest,
-    ArchiveProcessIngestResult, ArchivePromoteReviewArtifactRequest,
-    ArchivePromoteReviewArtifactResult, ArchivePromotedPage, ArchiveReviewArtifact,
-    ArchiveReviewDecision, ArchiveReviewDecisionRequest, ArchiveReviewDecisionResult,
-    ArchiveRuntime, ArchiveSkippedPage,
+    lint_archive, list_archive_ingest_requests, open_archive_db, parse_frontmatter,
+    refresh_archive_wiki_navigation, resolve_allowed_source_path, resolve_document_path, slugify,
+    source_id_from_path, string_field, unix_timestamp, ArchiveMaintenanceCycleRequest,
+    ArchiveMaintenanceCycleResult, ArchiveProcessIngestRequest, ArchiveProcessIngestResult,
+    ArchivePromoteReviewArtifactRequest, ArchivePromoteReviewArtifactResult, ArchivePromotedPage,
+    ArchiveReviewArtifact, ArchiveReviewDecision, ArchiveReviewDecisionRequest,
+    ArchiveReviewDecisionResult, ArchiveRuntime, ArchiveSkippedPage,
 };
+
+struct IngestSourceContent {
+    prompt_content: String,
+    verifier_excerpt: String,
+    chunk_manifest: Value,
+}
 
 fn normalize_confidence(value: Option<&Value>) -> String {
     match value
@@ -115,6 +122,320 @@ pub(super) fn evaluate_approval_tier(
 
 fn parse_proposed_pages(value: Option<&Value>) -> Vec<Value> {
     value.and_then(Value::as_array).cloned().unwrap_or_default()
+}
+
+fn verifier_decision_status(value: &Value) -> &str {
+    value
+        .get("decision")
+        .or_else(|| value.get("recommendation"))
+        .and_then(Value::as_str)
+        .unwrap_or("escalate")
+}
+
+fn verifier_notes(value: &Value) -> String {
+    value
+        .get("reason")
+        .or_else(|| value.get("notes"))
+        .or_else(|| value.get("rationale"))
+        .and_then(Value::as_str)
+        .unwrap_or("Archive verifier did not provide a reason.")
+        .to_string()
+}
+
+async fn verify_review_draft(
+    app: &AppHandle,
+    request: &ArchiveProcessIngestRequest,
+    source_excerpt: &str,
+    source_type: &str,
+    intent: &str,
+    recommended_tier: &str,
+    draft: &Value,
+) -> Value {
+    if recommended_tier == "auto-approve" {
+        return json!({
+            "decision": "approve",
+            "reason": "Policy matched a narrow low-risk auto-approval class.",
+            "confidence": "high",
+            "risks": []
+        });
+    }
+
+    if recommended_tier == "human-review" {
+        return json!({
+            "decision": "escalate",
+            "reason": "Policy requires human review for this artifact.",
+            "confidence": "high",
+            "risks": ["human-review-required"]
+        });
+    }
+
+    if proposed_page_types(&parse_proposed_pages(draft.get("proposed_pages"))).is_empty() {
+        return json!({
+            "decision": "escalate",
+            "reason": "Draft contains no promotable wiki pages.",
+            "confidence": "high",
+            "risks": ["empty-proposed-pages"]
+        });
+    }
+
+    let system_prompt = [
+        "You are the Living Archive Verifier.",
+        "Challenge the ingest draft before it can be promoted into AI Memory.",
+        "Approve only if the proposed pages are faithful to the source excerpt, preserve provenance, avoid unsupported claims, and do not require human review.",
+        "Escalate if claims are ambiguous, low-confidence, doctrine-sensitive, identity-sensitive, destructive, or not grounded in the source.",
+        "Return strict JSON only with keys: decision, confidence, reason, risks.",
+        "decision must be one of: approve, escalate.",
+    ]
+    .join("\n\n");
+
+    let user_prompt = format!(
+        "Source type: {source_type}\nIntent: {intent}\nRecommended tier: {recommended_tier}\n\nSource excerpt:\n{source_excerpt}\n\nIngest draft JSON:\n{}",
+        serde_json::to_string_pretty(draft).unwrap_or_else(|_| draft.to_string())
+    );
+
+    match execute_provider_service_chat(
+        app,
+        ProviderServiceChatRequest {
+            provider_id: request
+                .verifier_provider_id
+                .clone()
+                .unwrap_or_else(|| request.provider_id.clone()),
+            provider_type: request
+                .verifier_provider_type
+                .clone()
+                .unwrap_or_else(|| request.provider_type.clone()),
+            api_base_url: request
+                .verifier_api_base_url
+                .clone()
+                .or_else(|| request.api_base_url.clone()),
+            runtime_node_id: request
+                .verifier_runtime_node_id
+                .clone()
+                .or_else(|| request.runtime_node_id.clone()),
+            runtime_node_kind: request
+                .verifier_runtime_node_kind
+                .clone()
+                .or_else(|| request.runtime_node_kind.clone()),
+            runtime_node_endpoint: request
+                .verifier_runtime_node_endpoint
+                .clone()
+                .or_else(|| request.runtime_node_endpoint.clone()),
+            auth_tier: request
+                .verifier_auth_tier
+                .clone()
+                .or_else(|| request.auth_tier.clone()),
+            model: request
+                .verifier_model
+                .clone()
+                .unwrap_or_else(|| request.model.clone()),
+            reasoning_effort: "medium".to_string(),
+            system_prompt,
+            messages: vec![ChatMessageInput {
+                role: "user".to_string(),
+                content: user_prompt,
+            }],
+        },
+    )
+    .await
+    {
+        Ok(reply) => serde_json::from_str::<Value>(&reply).unwrap_or_else(|_| {
+            json!({
+                "decision": "escalate",
+                "confidence": "low",
+                "reason": "Verifier response was not valid JSON.",
+                "risks": ["invalid-verifier-json"],
+                "raw": reply
+            })
+        }),
+        Err(error) => json!({
+            "decision": "escalate",
+            "confidence": "low",
+            "reason": format!("Verifier provider call failed: {error}"),
+            "risks": ["verifier-provider-failed"]
+        }),
+    }
+}
+
+fn text_ingest_extension(extension: Option<&str>) -> bool {
+    matches!(
+        extension.map(|value| value.to_ascii_lowercase()),
+        Some(extension)
+            if matches!(
+                extension.as_str(),
+                "md" | "txt" | "json" | "csv" | "tsv" | "yaml" | "yml" | "html" | "xml" | "log"
+            )
+    )
+}
+
+fn chunk_text(content: &str, chunk_chars: usize) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    for character in content.chars() {
+        current.push(character);
+        if current.chars().count() >= chunk_chars {
+            chunks.push(current);
+            current = String::new();
+        }
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
+fn load_ingest_source_content(
+    runtime: &ArchiveRuntime,
+    resolved_source: &PathBuf,
+    checked_at: &str,
+) -> Result<IngestSourceContent, String> {
+    const SMALL_SOURCE_LIMIT: usize = 16_000;
+    const CHUNK_SIZE: usize = 10_000;
+    const PROMPT_CHUNK_BUDGET: usize = 48_000;
+
+    let metadata = fs::metadata(resolved_source)
+        .map_err(|error| format!("Failed to read archive ingest source metadata: {error}"))?;
+    let extension = resolved_source.extension().and_then(|value| value.to_str());
+    if !text_ingest_extension(extension) {
+        let source_type = extension.unwrap_or("binary");
+        let prompt_content = format!(
+            "The source is a non-text attachment and cannot be read directly by the base Living Archive ingest service.\n\nPath: {}\nType: {}\nSize bytes: {}\n\nCreate a conservative source stub only. If this is audio, image, PDF, or DOCX, queue the proper add-on pipeline before trusted synthesis.",
+            resolved_source.display(),
+            source_type,
+            metadata.len()
+        );
+        return Ok(IngestSourceContent {
+            verifier_excerpt: prompt_content.clone(),
+            prompt_content,
+            chunk_manifest: json!({
+                "mode": "attachment-stub",
+                "path": resolved_source.display().to_string(),
+                "extension": source_type,
+                "sizeBytes": metadata.len(),
+                "chunks": []
+            }),
+        });
+    }
+
+    let source_content = fs::read_to_string(resolved_source)
+        .map_err(|error| format!("Failed to read archive ingest source as text: {error}"))?;
+    if source_content.chars().count() <= SMALL_SOURCE_LIMIT {
+        return Ok(IngestSourceContent {
+            prompt_content: source_content.clone(),
+            verifier_excerpt: source_content,
+            chunk_manifest: json!({
+                "mode": "single-text",
+                "path": resolved_source.display().to_string(),
+                "sizeBytes": metadata.len(),
+                "chunks": []
+            }),
+        });
+    }
+
+    let chunks = chunk_text(&source_content, CHUNK_SIZE);
+    let chunk_root = runtime.review_queue_root().join("chunks").join(format!(
+        "{}-{}",
+        checked_at.replace(':', "-"),
+        slugify(
+            resolved_source
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("source")
+        )
+    ));
+    fs::create_dir_all(&chunk_root)
+        .map_err(|error| format!("Failed to create archive chunk staging root: {error}"))?;
+
+    let mut prompt_parts = Vec::new();
+    let mut used_chars = 0usize;
+    let mut chunk_entries = Vec::new();
+    for (index, chunk) in chunks.iter().enumerate() {
+        let chunk_path = chunk_root.join(format!("chunk-{:04}.md", index + 1));
+        fs::write(&chunk_path, chunk)
+            .map_err(|error| format!("Failed to write archive ingest chunk: {error}"))?;
+        chunk_entries.push(json!({
+            "index": index + 1,
+            "path": chunk_path.display().to_string(),
+            "chars": chunk.chars().count(),
+        }));
+        if used_chars < PROMPT_CHUNK_BUDGET {
+            let remaining = PROMPT_CHUNK_BUDGET.saturating_sub(used_chars);
+            let excerpt = chunk.chars().take(remaining).collect::<String>();
+            used_chars += excerpt.chars().count();
+            prompt_parts.push(format!(
+                "\n\n--- chunk {} of {} ---\n{}",
+                index + 1,
+                chunks.len(),
+                excerpt
+            ));
+        }
+    }
+
+    let prompt_content = format!(
+        "Large source staged into {} chunk file(s). Use the included chunk excerpts and chunk manifest. Do not claim unsupported completeness if only sampled text is visible.\nChunk root: {}\n{}",
+        chunks.len(),
+        chunk_root.display(),
+        prompt_parts.join("")
+    );
+    let verifier_excerpt = prompt_content
+        .chars()
+        .take(SMALL_SOURCE_LIMIT)
+        .collect::<String>();
+    Ok(IngestSourceContent {
+        prompt_content,
+        verifier_excerpt,
+        chunk_manifest: json!({
+            "mode": "chunked-text",
+            "path": resolved_source.display().to_string(),
+            "sizeBytes": metadata.len(),
+            "chunkRoot": chunk_root.display().to_string(),
+            "totalChunks": chunks.len(),
+            "promptCharsIncluded": used_chars,
+            "chunks": chunk_entries
+        }),
+    })
+}
+
+fn decision_from_policy_and_verifier(
+    recommended_tier: &str,
+    checked_at: &str,
+    verifier: &Value,
+) -> Value {
+    if recommended_tier == "auto-approve" {
+        return json!({
+            "status": "approved",
+            "action": "approve",
+            "actorId": "policy.auto",
+            "decidedAt": checked_at,
+            "tierApplied": "auto-approve",
+            "notes": "Auto-approved by archive approval policy."
+        });
+    }
+
+    if recommended_tier == "human-review" {
+        return json!({
+            "status": "pending",
+            "notes": "Human review is required by archive approval policy."
+        });
+    }
+
+    match verifier_decision_status(verifier) {
+        "approve" => json!({
+            "status": "approved",
+            "action": "approve",
+            "actorId": "archive-verifier.ai",
+            "decidedAt": checked_at,
+            "tierApplied": "strategist-review",
+            "notes": verifier_notes(verifier)
+        }),
+        _ => json!({
+            "status": "escalated",
+            "action": "escalate",
+            "actorId": "archive-verifier.ai",
+            "decidedAt": checked_at,
+            "tierApplied": "human-review",
+            "notes": verifier_notes(verifier)
+        }),
+    }
 }
 
 fn collect_string_values(value: Option<&Value>) -> Vec<String> {
@@ -234,6 +555,16 @@ pub(super) fn merge_promoted_page_body(
         if existing_body.contains(&marker) {
             return existing_body.to_string();
         }
+        if let Some(merged) = merge_markdown_sections(
+            existing_body,
+            promoted_body,
+            source_path,
+            artifact_file,
+            promoted_at,
+            &marker,
+        ) {
+            return merged;
+        }
         return format!(
             "{existing_body}\n\n---\n\n{marker}\n## Promoted Update ({promoted_at})\n\n**Source:** `{source_path}`  \n**Review Artifact:** `{artifact_file}`\n\n{}",
             promoted_body.trim()
@@ -241,6 +572,130 @@ pub(super) fn merge_promoted_page_body(
     }
 
     format!("# {title}\n\n{}", promoted_body.trim())
+}
+
+#[derive(Clone)]
+struct MarkdownSection {
+    heading: String,
+    body: String,
+}
+
+fn split_h2_sections(body: &str) -> (String, Vec<MarkdownSection>) {
+    let mut preamble = Vec::new();
+    let mut sections = Vec::new();
+    let mut current_heading: Option<String> = None;
+    let mut current_body = Vec::new();
+
+    for line in body.lines() {
+        if line.starts_with("## ") {
+            if let Some(heading) = current_heading.take() {
+                sections.push(MarkdownSection {
+                    heading,
+                    body: current_body.join("\n").trim().to_string(),
+                });
+                current_body.clear();
+            }
+            current_heading = Some(line.trim_start_matches("## ").trim().to_string());
+        } else if current_heading.is_some() {
+            current_body.push(line.to_string());
+        } else {
+            preamble.push(line.to_string());
+        }
+    }
+
+    if let Some(heading) = current_heading {
+        sections.push(MarkdownSection {
+            heading,
+            body: current_body.join("\n").trim().to_string(),
+        });
+    }
+
+    (preamble.join("\n").trim().to_string(), sections)
+}
+
+fn normalize_heading_key(value: &str) -> String {
+    slugify(value)
+}
+
+fn render_section(section: &MarkdownSection) -> String {
+    if section.body.trim().is_empty() {
+        format!("## {}", section.heading)
+    } else {
+        format!("## {}\n\n{}", section.heading, section.body.trim())
+    }
+}
+
+fn merge_markdown_sections(
+    existing_body: &str,
+    promoted_body: &str,
+    source_path: &str,
+    artifact_file: &str,
+    promoted_at: &str,
+    marker: &str,
+) -> Option<String> {
+    let (existing_preamble, existing_sections) = split_h2_sections(existing_body);
+    let (promoted_preamble, promoted_sections) = split_h2_sections(promoted_body);
+    if existing_sections.is_empty() || promoted_sections.is_empty() {
+        return None;
+    }
+
+    let mut output = Vec::new();
+    if !existing_preamble.is_empty() {
+        output.push(existing_preamble);
+    }
+    output.push(format!(
+        "{marker}\n> Last structured merge: `{promoted_at}` from `{source_path}` via `{artifact_file}`."
+    ));
+
+    let mut used_promoted = vec![false; promoted_sections.len()];
+    let mut superseded = Vec::new();
+    for existing in &existing_sections {
+        let existing_key = normalize_heading_key(&existing.heading);
+        if let Some((index, replacement)) = promoted_sections
+            .iter()
+            .enumerate()
+            .find(|(_, section)| normalize_heading_key(&section.heading) == existing_key)
+        {
+            used_promoted[index] = true;
+            superseded.push(existing.clone());
+            output.push(render_section(replacement));
+        } else {
+            output.push(render_section(existing));
+        }
+    }
+
+    for (index, section) in promoted_sections.iter().enumerate() {
+        if !used_promoted[index] {
+            output.push(render_section(section));
+        }
+    }
+
+    if !promoted_preamble.is_empty() {
+        output.push(format!(
+            "## Promoted Context ({promoted_at})\n\n{}",
+            promoted_preamble
+        ));
+    }
+
+    if !superseded.is_empty() {
+        let archived = superseded
+            .iter()
+            .map(|section| {
+                format!(
+                    "### Previous {}\n\n{}",
+                    section.heading,
+                    section.body.trim()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        output.push(format!(
+            "## Superseded Sections ({promoted_at})\n\n{}",
+            archived
+        ));
+    }
+
+    Some(output.join("\n\n").trim().to_string())
 }
 
 fn parse_review_decision(payload: &Value) -> ArchiveReviewDecision {
@@ -513,21 +968,10 @@ pub(crate) async fn process_archive_ingest_request(
         .and_then(Value::as_str)
         .unwrap_or_default();
 
-    let resolved_source = resolve_source_path(&runtime, source_path);
-    if !resolved_source.exists() {
-        return Err(format!(
-            "Archive ingest source does not exist: {}",
-            resolved_source.display()
-        ));
-    }
+    let resolved_source = resolve_allowed_source_path(&runtime, source_path)?;
 
-    let source_content = fs::read_to_string(&resolved_source)
-        .map_err(|error| format!("Failed to read archive ingest source: {error}"))?;
-    let truncated_content = if source_content.chars().count() > 16_000 {
-        source_content.chars().take(16_000).collect::<String>()
-    } else {
-        source_content.clone()
-    };
+    let checked_at = unix_timestamp();
+    let ingest_source = load_ingest_source_content(&runtime, &resolved_source, &checked_at)?;
 
     let prompt_file = runtime.config_root.join("INGEST_AGENT_SYSTEM_PROMPT.md");
     let ingest_prompt = if prompt_file.exists() {
@@ -550,12 +994,12 @@ pub(crate) async fn process_archive_ingest_request(
         app,
         ProviderServiceChatRequest {
             provider_id: request.provider_id.clone(),
-            provider_type: request.provider_type,
-            api_base_url: request.api_base_url,
-            runtime_node_id: request.runtime_node_id,
-            runtime_node_kind: request.runtime_node_kind,
-            runtime_node_endpoint: request.runtime_node_endpoint,
-            auth_tier: request.auth_tier,
+            provider_type: request.provider_type.clone(),
+            api_base_url: request.api_base_url.clone(),
+            runtime_node_id: request.runtime_node_id.clone(),
+            runtime_node_kind: request.runtime_node_kind.clone(),
+            runtime_node_endpoint: request.runtime_node_endpoint.clone(),
+            auth_tier: request.auth_tier.clone(),
             model: request.model.clone(),
             reasoning_effort: "high".to_string(),
             system_prompt,
@@ -565,7 +1009,7 @@ pub(crate) async fn process_archive_ingest_request(
                     "Queued at: {queued_at}\nIntent: {intent}\nSource type: {source_type}\nSource role: {}\nSource path: {}\n\nSource content:\n{}",
                     source_role.as_deref().unwrap_or("unknown"),
                     resolved_source.display(),
-                    truncated_content
+                    ingest_source.prompt_content
                 ),
             }],
         },
@@ -602,7 +1046,17 @@ pub(crate) async fn process_archive_ingest_request(
         &proposed_pages,
     );
 
-    let checked_at = unix_timestamp();
+    let verification = verify_review_draft(
+        app,
+        &request,
+        &ingest_source.verifier_excerpt,
+        source_type,
+        intent,
+        &recommended_tier,
+        &parsed,
+    )
+    .await;
+    let decision = decision_from_policy_and_verifier(&recommended_tier, &checked_at, &verification);
     let artifacts_root = runtime.review_queue_root().join("artifacts");
     let processed_root = runtime.review_queue_root().join("processed");
     fs::create_dir_all(&artifacts_root)
@@ -619,20 +1073,6 @@ pub(crate) async fn process_archive_ingest_request(
         checked_at.replace(':', "-"),
         slugify(&format!("{source_type}-{source_stem}"))
     ));
-    let decision = if recommended_tier == "auto-approve" {
-        json!({
-            "status": "approved",
-            "action": "approve",
-            "actorId": "policy.auto",
-            "decidedAt": checked_at,
-            "tierApplied": "auto-approve",
-            "notes": "Auto-approved by archive approval policy."
-        })
-    } else {
-        json!({
-            "status": "pending"
-        })
-    };
     let artifact_payload = json!({
         "checkedAt": checked_at,
         "requestFile": request_path.display().to_string(),
@@ -648,6 +1088,8 @@ pub(crate) async fn process_archive_ingest_request(
             "recommendedTier": recommended_tier,
             "recommendationReason": recommendation_reason,
         },
+        "sourceRead": ingest_source.chunk_manifest,
+        "verification": verification,
         "decision": decision,
         "result": parsed,
     });
@@ -1024,4 +1466,202 @@ pub(crate) fn promote_archive_review_artifact(
         pages_written,
         skipped_pages,
     })
+}
+
+pub(crate) async fn run_archive_maintenance_cycle(
+    app: &AppHandle,
+    request: ArchiveMaintenanceCycleRequest,
+) -> Result<ArchiveMaintenanceCycleResult, String> {
+    let started_at = unix_timestamp();
+    let max_requests = request.max_requests.unwrap_or(3).clamp(1, 12);
+    let auto_promote = request.auto_promote.unwrap_or(true);
+    let actor_id = request
+        .actor_id
+        .clone()
+        .unwrap_or_else(|| "archive-maintenance.ai".to_string());
+    let queued = list_archive_ingest_requests(app)?;
+    let mut processed = Vec::new();
+    let mut promoted = Vec::new();
+    let mut skipped = Vec::new();
+    let mut errors = Vec::new();
+
+    for queued_request in queued.into_iter().take(max_requests) {
+        if !queued_request.source_exists {
+            skipped.push(format!(
+                "Skipped {} because the source no longer exists.",
+                queued_request.request_file
+            ));
+            continue;
+        }
+
+        let process_result = match process_archive_ingest_request(
+            app,
+            ArchiveProcessIngestRequest {
+                request_file: queued_request.request_file.clone(),
+                provider_id: request.provider_id.clone(),
+                provider_type: request.provider_type.clone(),
+                api_base_url: request.api_base_url.clone(),
+                runtime_node_id: request.runtime_node_id.clone(),
+                runtime_node_kind: request.runtime_node_kind.clone(),
+                runtime_node_endpoint: request.runtime_node_endpoint.clone(),
+                auth_tier: request.auth_tier.clone(),
+                model: request.model.clone(),
+                verifier_provider_id: request.verifier_provider_id.clone(),
+                verifier_provider_type: request.verifier_provider_type.clone(),
+                verifier_api_base_url: request.verifier_api_base_url.clone(),
+                verifier_runtime_node_id: request.verifier_runtime_node_id.clone(),
+                verifier_runtime_node_kind: request.verifier_runtime_node_kind.clone(),
+                verifier_runtime_node_endpoint: request.verifier_runtime_node_endpoint.clone(),
+                verifier_auth_tier: request.verifier_auth_tier.clone(),
+                verifier_model: request.verifier_model.clone(),
+            },
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                errors.push(format!(
+                    "Failed to process {}: {error}",
+                    queued_request.request_file
+                ));
+                continue;
+            }
+        };
+
+        if auto_promote && process_result.review_artifact.decision.status == "approved" {
+            match promote_archive_review_artifact(
+                app,
+                ArchivePromoteReviewArtifactRequest {
+                    artifact_file: process_result.review_artifact_file.clone(),
+                    actor_id: actor_id.clone(),
+                },
+            ) {
+                Ok(result) => promoted.push(result),
+                Err(error) => errors.push(format!(
+                    "Failed to promote {}: {error}",
+                    process_result.review_artifact_file
+                )),
+            }
+        } else if process_result.review_artifact.decision.status != "approved" {
+            skipped.push(format!(
+                "Review artifact {} is {} and was not promoted.",
+                process_result.review_artifact_file, process_result.review_artifact.decision.status
+            ));
+        }
+
+        processed.push(process_result);
+    }
+
+    let navigation = refresh_archive_wiki_navigation(app)?;
+    let lint = lint_archive(app)?;
+
+    Ok(ArchiveMaintenanceCycleResult {
+        started_at,
+        finished_at: unix_timestamp(),
+        processed,
+        promoted,
+        navigation,
+        lint,
+        skipped,
+        errors,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        chunk_text, decision_from_policy_and_verifier, merge_promoted_page_body,
+        text_ingest_extension, verifier_decision_status,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn verifier_can_approve_strategist_review_without_human_bottleneck() {
+        let decision = decision_from_policy_and_verifier(
+            "strategist-review",
+            "2026-04-30T12:00:00Z",
+            &json!({
+                "decision": "approve",
+                "confidence": "high",
+                "reason": "Grounded and non-destructive."
+            }),
+        );
+
+        assert_eq!(decision["status"], "approved");
+        assert_eq!(decision["actorId"], "archive-verifier.ai");
+        assert_eq!(decision["tierApplied"], "strategist-review");
+    }
+
+    #[test]
+    fn verifier_escalates_uncertain_strategist_review() {
+        let decision = decision_from_policy_and_verifier(
+            "strategist-review",
+            "2026-04-30T12:00:00Z",
+            &json!({
+                "decision": "escalate",
+                "confidence": "medium",
+                "reason": "The draft contains an unsupported synthesis claim."
+            }),
+        );
+
+        assert_eq!(decision["status"], "escalated");
+        assert_eq!(decision["tierApplied"], "human-review");
+    }
+
+    #[test]
+    fn human_review_policy_cannot_be_auto_approved_by_verifier() {
+        let decision = decision_from_policy_and_verifier(
+            "human-review",
+            "2026-04-30T12:00:00Z",
+            &json!({
+                "decision": "approve",
+                "confidence": "high",
+                "reason": "Looks plausible."
+            }),
+        );
+
+        assert_eq!(decision["status"], "pending");
+    }
+
+    #[test]
+    fn verifier_defaults_to_escalate_for_malformed_decisions() {
+        assert_eq!(
+            verifier_decision_status(&json!({ "confidence": "low" })),
+            "escalate"
+        );
+    }
+
+    #[test]
+    fn chunking_preserves_large_source_text_order() {
+        let chunks = chunk_text("abcdefghij", 3);
+
+        assert_eq!(chunks, vec!["abc", "def", "ghi", "j"]);
+        assert_eq!(chunks.join(""), "abcdefghij");
+    }
+
+    #[test]
+    fn base_ingest_distinguishes_text_from_attachment_sources() {
+        assert!(text_ingest_extension(Some("md")));
+        assert!(text_ingest_extension(Some("JSON")));
+        assert!(!text_ingest_extension(Some("mp3")));
+        assert!(!text_ingest_extension(Some("pdf")));
+    }
+
+    #[test]
+    fn promotion_merge_updates_matching_sections_without_append_only_drift() {
+        let merged = merge_promoted_page_body(
+            Some("# Topic\n\nStable intro.\n\n## Current View\n\nOld claim.\n\n## Open Questions\n\nOld question."),
+            "Topic",
+            "## Current View\n\nNew grounded claim.\n\n## Evidence\n\nFresh source.",
+            "/sources/source.md",
+            "/review/artifact.json",
+            "unix:123",
+        );
+
+        assert!(merged.contains("## Current View\n\nNew grounded claim."));
+        assert!(merged.contains("## Evidence\n\nFresh source."));
+        assert!(merged.contains("## Superseded Sections (unix:123)"));
+        assert!(merged.contains("### Previous Current View"));
+        assert!(!merged.contains("## Promoted Update"));
+    }
 }

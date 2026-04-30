@@ -344,6 +344,106 @@ export const createEngineerDelegationPacket = (
   };
 };
 
+export const createHermesDelegationPacket = (
+  state: ResonantShellState,
+  input: {
+    mission: string;
+    context?: string;
+    taskType?: "communication" | "routine-work" | "research";
+    createdAt?: string;
+  },
+): DelegationPacket => {
+  const createdAt = input.createdAt ?? new Date().toISOString();
+  const mission = input.mission.trim();
+  const workspaceId = `workspace-hermes-${compactIdFragment(mission)}-${createdAt.replace(/[^0-9]/g, "").slice(0, 14)}`;
+  const taskType = input.taskType ?? "communication";
+  const hermesInstallation = state.installations["addon.hermes"];
+  const grantedCapabilities = hermesInstallation?.grantedCapabilities.filter((grant) => grant.granted) ?? [];
+
+  return {
+    id: `delegation-${workspaceId}`,
+    createdAt,
+    createdByAgentId: "strategist.core",
+    targetAgentId: "hermes.agent",
+    targetRuntime: "addon-agent",
+    taskType,
+    mission,
+    context:
+      input.context?.trim() ||
+      "Augmentor is delegating a Hermes-compatible communication or coordination task. Prepare the answer, plan, draft, or research result. Do not send public or external messages without explicit human approval.",
+    sourceMemoryRefs: [],
+    systemMemoryRefs: [
+      "system://resonantos-addon-sdk",
+      "system://resonantos-delegation-contract",
+      "system://living-archive/context-read-only",
+    ],
+    workspaceId,
+    filesInScope: [],
+    allowedTools: [
+      "archive.search",
+      "archive.read",
+      "archive.intake_write",
+      "delegation.collect_artifacts",
+      "delegation.verify_result",
+    ],
+    forbiddenActions: [
+      "Do not send public, external, or identity-sensitive messages without explicit human approval.",
+      "Do not write trusted Living Archive knowledge pages.",
+      "Do not read raw secrets or expose provider/channel credentials.",
+      "Do not alter Hermes identity, skills, memory, or config unless the user explicitly approves a remediation step.",
+    ],
+    capabilityGrants: grantedCapabilities.length
+      ? grantedCapabilities
+      : [
+          {
+            capability: "archive-read",
+            granted: true,
+            scope: "shared",
+            revocationBehavior: "degrade",
+          },
+          {
+            capability: "providers",
+            granted: true,
+            scope: "shared",
+            revocationBehavior: "degrade",
+          },
+        ],
+    providerPolicy: {
+      preferredProviderProfileIds: ["shared-minimax", "shared-local", "shared-openai"],
+      preferredRuntimeNodeIds: ["node-minimax-cloud", "node-local-resurrect", "node-openai-cloud"],
+      preferredModels: ["MiniMax-M2.7", "batiai/gemma4-e2b:q4", "gpt-5.4"],
+      allowedRuntimeKinds: ["local", "cloud", "remote-user-owned"],
+      fallbackPolicyId: "routine-default",
+    },
+    costPolicy: {
+      sensitivity: "medium",
+      preferredCostTier: "subscription",
+      allowPaidEscalation: false,
+      rationale: "Hermes delegation should use the existing Hermes profile first and avoid unexpected paid escalation.",
+    },
+    humanApprovalRequired: true,
+    approvalReasons: ["public-action", "identity-sensitive"],
+    verificationRequirements: [
+      {
+        id: "hermes-result-review",
+        label: "Return a reviewable Hermes result with summary, actions taken, approval needs, and residual risks.",
+        method: "manual-review",
+        required: true,
+      },
+    ],
+    expectedArtifacts: ["summary", "markdown", "log"],
+    returnProtocol: {
+      summaryRequired: true,
+      artifactTypes: ["summary", "markdown", "log"],
+      mustReportFilesChanged: false,
+      mustReportCommandsRun: false,
+      mustReportResidualRisks: true,
+      mustReportVerification: true,
+    },
+    auditLogPath: `${workspaceId}/logs/audit.jsonl`,
+  };
+};
+
 export const formatTaskWorkspaceCreatedReply = (workspace: TaskWorkspace): string =>
   [
     "I created an Engineer delegation workspace. No agent execution has started yet.",
@@ -355,6 +455,90 @@ export const formatTaskWorkspaceCreatedReply = (workspace: TaskWorkspace): strin
     "",
     "Next step, when approved: start the Engineer task from this workspace and collect its diagnostic artifacts.",
   ].join("\n");
+
+export const formatHermesTaskWorkspaceCreatedReply = (workspace: TaskWorkspace): string =>
+  [
+    "I created a Hermes delegation workspace. No Hermes execution has started yet.",
+    "",
+    `- Workspace: \`${workspace.rootPath}\``,
+    `- Delegation packet: \`${workspace.packetPath}\``,
+    `- TASK.md: \`${workspace.taskMarkdownPath}\``,
+    `- Verification: \`${workspace.verificationPath}\``,
+    "",
+    "Next step, when approved: start the Hermes task from the Delegation monitor and review the returned artifact before any outbound send.",
+  ].join("\n");
+
+export const shouldDelegateToHermes = (message: string): boolean => {
+  const normalized = message.toLowerCase();
+  return (
+    /\bdelegate\b.*\b(hermes|message|communication|email|telegram|follow[- ]?up|coordination)\b/.test(normalized) ||
+    /\bask\b.*\bhermes\b/.test(normalized) ||
+    /\bhermes\b.*\b(draft|research|coordinate|message|follow[- ]?up|handle)\b/.test(normalized)
+  );
+};
+
+export const hermesTaskPromptFromWorkspace = (payload: TaskWorkspacePayload): string =>
+  [
+    "Start this delegated Hermes task from the ResonantOS task workspace.",
+    "",
+    "Rules:",
+    "- Use the existing Hermes profile identity, skills, and memory.",
+    "- Treat Living Archive material as read-only context unless ResonantOS provides intake approval.",
+    "- Do not send public, external, or identity-sensitive messages. Return drafts and approval requests instead.",
+    "- Report summary, actions taken, approval needs, residual risks, and verification.",
+    "",
+    "Delegation packet:",
+    JSON.stringify(payload.packet, null, 2),
+    "",
+    "TASK.md:",
+    payload.taskMarkdown,
+  ].join("\n");
+
+export const renderHermesTaskResultMarkdown = (input: {
+  workspace: TaskWorkspace;
+  reply: string;
+  profileHome?: string;
+}): string =>
+  [
+    "# Hermes Delegation Result",
+    "",
+    `Workspace: \`${input.workspace.id}\``,
+    input.profileHome ? `Hermes profile: \`${input.profileHome}\`` : null,
+    "",
+    "## Result",
+    input.reply.trim(),
+    "",
+    "## ResonantOS Boundary",
+    "- External sends remain unapproved unless the result explicitly states a later human approval was granted.",
+    "- Living Archive writes remain intake-only and review-gated.",
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+
+export const hermesTaskVerificationPayload = (input: { packetId: string; profileHome?: string }) => ({
+  packetId: input.packetId,
+  status: "completed",
+  checks: [
+    {
+      id: "hermes-result-review",
+      status: "passed",
+      evidence: "Hermes returned a reviewable result through the local profile bridge.",
+    },
+  ],
+  profileHome: input.profileHome,
+  approval: {
+    outboundSendApproved: false,
+    note: "Delegation execution does not approve public or external sends.",
+  },
+});
+
+export const hermesTaskAuditEvent = (input: { packetId: string; workspaceId: string; profileHome?: string }) => ({
+  event: "hermes-task-finished",
+  packetId: input.packetId,
+  workspaceId: input.workspaceId,
+  profileHome: input.profileHome,
+  approvalBoundary: "no-outbound-send-approved",
+});
 
 export const parseStartEngineerTaskWorkspaceId = (message: string): string | null => {
   const match = message.match(/\bstart\s+(?:the\s+)?engineer\s+task\s+([a-zA-Z0-9_-]+)/i);

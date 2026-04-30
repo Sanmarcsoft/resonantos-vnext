@@ -9,11 +9,19 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:browser-host": "node --test addons/resonant-browser-host/test/*.test.mjs",
+    "test:browser-native": "node --test addons/resonant-browser-native/test/*.test.mjs",
+    "browser-native:cef:plan": "node addons/resonant-browser-native/scripts/fetch-cef.mjs",
+    "browser-native:build": "node scripts/build-native-browser.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "npm run browser-native:build && tauri build"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.41.1",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.7.0",
     "@xterm/addon-fit": "^0.11.0",

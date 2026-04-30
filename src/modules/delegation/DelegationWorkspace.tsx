@@ -3,11 +3,23 @@
 
 import { useEffect, useState } from "react";
 import type { TaskWorkspace, TaskWorkspacePayload } from "../../core/contracts";
-import { requestListTaskWorkspaces, requestReadTaskWorkspace } from "../../core/runtime";
+import {
+  requestFinishTaskWorkspace,
+  requestHermesChatCompletion,
+  requestListTaskWorkspaces,
+  requestReadTaskWorkspace,
+} from "../../core/runtime";
+import {
+  hermesTaskAuditEvent,
+  hermesTaskPromptFromWorkspace,
+  hermesTaskVerificationPayload,
+  renderHermesTaskResultMarkdown,
+} from "../../core/delegation";
 import { MessageContent } from "../chat/MessageContent";
 
 type DelegationWorkspaceProps = {
   chatBusy: boolean;
+  hermesProfileHome?: string;
   onStartWorkspace: (workspaceId: string) => Promise<void>;
   onAskAugmentor: (message: string) => Promise<void>;
 };
@@ -15,12 +27,13 @@ type DelegationWorkspaceProps = {
 const errorMessageOf = (error: unknown): string =>
   typeof error === "string" ? error : error instanceof Error ? error.message : "Unable to load delegation workspaces.";
 
-export function DelegationWorkspace({ chatBusy, onStartWorkspace, onAskAugmentor }: DelegationWorkspaceProps) {
+export function DelegationWorkspace({ chatBusy, hermesProfileHome, onStartWorkspace, onAskAugmentor }: DelegationWorkspaceProps) {
   const [workspaces, setWorkspaces] = useState<TaskWorkspace[]>([]);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null);
   const [selectedPayload, setSelectedPayload] = useState<TaskWorkspacePayload | null>(null);
   const [busy, setBusy] = useState(false);
   const [payloadBusy, setPayloadBusy] = useState(false);
+  const [startingWorkspaceId, setStartingWorkspaceId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? workspaces[0] ?? null;
 
@@ -74,13 +87,43 @@ export function DelegationWorkspace({ chatBusy, onStartWorkspace, onAskAugmentor
   }, [selectedWorkspace?.id]);
 
   const startWorkspace = async (workspaceId: string) => {
-    setNotice("Starting the Engineer task through Augmentor.");
-    await onStartWorkspace(workspaceId);
-    await refresh();
     try {
+      setStartingWorkspaceId(workspaceId);
+      const payload = await requestReadTaskWorkspace(workspaceId);
+      if (payload.packet.targetAgentId === "hermes.agent") {
+        setNotice("Starting the Hermes task through the local Hermes profile.");
+        const result = await requestHermesChatCompletion({
+          prompt: hermesTaskPromptFromWorkspace(payload),
+          profileHome: hermesProfileHome,
+        });
+        await requestFinishTaskWorkspace({
+          workspaceId: payload.workspace.id,
+          resultMarkdown: renderHermesTaskResultMarkdown({
+            workspace: payload.workspace,
+            reply: result.reply,
+            profileHome: result.profileHome,
+          }),
+          verification: hermesTaskVerificationPayload({
+            packetId: payload.workspace.packetId,
+            profileHome: result.profileHome,
+          }),
+          auditEvent: hermesTaskAuditEvent({
+            packetId: payload.workspace.packetId,
+            workspaceId: payload.workspace.id,
+            profileHome: result.profileHome,
+          }),
+        });
+        setNotice("Hermes task finished. Review the result before approving any outbound action.");
+      } else {
+        setNotice("Starting the Engineer task through Augmentor.");
+        await onStartWorkspace(workspaceId);
+      }
+      await refresh();
       setSelectedPayload(await requestReadTaskWorkspace(workspaceId));
     } catch (error) {
       setNotice(errorMessageOf(error));
+    } finally {
+      setStartingWorkspaceId(null);
     }
   };
 
@@ -121,7 +164,7 @@ export function DelegationWorkspace({ chatBusy, onStartWorkspace, onAskAugmentor
                   onClick={() => setSelectedWorkspaceId(workspace.id)}
                 >
                   <span className="delegation-task-orb" aria-hidden="true">
-                    R-EG
+                    {workspaceTargetLabel(workspace)}
                   </span>
                   <span>
                     <strong>{workspaceTitle(workspace)}</strong>
@@ -145,7 +188,7 @@ export function DelegationWorkspace({ chatBusy, onStartWorkspace, onAskAugmentor
               workspace={selectedWorkspace}
               payload={selectedPayload}
               payloadBusy={payloadBusy}
-              chatBusy={chatBusy}
+              agentBusy={chatBusy || startingWorkspaceId === selectedWorkspace.id}
               onStartWorkspace={startWorkspace}
               onAskAugmentor={onAskAugmentor}
             />
@@ -169,14 +212,14 @@ function DelegationWorkspaceDetail({
   workspace,
   payload,
   payloadBusy,
-  chatBusy,
+  agentBusy,
   onStartWorkspace,
   onAskAugmentor,
 }: {
   workspace: TaskWorkspace;
   payload: TaskWorkspacePayload | null;
   payloadBusy: boolean;
-  chatBusy: boolean;
+  agentBusy: boolean;
   onStartWorkspace: (workspaceId: string) => Promise<void>;
   onAskAugmentor: (message: string) => Promise<void>;
 }) {
@@ -199,23 +242,23 @@ function DelegationWorkspaceDetail({
           type="button"
           className="button-primary touch-action"
           onClick={() => void onStartWorkspace(workspace.id)}
-          disabled={chatBusy}
+          disabled={agentBusy}
         >
-          {chatBusy ? "Agent Busy" : "Start Engineer Task"}
+          {agentBusy ? "Agent Busy" : `Start ${workspaceTargetName(workspace)} Task`}
         </button>
         <button
           type="button"
           className="button-secondary touch-action"
           onClick={() => void onAskAugmentor(`Review the delegation result for ${workspace.id} and tell me whether it should be promoted, followed up, or archived.`)}
-          disabled={chatBusy || !resultReady}
+          disabled={agentBusy || !resultReady}
         >
           Ask Augmentor to Review
         </button>
         <button
           type="button"
           className="button-secondary touch-action"
-          onClick={() => void onAskAugmentor(`Create a follow-up Engineer task from the result of ${workspace.id}. Preserve scope, verification, and audit requirements.`)}
-          disabled={chatBusy || !resultReady}
+          onClick={() => void onAskAugmentor(`Create a follow-up task from the result of ${workspace.id}. Preserve the same target agent, scope, verification, and audit requirements.`)}
+          disabled={agentBusy || !resultReady}
         >
           Create Follow-up Task
         </button>
@@ -225,7 +268,7 @@ function DelegationWorkspaceDetail({
         <div className="workspace-section-head">
           <div>
             <span className="eyebrow">Review</span>
-            <h3>{payloadBusy ? "Loading result..." : resultReady ? "Engineer result returned" : "Result pending"}</h3>
+            <h3>{payloadBusy ? "Loading result..." : resultReady ? `${workspaceTargetName(workspace)} result returned` : "Result pending"}</h3>
           </div>
           <span className={`app-status app-status-${verificationTone(verificationStatus)}`}>{verificationStatus}</span>
         </div>
@@ -279,6 +322,20 @@ function PathCard({ label, path }: { label: string; path: string }) {
       <code>{path}</code>
     </div>
   );
+}
+
+function workspaceTargetLabel(workspace: TaskWorkspace): string {
+  if (workspace.id.includes("hermes")) {
+    return "HER";
+  }
+  return "R-EG";
+}
+
+function workspaceTargetName(workspace: TaskWorkspace): string {
+  if (workspace.id.includes("hermes")) {
+    return "Hermes";
+  }
+  return "Engineer";
 }
 
 function workspaceTitle(workspace: TaskWorkspace): string {

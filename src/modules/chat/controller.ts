@@ -20,11 +20,13 @@ import {
   updateConversationMessage,
 } from "../../core/chat";
 import { applyProviderDiagnostics } from "../../core/policies";
+import { resolveMemoryProviderBroker } from "../../core/memory-provider";
 import { resolveAgentChatRoute } from "../../core/provider-service";
 import {
   requestCreateTaskWorkspace,
   requestEngineerRecoveryTurn,
   requestFinishTaskWorkspace,
+  requestHermesChatCompletion,
   requestLocalRuntimeStatus,
   requestProviderDiagnostics,
   requestProviderServiceChatCompletion,
@@ -33,14 +35,17 @@ import {
 } from "../../core/runtime";
 import {
   createEngineerDelegationPacket,
+  createHermesDelegationPacket,
   engineerTaskAuditEvent,
   engineerTaskMessagesFromWorkspace,
   engineerTaskVerificationPayload,
+  formatHermesTaskWorkspaceCreatedReply,
   formatEngineerTaskFinishedReply,
   formatTaskWorkspaceCreatedReply,
   parseStartEngineerTaskWorkspaceId,
   renderEngineerTaskResultMarkdown,
   shouldDelegateToEngineer,
+  shouldDelegateToHermes,
 } from "../../core/delegation";
 import {
   buildContextBudget,
@@ -91,6 +96,26 @@ type ChatTurnControllerInput = {
 
 const cloneState = (state: ResonantShellState): ResonantShellState =>
   JSON.parse(JSON.stringify(state)) as ResonantShellState;
+
+const yieldForPaint = (): Promise<void> =>
+  new Promise((resolve) => {
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => resolve());
+      });
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+
+const hermesPromptFromThread = (thread: ConversationThread): string =>
+  [
+    "ResonantOS is handing this conversation to the user's existing local Hermes profile.",
+    "Stay within Hermes' own identity, skills, and memory boundaries.",
+    "Do not claim to write to the Living Archive directly. Ask for approval before public or external sends.",
+    "",
+    `User: ${[...thread.messages].reverse().find((message) => message.role === "user")?.content.trim() ?? ""}`,
+  ].join("\n");
 
 export const executeChatTurn = async ({
   snapshot,
@@ -246,6 +271,66 @@ export const executeChatTurn = async ({
       return;
     }
 
+    if (activeThread.owningAgentId === "strategist.core" && shouldDelegateToHermes(trimmed)) {
+      setChatRunPhase("tool-running");
+      setAgentActivityLabel("Creating a Hermes delegation workspace.");
+      const packet = createHermesDelegationPacket(nextState, {
+        mission: trimmed,
+        context:
+          "The human asked Augmentor to delegate this communication or coordination task to Hermes. Create the workspace only; do not start execution yet.",
+      });
+      const workspace = await requestCreateTaskWorkspace(packet);
+      if (!isRunCurrent(runToken)) {
+        return;
+      }
+      const reply = formatHermesTaskWorkspaceCreatedReply(workspace);
+      const withAssistant = appendAssistantMessage(cloneState(nextState), activeThread.id, reply);
+      commitReadyState(withAssistant);
+      setChatNotice("Hermes delegation workspace created. Execution has not started.");
+      setAgentActivityLabel("Hermes delegation workspace ready.");
+      setChatRunPhase("completed");
+      return;
+    }
+
+    if (activeThread.owningAgentId === "hermes.agent") {
+      setChatRunPhase("tool-running");
+      setAgentActivityLabel("Hermes is reading your message in the local profile.");
+      const thread = threadById(nextState, activeThread.id);
+      if (!thread) {
+        throw new Error("Active Hermes thread was not found.");
+      }
+      const withHermesPlaceholder = appendAssistantMessage(
+        cloneState(nextState),
+        activeThread.id,
+        "Hermes is thinking...",
+      );
+      const placeholderMessageId = threadById(withHermesPlaceholder, activeThread.id)?.messages.at(-1)?.id ?? null;
+      commitReadyState(withHermesPlaceholder);
+      await yieldForPaint();
+      setAgentActivityLabel("Hermes is working through your prompt. This can take a moment for local profile startup.");
+      const profileHome =
+        typeof nextState.installations["addon.hermes"]?.config?.profileHome === "string"
+          ? nextState.installations["addon.hermes"]?.config?.profileHome
+          : undefined;
+      const result = await requestHermesChatCompletion({
+        prompt: hermesPromptFromThread(thread),
+        profileHome,
+      });
+      if (!isRunCurrent(runToken)) {
+        return;
+      }
+      const withAssistant = placeholderMessageId
+        ? updateConversationMessage(cloneState(withHermesPlaceholder), activeThread.id, placeholderMessageId, (message) => ({
+            ...message,
+            content: result.reply,
+          }))
+        : appendAssistantMessage(cloneState(nextState), activeThread.id, result.reply);
+      commitReadyState(withAssistant);
+      setAgentActivityLabel("Hermes reply ready from the local profile.");
+      setChatRunPhase("completed");
+      return;
+    }
+
     let routedState = nextState;
     try {
       setChatRunPhase("tool-running");
@@ -342,12 +427,13 @@ export const executeChatTurn = async ({
         : strategistSystemPrompt(routedState);
 
     const recoveryAgentActive = activeThread.owningAgentId === routedState.recoverySession.engineerAgentId;
+    const memoryProvider = resolveMemoryProviderBroker(routedState, [...snapshot.bundled, ...snapshot.sideloaded]);
     if (recoveryAgentActive) {
       setChatRunPhase("tool-running");
       setAgentActivityLabel("Probing stronger routes, reading state, and preparing the next recovery step.");
     }
     setChatRunPhase("retrieving");
-    const systemMemoryContext = await buildSystemMemoryContextBundle().catch(() => null);
+    const systemMemoryContext = await buildSystemMemoryContextBundle(memoryProvider).catch(() => null);
     if (!isRunCurrent(runToken)) {
       return;
     }
@@ -360,7 +446,7 @@ export const executeChatTurn = async ({
     }
     let archiveContext =
       !recoveryAgentActive && activeThread.owningAgentId === "strategist.core"
-        ? await buildArchiveContextBundle(trimmed).catch(() => null)
+        ? await buildArchiveContextBundle(trimmed, memoryProvider).catch(() => null)
         : null;
     if (!isRunCurrent(runToken)) {
       return;

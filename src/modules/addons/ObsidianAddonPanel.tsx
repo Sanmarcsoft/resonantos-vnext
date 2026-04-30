@@ -301,13 +301,13 @@ export function ObsidianAddonPanel({
   };
 
   return (
-    <section className="obsidian-addon-panel" aria-label="Obsidian add-on vault bridge">
+    <section className="obsidian-addon-panel" aria-label="Resonant Notes vault bridge">
       <div className="obsidian-addon-hero">
         <div>
-          <span className="eyebrow">Obsidian V1 add-on</span>
+          <span className="eyebrow">Resonant Notes</span>
           <h3>Vault bridge, not trusted memory writes</h3>
           <p>
-            Connect an Obsidian vault or markdown folder so ResonantOS can inspect notes through scoped filesystem access.
+            Connect an Obsidian-compatible vault or markdown folder so ResonantOS can inspect notes through scoped filesystem access.
             Living Archive knowledge writes still require the Strategist-owned ingest path.
           </p>
         </div>

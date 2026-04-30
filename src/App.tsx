@@ -1,14 +1,17 @@
 // Intent citation: docs/architecture/ADR-002-modular-codebase.md
 // Intent citation: docs/architecture/ADR-003-engineering-standards.md
 
-import { startTransition, useDeferredValue, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, startTransition, useDeferredValue, useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type {
   AddOnManifest,
+  ArchiveBackgroundCycleResult,
   ArchiveDocumentPayload,
   ArchiveImportedLibrarySummary,
   ArchiveLibraryClassificationReview,
   ArchiveLibraryReorganisationPlan,
+  ArchiveLintResult,
+  ArchiveMaintenanceCycleResult,
   ArchivePromoteReviewArtifactResult,
   ArchiveProcessIngestResult,
   ArchiveQueuedIngestRequest,
@@ -25,6 +28,7 @@ import type {
   ArchiveIngestProbeResult,
   ArchiveRuntimeStatus,
   ArchiveSearchResult,
+  ArchiveSemanticLintResult,
   ChatRunPhase,
   ConversationThread,
   LocalRuntimeStatus,
@@ -33,14 +37,20 @@ import type {
   RecoveryRouteCandidate,
   ResonantShellState,
 } from "./core/contracts";
+import { resolveMemoryProviderBroker } from "./core/memory-provider";
 import { routedProviderLabel } from "./core/provider-service";
 import {
   createDesktopBrowserToolRunner,
+  openFloatingChatWindow,
   persistState,
   requestBrowserNativeWebviewHide,
   requestBrowserNativeWebviewResize,
   requestBrowserNativeWebviewShow,
+  requestNativeBrowserAttachSmoke,
+  requestNativeBrowserBridgeProbe,
+  requestNativeBrowserProbe,
   requestObsidianVaultFolderSelection,
+  subscribeRuntimeStateUpdates,
 } from "./core/runtime";
 import {
   executeSideloadManifest,
@@ -68,6 +78,9 @@ import {
   promoteArchiveReviewArtifact,
   queueArchiveSourceForIngest,
   queueWatchedArchiveSourceForIngest,
+  runArchiveBackgroundCycle,
+  runArchiveLint,
+  runArchiveSemanticLint,
   scanArchiveSourceFolders,
 } from "./modules/archive/controller";
 import { buildArchivePreflightAugmentorPrompt } from "./modules/archive/archive-augmentor-handoff";
@@ -79,6 +92,7 @@ import {
 } from "./modules/chat/composer-controller";
 import { saveChatMessageToArchiveIntake } from "./modules/chat/archive-intake-controller";
 import { executeChatTurn } from "./modules/chat/controller";
+import { claimChatRun, releaseChatRun } from "./modules/chat/run-guard";
 import { StrategistChatRail } from "./modules/chat/StrategistChatRail";
 import { appendTranscriptEvent } from "./core/context-memory";
 import {
@@ -103,31 +117,64 @@ import {
 } from "./modules/chat/thread-controller";
 import type { ComposerAttachment, ThinkingDepth } from "./modules/chat/types";
 import { Panel } from "./components/Panel";
-import { ArchiveWorkspace } from "./modules/archive/ArchiveWorkspace";
-import { AddOnsWorkspace } from "./modules/addons/AddOnsWorkspace";
-import { BrowserWorkspace } from "./modules/browser/BrowserWorkspace";
-import { ObsidianWorkspace } from "./modules/obsidian/ObsidianWorkspace";
 import { OpenCodeWorkspace } from "./modules/opencode/OpenCodeWorkspace";
-import { TerminalWorkspace } from "./modules/terminal/TerminalWorkspace";
-import { DelegationWorkspace } from "./modules/delegation/DelegationWorkspace";
-import { OverviewWorkspace } from "./modules/overview/OverviewWorkspace";
 import { promoteRecoveryRoute, RECOVERY_RUNBOOK_PROMPT, setRecoveryMode } from "./modules/recovery/controller";
-import { RecoveryWorkspace } from "./modules/recovery/RecoveryWorkspace";
-import { loadInitialShellState, loadRecoveryRuntimeSnapshot } from "./modules/shell/controller";
-import { buildShellViewModel, resolveActiveProviderForSelection } from "./modules/shell/selectors";
+import {
+  applyFirstRunRecommendedAddOns,
+  loadInitialShellState,
+  loadRecoveryRuntimeSnapshot,
+  markFirstRunRecommendedAddOnsReviewed,
+} from "./modules/shell/controller";
+import { buildShellViewModel, channelAllowedByOwningAddon, resolveActiveProviderForSelection } from "./modules/shell/selectors";
+import {
+  activeSystemSlotProvider,
+  hasSystemSlotManifest,
+  recommendedSystemSlotManifests,
+  systemSlotAvailable,
+} from "./modules/shell/system-slots";
 import {
   executeRefreshProviderDiagnostics,
   executeProviderSmokeTest,
   executeSaveProviderSecret,
   updateProviderProfile,
 } from "./modules/settings/controller";
-import { SettingsWorkspace, type SettingsSection } from "./modules/settings/SettingsWorkspace";
+import type { SettingsSection } from "./modules/settings/SettingsWorkspace";
 import {
   activateChatThread,
   renameStrategistIdentity,
   toggleStrategistChannel,
 } from "./modules/strategist/controller";
-import { StrategistWorkspace } from "./modules/strategist/StrategistWorkspace";
+
+const ArchiveWorkspace = lazy(() =>
+  import("./modules/archive/ArchiveWorkspace").then((module) => ({ default: module.ArchiveWorkspace })),
+);
+const BrowserWorkspace = lazy(() =>
+  import("./modules/browser/BrowserWorkspace").then((module) => ({ default: module.BrowserWorkspace })),
+);
+const AddOnsWorkspace = lazy(() =>
+  import("./modules/addons/AddOnsWorkspace").then((module) => ({ default: module.AddOnsWorkspace })),
+);
+const SettingsWorkspace = lazy(() =>
+  import("./modules/settings/SettingsWorkspace").then((module) => ({ default: module.SettingsWorkspace })),
+);
+const DelegationWorkspace = lazy(() =>
+  import("./modules/delegation/DelegationWorkspace").then((module) => ({ default: module.DelegationWorkspace })),
+);
+const OverviewWorkspace = lazy(() =>
+  import("./modules/overview/OverviewWorkspace").then((module) => ({ default: module.OverviewWorkspace })),
+);
+const RecoveryWorkspace = lazy(() =>
+  import("./modules/recovery/RecoveryWorkspace").then((module) => ({ default: module.RecoveryWorkspace })),
+);
+const StrategistWorkspace = lazy(() =>
+  import("./modules/strategist/StrategistWorkspace").then((module) => ({ default: module.StrategistWorkspace })),
+);
+const TerminalWorkspace = lazy(() =>
+  import("./modules/terminal/TerminalWorkspace").then((module) => ({ default: module.TerminalWorkspace })),
+);
+const ObsidianWorkspace = lazy(() =>
+  import("./modules/obsidian/ObsidianWorkspace").then((module) => ({ default: module.ObsidianWorkspace })),
+);
 
 type LoadState =
   | { phase: "loading" }
@@ -141,6 +188,7 @@ type DockIconId =
   | "delegation"
   | "addons"
   | "browser"
+  | "obsidian"
   | "opencode"
   | "terminal"
   | "agent"
@@ -157,14 +205,12 @@ type VendorIconId =
   | "settings"
   | "world";
 
-const dockIconMap: Record<DockIconId, VendorIconId> = {
+const dockIconMap: Record<Exclude<DockIconId, "obsidian" | "opencode" | "terminal">, VendorIconId> = {
   home: "home",
   archive: "database",
   delegation: "route-alt-left",
   addons: "apps",
   browser: "world",
-  opencode: "settings",
-  terminal: "settings",
   agent: "robot",
   settings: "settings",
 };
@@ -185,6 +231,12 @@ const CHAT_RAIL_WITH_HISTORY_MIN_WIDTH = 760;
 const ZOOM_STEP = 0.05;
 const MIN_WINDOW_ZOOM = 0.85;
 const MAX_WINDOW_ZOOM = 1.25;
+const appSurfaceMode = (): "shell" | "floating-chat" => {
+  if (typeof window === "undefined") {
+    return "shell";
+  }
+  return new URLSearchParams(window.location.search).get("surface") === "floating-chat" ? "floating-chat" : "shell";
+};
 
 const clampChatWidth = (width: number): number => Math.min(CHAT_RAIL_MAX_WIDTH, Math.max(CHAT_RAIL_MIN_WIDTH, Math.round(width)));
 const clampWindowZoom = (zoom: number): number => Math.min(MAX_WINDOW_ZOOM, Math.max(MIN_WINDOW_ZOOM, Number(zoom.toFixed(2))));
@@ -193,11 +245,14 @@ const errorMessageOf = (error: unknown, fallback: string): string =>
   typeof error === "string" ? error : error instanceof Error ? error.message : fallback;
 
 export function App() {
+  const surfaceMode = appSurfaceMode();
+  const isFloatingChatSurface = surfaceMode === "floating-chat";
   const [loadState, setLoadState] = useState<LoadState>({ phase: "loading" });
   const currentReadyStateRef = useRef<ResonantShellState | null>(null);
   const [search, setSearch] = useState("");
   const [sideloadPath, setSideloadPath] = useState("");
   const [selectedAddonId, setSelectedAddonId] = useState<string>("");
+  const [firstRunSelections, setFirstRunSelections] = useState<Record<string, boolean>>({});
   const [archiveFocusTarget, setArchiveFocusTarget] = useState<"review" | null>(null);
   const [composer, setComposer] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
@@ -239,6 +294,10 @@ export function App() {
   const [archiveProcessResult, setArchiveProcessResult] = useState<ArchiveProcessIngestResult | null>(null);
   const [archiveReviewDecisionResult, setArchiveReviewDecisionResult] = useState<ArchiveReviewDecisionResult | null>(null);
   const [archivePromotionResult, setArchivePromotionResult] = useState<ArchivePromoteReviewArtifactResult | null>(null);
+  const [archiveMaintenanceResult, setArchiveMaintenanceResult] = useState<ArchiveMaintenanceCycleResult | null>(null);
+  const [archiveBackgroundResult, setArchiveBackgroundResult] = useState<ArchiveBackgroundCycleResult | null>(null);
+  const [archiveLintResult, setArchiveLintResult] = useState<ArchiveLintResult | null>(null);
+  const [archiveSemanticLintResult, setArchiveSemanticLintResult] = useState<ArchiveSemanticLintResult | null>(null);
   const [archiveTolBundles, setArchiveTolBundles] = useState<ArchiveTolBundleCandidate[]>([]);
   const [archiveTolBundleResult, setArchiveTolBundleResult] = useState<ArchiveTolBundleBuildResult | null>(null);
   const [archiveSourceScanBusy, setArchiveSourceScanBusy] = useState(false);
@@ -287,10 +346,41 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void subscribeRuntimeStateUpdates((nextState) => {
+      if (cancelled) {
+        return;
+      }
+      currentReadyStateRef.current = nextState;
+      setLoadState((current) =>
+        current.phase === "ready"
+          ? { ...current, state: nextState }
+          : current,
+      );
+    }).then((cleanup) => {
+      if (cancelled) {
+        cleanup();
+      } else {
+        unlisten = cleanup;
+      }
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
     if (loadState.phase !== "ready" || !loadState.state.uiPreferences.chatSidebarOpen) {
       return;
     }
-    const activeAgentId = loadState.state.recoverySession.active ? loadState.state.recoverySession.engineerAgentId : "strategist.core";
+    const selectedThread = loadState.state.conversationThreads.find(
+      (thread) => thread.id === loadState.state.uiPreferences.activeChatThreadId,
+    );
+    const activeAgentId = loadState.state.recoverySession.active
+      ? loadState.state.recoverySession.engineerAgentId
+      : selectedThread?.owningAgentId ?? "strategist.core";
     const visibleThreads = loadState.state.conversationThreads.filter((thread) => thread.owningAgentId === activeAgentId);
     const activeThread =
       visibleThreads.find((thread) => thread.id === loadState.state.uiPreferences.activeChatThreadId) ?? visibleThreads[0] ?? null;
@@ -396,6 +486,11 @@ export function App() {
     if (loadState.state.uiPreferences.activeSection !== "archive" || loadState.state.recoverySession.active) {
       return;
     }
+    const manifests = [...loadState.bundled, ...loadState.sideloaded];
+    const activeProvider = activeSystemSlotProvider(loadState.state, manifests, "memory-system");
+    if (hasSystemSlotManifest(manifests, "memory-system") && activeProvider?.manifest.id !== "addon.living-archive") {
+      return;
+    }
     if (archiveStatusBusy || archiveStatus) {
       return;
     }
@@ -407,6 +502,11 @@ export function App() {
       return;
     }
     if (loadState.state.uiPreferences.activeSection !== "archive" || loadState.state.recoverySession.active) {
+      return;
+    }
+    const manifests = [...loadState.bundled, ...loadState.sideloaded];
+    const activeProvider = activeSystemSlotProvider(loadState.state, manifests, "memory-system");
+    if (hasSystemSlotManifest(manifests, "memory-system") && activeProvider?.manifest.id !== "addon.living-archive") {
       return;
     }
     if (archiveQueueBusy || archiveQueue.length) {
@@ -488,6 +588,20 @@ export function App() {
     attachments,
     selectedChatModel,
   });
+  const chatSlotAvailable = systemSlotAvailable(state, allManifests, "chat-interface");
+  const engineerSettingsConsoleActive = !recoveryModeActive && !chatSlotAvailable && currentSection === "settings";
+  const chatInterfaceAvailable = recoveryModeActive || chatSlotAvailable || engineerSettingsConsoleActive;
+  const memorySystemAvailable = systemSlotAvailable(state, allManifests, "memory-system");
+  const memorySlotHasProviders = hasSystemSlotManifest(allManifests, "memory-system");
+  const activeMemoryProvider = activeSystemSlotProvider(state, allManifests, "memory-system");
+  const livingArchiveMemoryActive =
+    !memorySlotHasProviders || activeMemoryProvider?.manifest.id === "addon.living-archive";
+  const memoryProviderBroker = resolveMemoryProviderBroker(state, allManifests);
+  const recommendedAddOns = recommendedSystemSlotManifests(allManifests);
+  const showFirstRunRecommendedAddOns =
+    !isFloatingChatSurface && !state.uiPreferences.recommendedAddOnsReviewed && recommendedAddOns.length > 0;
+  const firstRunSelectionFor = (manifestId: string): boolean => firstRunSelections[manifestId] ?? true;
+  const effectiveChatOpen = chatInterfaceAvailable && (isFloatingChatSurface || engineerSettingsConsoleActive || state.uiPreferences.chatSidebarOpen);
 
   const setSection = (section: Section) => {
     startTransition(() => {
@@ -624,6 +738,7 @@ export function App() {
 
   const refreshArchiveRuntime = async () => {
     await loadArchiveRuntimeStatus({
+      memoryProvider: memoryProviderBroker,
       setChatNotice,
       setArchiveStatusBusy,
       setArchiveStatus,
@@ -648,6 +763,7 @@ export function App() {
 
   const refreshArchiveQueue = async () => {
     await loadArchiveReviewQueue({
+      memoryProvider: memoryProviderBroker,
       setChatNotice,
       setArchiveQueueBusy,
       setArchiveQueue,
@@ -659,6 +775,7 @@ export function App() {
   const runArchiveSearch = async (query: string) => {
     await executeArchiveSearch({
       query,
+      memoryProvider: memoryProviderBroker,
       setChatNotice,
       setArchiveSearchBusy,
       setArchiveSearchResult,
@@ -669,6 +786,7 @@ export function App() {
   const queueArchiveSource = async (source: ArchiveSearchResult["sources"][number]) => {
     await queueArchiveSourceForIngest({
       source,
+      memoryProvider: memoryProviderBroker,
       setChatNotice,
       setArchiveQueueBusy,
       setArchiveQueue,
@@ -680,6 +798,7 @@ export function App() {
   const queueWatchedArchiveSource = async (source: ArchiveSourceWatchRecord) => {
     await queueWatchedArchiveSourceForIngest({
       source,
+      memoryProvider: memoryProviderBroker,
       setChatNotice,
       setArchiveQueueBusy,
       setArchiveQueue,
@@ -756,6 +875,7 @@ export function App() {
     await processArchiveQueuedRequest({
       snapshot: { state, bundled, sideloaded },
       requestFile,
+      memoryProvider: memoryProviderBroker,
       commitReadyState,
       setProviderDiagnostics,
       setChatNotice,
@@ -776,6 +896,7 @@ export function App() {
       artifactFile,
       action,
       actorId,
+      memoryProvider: memoryProviderBroker,
       setChatNotice,
       setArchiveQueueBusy,
       setArchiveReviewArtifacts,
@@ -788,12 +909,58 @@ export function App() {
     await promoteArchiveReviewArtifact({
       artifactFile,
       actorId: "archive-ingest.core",
+      memoryProvider: memoryProviderBroker,
       setChatNotice,
       setArchiveQueueBusy,
       setArchiveReviewArtifacts,
       setArchivePromotionResult,
       errorMessageOf,
     });
+  };
+
+  const runArchiveMaintenance = async () => {
+    await runArchiveBackgroundCycle({
+      snapshot: { state, bundled, sideloaded },
+      memoryProvider: memoryProviderBroker,
+      commitReadyState,
+      setProviderDiagnostics,
+      setChatNotice,
+      setArchiveQueueBusy,
+      setArchiveQueue,
+      setArchiveReviewArtifacts,
+      setArchiveProcessResult,
+      setArchivePromotionResult,
+      setArchiveMaintenanceResult,
+      setArchiveSourceScanResult,
+      setArchiveBackgroundResult,
+      errorMessageOf,
+    });
+    await refreshArchiveRuntime();
+  };
+
+  const runArchiveHealthLint = async () => {
+    await runArchiveLint({
+      memoryProvider: memoryProviderBroker,
+      setChatNotice,
+      setArchiveQueueBusy,
+      setArchiveLintResult,
+      errorMessageOf,
+    });
+    await refreshArchiveRuntime();
+  };
+
+  const runArchiveSemanticHealthLint = async () => {
+    await runArchiveSemanticLint({
+      snapshot: { state, bundled, sideloaded },
+      memoryProvider: memoryProviderBroker,
+      commitReadyState,
+      setProviderDiagnostics,
+      setChatNotice,
+      setArchiveQueueBusy,
+      setArchiveSemanticLintResult,
+      errorMessageOf,
+    });
+    await refreshArchiveRuntime();
   };
 
   const refreshArchiveTolBundles = async () => {
@@ -821,6 +988,7 @@ export function App() {
   const openArchiveDocument = async (path: string) => {
     await loadArchiveDocument({
       path,
+      memoryProvider: memoryProviderBroker,
       setChatNotice,
       setArchiveDocumentBusy,
       setArchiveDocument,
@@ -842,15 +1010,23 @@ export function App() {
   };
 
   const sendStrategistMessage = async (overrideMessage?: string) => {
+    if (!recoveryModeActive && !chatInterfaceAvailable) {
+      setChatNotice("No active chat-interface add-on is enabled. Enable Augmentor Chat or select another chat add-on.");
+      return;
+    }
     if (!activeThread || !(overrideMessage ?? composer).trim()) {
       return;
     }
+    const runToken = claimChatRun(activeChatRunTokenRef, activeThread.id);
+    if (!runToken) {
+      setChatNotice("Hermes is already working on the current message.");
+      return;
+    }
     if (chatBusy) {
+      releaseChatRun(activeChatRunTokenRef, runToken);
       setChatNotice("Stop the current response before sending a follow-up correction.");
       return;
     }
-    const runToken = `chat-run-${activeThread.id.replace(/[^a-zA-Z0-9_-]/g, "-")}-${Date.now()}`;
-    activeChatRunTokenRef.current = runToken;
     await executeChatTurn({
       snapshot: { state, bundled, sideloaded },
       activeThread,
@@ -872,13 +1048,16 @@ export function App() {
       isRunCurrent: (token) => activeChatRunTokenRef.current === token,
       errorMessageOf,
     });
-    if (activeChatRunTokenRef.current === runToken) {
-      activeChatRunTokenRef.current = null;
+    if (releaseChatRun(activeChatRunTokenRef, runToken)) {
       setChatRunPhase("idle");
     }
   };
 
   const startArchivePreflightAugmentorSession = async (report: ArchiveLibraryPreflightResult) => {
+    if (!chatInterfaceAvailable) {
+      setChatNotice("No active chat-interface add-on is enabled for an Augmentor discussion.");
+      return;
+    }
     if (chatBusy) {
       setChatNotice("Stop the current response before opening a Living Archive plan discussion.");
       return;
@@ -963,6 +1142,19 @@ export function App() {
     void sendStrategistMessage(RECOVERY_RUNBOOK_PROMPT);
   };
 
+  const detachChatWindow = async () => {
+    try {
+      await openFloatingChatWindow();
+      updateRuntimeState((draft) => {
+        draft.uiPreferences.chatSidebarOpen = false;
+        draft.uiPreferences.chatHistoryOpen = false;
+        return draft;
+      });
+    } catch (error) {
+      setChatNotice(errorMessageOf(error, "Failed to open floating chat window."));
+    }
+  };
+
   const runArchiveIngestProbe = async () => {
     if (archiveProbeBusy || recoveryModeActive) {
       return;
@@ -1011,10 +1203,10 @@ export function App() {
       const existingGrants = new Map(installation.grantedCapabilities.map((grant) => [grant.capability, grant]));
       const missingRequestedGrants = browserManifest.requestedCapabilities.filter((grant) => !existingGrants.has(grant.capability));
       installation.grantedCapabilities = [...installation.grantedCapabilities, ...missingRequestedGrants].map((grant) =>
-        ["network", "ui-embedding", "browser-control"].includes(grant.capability) ? { ...grant, granted: true } : grant,
+        ["network", "ui-embedding", "browser-control", "filesystem"].includes(grant.capability) ? { ...grant, granted: true } : grant,
       );
       installation.status = "enabled";
-      installation.notes = ["Installed, enabled, and granted network, ui-embedding, browser-control through Browser setup."];
+      installation.notes = ["Installed, enabled, and granted network, ui-embedding, browser-control, filesystem through Browser v2 setup."];
       draft.uiPreferences.activeSection = "browser";
       return draft;
     });
@@ -1097,6 +1289,9 @@ export function App() {
   const hideNativeBrowserWebview = async (): Promise<void> => {
     await requestBrowserNativeWebviewHide();
   };
+  const probeNativeBrowserHost = async () => requestNativeBrowserProbe("cef-chrome-runtime");
+  const smokeTestNativeBrowserAttach = async () => requestNativeBrowserAttachSmoke("external-process");
+  const probeNativeBrowserBridge = async () => requestNativeBrowserBridgeProbe("in-process-native-library");
   const readActiveBrowserPage = async (url: string): Promise<string> => {
     const runner = createDesktopBrowserToolRunner({
       manifest: browserManifest,
@@ -1153,7 +1348,7 @@ export function App() {
       }
       installation.notes = selectedVaultPath
         ? [`Workspace access granted for ${selectedVaultPath}.`]
-        : ["Workspace access granted. Choose a vault to open the Obsidian workspace."];
+        : ["Workspace access granted. Choose a vault to open the Resonant Notes workspace."];
       return draft;
     });
   };
@@ -1232,7 +1427,7 @@ export function App() {
   const terminalDockEnabled = Boolean(terminalManifest && terminalInstallation?.installed && terminalInstallation.enabled);
   const addOnNavItems = [
     ...(obsidianDockEnabled
-      ? [{ id: "obsidian" as Section, label: obsidianManifest?.name ?? "Obsidian", eyebrow: "vault", icon: "archive" as DockIconId, pinned: true }]
+      ? [{ id: "obsidian" as Section, label: obsidianManifest?.name ?? "Resonant Notes", eyebrow: "notes", icon: "obsidian" as DockIconId, pinned: true }]
       : []),
     ...(browserDockEnabled
       ? [{ id: "browser" as Section, label: browserManifest?.name ?? "Browser", eyebrow: "web", icon: "browser" as DockIconId, pinned: true }]
@@ -1264,7 +1459,7 @@ export function App() {
     <div className="app-zoom-viewport" style={zoomStyle}>
       <div className="app-zoom-stage">
         <div
-          className={`shell ${state.uiPreferences.chatSidebarOpen ? "chat-open" : "chat-closed"} layout-${state.uiPreferences.workspaceLayout}`}
+          className={`shell ${effectiveChatOpen ? "chat-open" : "chat-closed"} ${chatInterfaceAvailable ? "" : "chat-unavailable"} ${isFloatingChatSurface ? "floating-chat-surface" : ""} layout-${state.uiPreferences.workspaceLayout}`}
           style={shellStyle}
         >
       <header className="system-topbar" aria-label="ResonantOS system bar">
@@ -1291,6 +1486,7 @@ export function App() {
                 : "Move chat beside the launcher"
             }
             onClick={toggleWorkspaceLayout}
+            disabled={!chatInterfaceAvailable}
           >
             <VendorIcon
               icon={
@@ -1351,7 +1547,7 @@ export function App() {
         </nav>
       </aside>
 
-      <main className="main-shell">
+      <main className={`main-shell ${!recoveryModeActive && currentSection === "obsidian" ? "notes-shell-active" : ""}`}>
 
         {recoveryModeActive && (
           <div className="inline-notice warning recovery-notice">
@@ -1366,131 +1562,270 @@ export function App() {
             !recoveryModeActive && currentSection === "terminal" ? "terminal-active" : ""
           } ${
             !recoveryModeActive && currentSection === "opencode" ? "opencode-active" : ""
+          } ${
+            !recoveryModeActive && currentSection === "obsidian" ? "notes-active" : ""
           }`}
         >
           {recoveryModeActive ? (
-            <RecoveryWorkspace
-              state={state}
-              activeRouteLabel={activeRuntimeNode?.label ?? "No live node"}
-              activeModel={activeChatModel || "Missing"}
-              recoveryRuntimeStatus={recoveryRuntimeStatus}
-              recoveryCandidates={recoveryCandidates}
-              recoveryBusy={chatBusy}
-              recoveryActivityLabel={agentActivityLabel}
-              onStartRecovery={startRecoveryRunbook}
-              onPromoteCandidate={(candidate) =>
-                promoteRecoveryRoute(
-                  candidate,
-                  updateRuntimeState,
-                  setSelectedChatModel,
-                  setChatNotice,
-                  setAgentActivityLabel,
-                )
+            <Suspense
+              fallback={
+                <Panel title="Loading Recovery" subtitle="Resonant Engineer">
+                  <p className="muted-copy">Preparing recovery controls...</p>
+                </Panel>
               }
-            />
+            >
+              <RecoveryWorkspace
+                state={state}
+                activeRouteLabel={activeRuntimeNode?.label ?? "No live node"}
+                activeModel={activeChatModel || "Missing"}
+                recoveryRuntimeStatus={recoveryRuntimeStatus}
+                recoveryCandidates={recoveryCandidates}
+                recoveryBusy={chatBusy}
+                recoveryActivityLabel={agentActivityLabel}
+                onStartRecovery={startRecoveryRunbook}
+                onPromoteCandidate={(candidate) =>
+                  promoteRecoveryRoute(
+                    candidate,
+                    updateRuntimeState,
+                    setSelectedChatModel,
+                    setChatNotice,
+                    setAgentActivityLabel,
+                  )
+                }
+              />
+            </Suspense>
           ) : currentSection === "overview" ? (
-            <OverviewWorkspace
-              state={state}
-              manifests={allManifests}
-              displayedStrategistName={displayedStrategistName}
-              providerLabel={routedProviderLabel(strategistRoute)}
-              onOpenArchive={() => setSection("archive")}
-              onOpenDelegation={() => setSection("delegation")}
-              onOpenAddons={() => setSection("addons")}
-              onOpenBrowser={() => setSection("browser")}
-              onOpenOpenCode={() => setSection("opencode")}
-              onGrantBrowserVisibleAccess={grantBrowserVisibleAccess}
-              onOpenSettings={() => setSection("settings")}
-            />
+            <Suspense
+              fallback={
+                <Panel title="Loading Home" subtitle="ResonantOS overview">
+                  <p className="muted-copy">Preparing workspace overview...</p>
+                </Panel>
+              }
+            >
+              <OverviewWorkspace
+                state={state}
+                manifests={allManifests}
+                displayedStrategistName={displayedStrategistName}
+                providerLabel={routedProviderLabel(strategistRoute)}
+                onOpenArchive={() => setSection("archive")}
+                onOpenDelegation={() => setSection("delegation")}
+                onOpenAddons={() => setSection("addons")}
+                onOpenBrowser={() => setSection("browser")}
+                onOpenOpenCode={() => setSection("opencode")}
+                onGrantBrowserVisibleAccess={grantBrowserVisibleAccess}
+                onOpenSettings={() => setSection("settings")}
+              />
+            </Suspense>
           ) : null}
 
           {!recoveryModeActive && currentSection === "strategist" && (
-            <StrategistWorkspace
-              state={state}
-              displayedStrategistName={displayedStrategistName}
-              onStrategistRename={(value) => renameStrategistIdentity(value, updateRuntimeState)}
-              onToggleChannel={(channelId) => toggleStrategistChannel(channelId, updateRuntimeState)}
-            />
+            <Suspense
+              fallback={
+                <Panel title="Loading Agent Identity" subtitle="Strategist configuration">
+                  <p className="muted-copy">Preparing identity controls...</p>
+                </Panel>
+              }
+            >
+              <StrategistWorkspace
+                state={state}
+                displayedStrategistName={displayedStrategistName}
+                onStrategistRename={(value) => renameStrategistIdentity(value, updateRuntimeState)}
+                onToggleChannel={(channelId) => toggleStrategistChannel(channelId, updateRuntimeState)}
+              />
+            </Suspense>
           )}
 
-          {!recoveryModeActive && currentSection === "archive" && (
-            <ArchiveWorkspace
-              state={state}
-              focusTarget={archiveFocusTarget}
-              archiveStatusBusy={archiveStatusBusy}
-              archiveStatus={archiveStatus}
-              archiveSearchBusy={archiveSearchBusy}
-              archiveSearchResult={archiveSearchResult}
-              archiveDocumentBusy={archiveDocumentBusy}
-              archiveDocument={archiveDocument}
-              archiveQueueBusy={archiveQueueBusy}
-              archiveQueue={archiveQueue}
-              archiveReviewArtifacts={archiveReviewArtifacts}
-              archiveProcessResult={archiveProcessResult}
-              archiveReviewDecisionResult={archiveReviewDecisionResult}
-              archivePromotionResult={archivePromotionResult}
-              archiveTolBundles={archiveTolBundles}
-              archiveTolBundleResult={archiveTolBundleResult}
-              archiveSourceScanBusy={archiveSourceScanBusy}
-              archiveSourceScanResult={archiveSourceScanResult}
-              archiveImportedLibraries={archiveImportedLibraries}
-              archiveClassificationReview={archiveClassificationReview}
-              archiveReorganisationPlan={archiveReorganisationPlan}
-              archiveLibraryImportResult={archiveLibraryImportResult}
-              archiveLibraryPreflightResult={archiveLibraryPreflightResult}
-              ingestProbeBusy={archiveProbeBusy}
-              ingestProbeResult={archiveProbeResult}
-              onRefreshArchiveStatus={() => void refreshArchiveRuntime()}
-              onRefreshArchiveSourceRegistry={() => void refreshArchiveSourceRegistry()}
-              onRefreshArchiveQueue={() => void refreshArchiveQueue()}
-              onRunArchiveSearch={(query) => void runArchiveSearch(query)}
-              onOpenArchiveDocument={(path) => void openArchiveDocument(path)}
-              onQueueArchiveSource={(source) => void queueArchiveSource(source)}
-              onScanSourceFolders={(rootPath) => void runArchiveSourceFolderScan(rootPath)}
-              onPickLibraryFolder={runPickArchiveLibraryFolder}
-              onPreflightLibrary={(sourcePath) => void runArchiveLibraryPreflight(sourcePath)}
-              onAskAugmentorAboutPreflight={(report) => void startArchivePreflightAugmentorSession(report)}
-              onOpenClassificationReview={(classificationManifestPath) => void openArchiveClassificationReview(classificationManifestPath)}
-              onGenerateReorganisationPlan={(classificationManifestPath) => void runArchiveReorganisationPlan(classificationManifestPath)}
-              onImportLibrary={(input) => void runArchiveLibraryImport(input)}
-              onQueueWatchedSource={(source) => void queueWatchedArchiveSource(source)}
-              onProcessArchiveRequest={(requestFile) => void runArchiveQueuedRequest(requestFile)}
-              onApproveReviewArtifact={(artifactFile) => void runArchiveReviewDecision(artifactFile, "approve", "strategist.core")}
-              onEscalateReviewArtifact={(artifactFile) => void runArchiveReviewDecision(artifactFile, "escalate", "strategist.core")}
-              onRejectReviewArtifact={(artifactFile) => void runArchiveReviewDecision(artifactFile, "reject", "strategist.core")}
-              onPromoteReviewArtifact={(artifactFile) => void runArchivePromotion(artifactFile)}
-              onRefreshTolBundles={() => void refreshArchiveTolBundles()}
-              onBuildTolBundle={(sessionId) => void runArchiveTolBundleBuild(sessionId)}
-              onRunIngestProbe={() => void runArchiveIngestProbe()}
-            />
+          {!recoveryModeActive && currentSection === "archive" && !memorySystemAvailable && (
+            <Panel title="Select a memory add-on" subtitle="Replaceable memory slot">
+              <div className="slot-empty-state">
+                <p>
+                  ResonantOS has no active memory-system provider. Enable Living Archive or sideload another memory
+                  add-on before opening the memory workspace.
+                </p>
+                <p>
+                  Memory is intentionally replaceable. The shell keeps the slot, but the user chooses which add-on owns
+                  Human Knowledge, External Knowledge, and AI Memory operations.
+                </p>
+                <div className="slot-empty-actions">
+                  <button
+                    type="button"
+                    className="button-primary touch-action"
+                    onClick={() => {
+                      setSelectedAddonId(
+                        activeMemoryProvider?.manifest.id ??
+                          allManifests.find((manifest) => manifest.systemSlots?.some((slot) => slot.id === "memory-system"))?.id ??
+                          "addon.living-archive",
+                      );
+                      setSection("addons");
+                    }}
+                  >
+                    Choose Memory Add-on
+                  </button>
+                  <button type="button" className="button-secondary touch-action" onClick={() => setSection("settings")}>
+                    Open Settings
+                  </button>
+                </div>
+                {!memorySlotHasProviders ? (
+                  <small>No memory-system add-on manifests are installed. Sideload a compatible memory add-on.</small>
+                ) : null}
+              </div>
+            </Panel>
+          )}
+
+          {!recoveryModeActive && currentSection === "archive" && memorySystemAvailable && !livingArchiveMemoryActive && (
+            <Panel title="Memory Provider Active" subtitle="Replaceable memory slot">
+              <div className="slot-empty-state">
+                <p>
+                  {activeMemoryProvider?.manifest.name ?? "Another memory add-on"} is currently active as the memory-system
+                  provider. The bundled Living Archive workspace is not shown because memory is replaceable and only the
+                  active provider should own this surface.
+                </p>
+                <p>
+                  To use the Living Archive LLM Wiki, enable the Living Archive add-on with the recommended grants. To keep
+                  this provider, open its add-on surface or settings instead.
+                </p>
+                <div className="slot-empty-actions">
+                  <button
+                    type="button"
+                    className="button-primary touch-action"
+                    onClick={() => {
+                      setSelectedAddonId(activeMemoryProvider?.manifest.id ?? "addon.living-archive");
+                      setSection("addons");
+                    }}
+                  >
+                    Manage Active Memory Add-on
+                  </button>
+                  <button
+                    type="button"
+                    className="button-secondary touch-action"
+                    onClick={() => {
+                      setSelectedAddonId("addon.living-archive");
+                      setSection("addons");
+                    }}
+                  >
+                    Configure Living Archive
+                  </button>
+                </div>
+              </div>
+            </Panel>
+          )}
+
+          {!recoveryModeActive && currentSection === "archive" && livingArchiveMemoryActive && (
+            <Suspense
+              fallback={
+                <Panel title="Loading Living Archive" subtitle="Memory workspace">
+                  <p className="muted-copy">Preparing archive controls...</p>
+                </Panel>
+              }
+            >
+              <ArchiveWorkspace
+                state={state}
+                focusTarget={archiveFocusTarget}
+                archiveStatusBusy={archiveStatusBusy}
+                archiveStatus={archiveStatus}
+                archiveSearchBusy={archiveSearchBusy}
+                archiveSearchResult={archiveSearchResult}
+                archiveDocumentBusy={archiveDocumentBusy}
+                archiveDocument={archiveDocument}
+                archiveQueueBusy={archiveQueueBusy}
+                archiveQueue={archiveQueue}
+                archiveReviewArtifacts={archiveReviewArtifacts}
+                archiveProcessResult={archiveProcessResult}
+                archiveReviewDecisionResult={archiveReviewDecisionResult}
+                archivePromotionResult={archivePromotionResult}
+                archiveMaintenanceResult={archiveMaintenanceResult}
+                archiveLintResult={archiveLintResult}
+                archiveSemanticLintResult={archiveSemanticLintResult}
+                archiveTolBundles={archiveTolBundles}
+                archiveTolBundleResult={archiveTolBundleResult}
+                archiveSourceScanBusy={archiveSourceScanBusy}
+                archiveSourceScanResult={archiveSourceScanResult}
+                archiveImportedLibraries={archiveImportedLibraries}
+                archiveClassificationReview={archiveClassificationReview}
+                archiveReorganisationPlan={archiveReorganisationPlan}
+                archiveLibraryImportResult={archiveLibraryImportResult}
+                archiveLibraryPreflightResult={archiveLibraryPreflightResult}
+                ingestProbeBusy={archiveProbeBusy}
+                ingestProbeResult={archiveProbeResult}
+                onRefreshArchiveStatus={() => void refreshArchiveRuntime()}
+                onRefreshArchiveSourceRegistry={() => void refreshArchiveSourceRegistry()}
+                onRefreshArchiveQueue={() => void refreshArchiveQueue()}
+                onRunArchiveSearch={(query) => void runArchiveSearch(query)}
+                onOpenArchiveDocument={(path) => void openArchiveDocument(path)}
+                onQueueArchiveSource={(source) => void queueArchiveSource(source)}
+                onScanSourceFolders={(rootPath) => void runArchiveSourceFolderScan(rootPath)}
+                onPickLibraryFolder={runPickArchiveLibraryFolder}
+                onPreflightLibrary={(sourcePath) => void runArchiveLibraryPreflight(sourcePath)}
+                onAskAugmentorAboutPreflight={(report) => void startArchivePreflightAugmentorSession(report)}
+                onOpenClassificationReview={(classificationManifestPath) => void openArchiveClassificationReview(classificationManifestPath)}
+                onGenerateReorganisationPlan={(classificationManifestPath) => void runArchiveReorganisationPlan(classificationManifestPath)}
+                onImportLibrary={(input) => void runArchiveLibraryImport(input)}
+                onQueueWatchedSource={(source) => void queueWatchedArchiveSource(source)}
+                onProcessArchiveRequest={(requestFile) => void runArchiveQueuedRequest(requestFile)}
+                onApproveReviewArtifact={(artifactFile) => void runArchiveReviewDecision(artifactFile, "approve", "strategist.core")}
+                onEscalateReviewArtifact={(artifactFile) => void runArchiveReviewDecision(artifactFile, "escalate", "strategist.core")}
+                onRejectReviewArtifact={(artifactFile) => void runArchiveReviewDecision(artifactFile, "reject", "strategist.core")}
+                onPromoteReviewArtifact={(artifactFile) => void runArchivePromotion(artifactFile)}
+                onRunArchiveMaintenance={() => void runArchiveMaintenance()}
+                onRunArchiveLint={() => void runArchiveHealthLint()}
+                onRunArchiveSemanticLint={() => void runArchiveSemanticHealthLint()}
+                onRefreshTolBundles={() => void refreshArchiveTolBundles()}
+                onBuildTolBundle={(sessionId) => void runArchiveTolBundleBuild(sessionId)}
+                onRunIngestProbe={() => void runArchiveIngestProbe()}
+              />
+            </Suspense>
           )}
 
           {!recoveryModeActive && currentSection === "delegation" && (
-            <DelegationWorkspace
-              chatBusy={chatBusy}
-              onStartWorkspace={async (workspaceId) => {
-                await sendStrategistMessage(`start engineer task ${workspaceId}`);
-              }}
-              onAskAugmentor={async (message) => {
-                await sendStrategistMessage(message);
-              }}
-            />
+            <Suspense
+              fallback={
+                <Panel title="Loading Delegation" subtitle="Task workspaces">
+                  <p className="muted-copy">Preparing delegation controls...</p>
+                </Panel>
+              }
+            >
+              <DelegationWorkspace
+                chatBusy={chatBusy}
+                hermesProfileHome={
+                  typeof state.installations["addon.hermes"]?.config?.profileHome === "string"
+                    ? state.installations["addon.hermes"]?.config?.profileHome
+                    : undefined
+                }
+                onStartWorkspace={async (workspaceId) => {
+                  await sendStrategistMessage(`start engineer task ${workspaceId}`);
+                }}
+                onAskAugmentor={async (message) => {
+                  await sendStrategistMessage(message);
+                }}
+              />
+            </Suspense>
           )}
 
           {!recoveryModeActive && currentSection === "browser" && (
-            <BrowserWorkspace
-              manifest={browserManifest}
-              installation={browserInstallation}
-              workspaceState={state.uiPreferences.browserWorkspace}
-              onWorkspaceStateChange={updateBrowserWorkspaceState}
-              onConfigureAddon={() => setSection("addons")}
-              onGrantVisibleAccess={grantBrowserVisibleAccess}
-              onShowNativeWebview={showNativeBrowserWebview}
-              onResizeNativeWebview={resizeNativeBrowserWebview}
-              onHideNativeWebview={hideNativeBrowserWebview}
-              onSyncControlledSession={syncControlledBrowserSession}
-              onReadActivePage={readActiveBrowserPage}
-            />
+            <Suspense
+              fallback={
+                <Panel title="Loading Browser" subtitle="Chromium workspace">
+                  <p className="muted-copy">Preparing browser controls...</p>
+                </Panel>
+              }
+            >
+              <BrowserWorkspace
+                manifest={browserManifest}
+                installation={browserInstallation}
+                workspaceState={state.uiPreferences.browserWorkspace}
+                onWorkspaceStateChange={updateBrowserWorkspaceState}
+                onConfigureAddon={() => setSection("addons")}
+                onGrantVisibleAccess={grantBrowserVisibleAccess}
+                onShowNativeWebview={showNativeBrowserWebview}
+                onResizeNativeWebview={resizeNativeBrowserWebview}
+                onHideNativeWebview={hideNativeBrowserWebview}
+                onSyncControlledSession={syncControlledBrowserSession}
+                onReadActivePage={readActiveBrowserPage}
+                onProbeNativeBrowser={probeNativeBrowserHost}
+                onSmokeTestNativeAttach={smokeTestNativeBrowserAttach}
+                onProbeNativeBridge={probeNativeBrowserBridge}
+              />
+            </Suspense>
           )}
 
           {!recoveryModeActive && (
@@ -1508,94 +1843,137 @@ export function App() {
           )}
 
           {!recoveryModeActive && currentSection === "terminal" && (
-            <TerminalWorkspace
-              manifest={terminalManifest}
-              installation={terminalInstallation}
-              onConfigureAddon={() => {
-                setSelectedAddonId("addon.terminal");
-                setSection("addons");
-              }}
-              onGrantWorkspaceAccess={grantTerminalWorkspaceAccess}
-            />
+            <Suspense
+              fallback={
+                <Panel title="Loading Terminal" subtitle="Local shell add-on">
+                  <p className="muted-copy">Preparing terminal controls...</p>
+                </Panel>
+              }
+            >
+              <TerminalWorkspace
+                manifest={terminalManifest}
+                installation={terminalInstallation}
+                onConfigureAddon={() => {
+                  setSelectedAddonId("addon.terminal");
+                  setSection("addons");
+                }}
+                onGrantWorkspaceAccess={grantTerminalWorkspaceAccess}
+              />
+            </Suspense>
           )}
 
           {!recoveryModeActive && currentSection === "obsidian" && (
-            <ObsidianWorkspace
-              manifest={obsidianManifest}
-              installation={obsidianInstallation}
-              onConfigureAddon={() => {
-                setSelectedAddonId("addon.obsidian");
-                setSection("addons");
-              }}
-              onGrantWorkspaceAccess={grantObsidianWorkspaceAccess}
-            />
+            <div className="full-pane-route notes-pane-route">
+              <Suspense
+                fallback={
+                  <Panel title="Loading Resonant Notes" subtitle="Markdown vault workspace">
+                    <p className="muted-copy">Preparing the vault workspace...</p>
+                  </Panel>
+                }
+              >
+                <ObsidianWorkspace
+                  manifest={obsidianManifest}
+                  installation={obsidianInstallation}
+                  onConfigureAddon={() => {
+                    setSelectedAddonId("addon.obsidian");
+                    setSection("addons");
+                  }}
+                  onGrantWorkspaceAccess={grantObsidianWorkspaceAccess}
+                />
+              </Suspense>
+            </div>
           )}
 
           {!recoveryModeActive && currentSection === "addons" && (
-            <AddOnsWorkspace
-              search={search}
-              sideloadPath={sideloadPath}
-              filteredManifests={filteredManifests}
-              installations={state.installations}
-              selectedManifest={selectedManifest}
-              selectedInstallation={selectedInstallation}
-              onSearchChange={(value) => {
-                startTransition(() => setSearch(value));
-              }}
-              onSideloadPathChange={setSideloadPath}
-              onSideload={() => void handleSideload()}
-              onSelectManifest={setSelectedAddonId}
-              onToggleAddonInstall={(manifest) => toggleAddonInstallation(manifest, updateRuntimeState)}
-              onToggleGrant={(manifestId, capability) =>
-                toggleAddonCapabilityGrant(manifestId, capability, updateRuntimeState)
+            <Suspense
+              fallback={
+                <Panel title="Loading Add-ons" subtitle="Extension catalog">
+                  <p className="muted-copy">Preparing add-on controls...</p>
+                </Panel>
               }
-              onGrantCapabilities={(manifestId, capabilities, requestedCapabilities) =>
-                grantAddonCapabilities(manifestId, capabilities, requestedCapabilities, updateRuntimeState)
-              }
-              onGrantTerminalWorkspaceAccess={grantAndOpenTerminalWorkspace}
-              onUpdateAddonConfig={(manifestId, config) => updateAddonConfig(manifestId, config, updateRuntimeState)}
-              onAskAugmentor={async (message) => {
-                await sendStrategistMessage(message);
-              }}
-              onOpenArchiveReview={openArchiveReview}
-            />
+            >
+              <AddOnsWorkspace
+                search={search}
+                sideloadPath={sideloadPath}
+                filteredManifests={filteredManifests}
+                installations={state.installations}
+                selectedManifest={selectedManifest}
+                selectedInstallation={selectedInstallation}
+                onSearchChange={(value) => {
+                  startTransition(() => setSearch(value));
+                }}
+                onSideloadPathChange={setSideloadPath}
+                onSideload={() => void handleSideload()}
+                onSelectManifest={setSelectedAddonId}
+                onToggleAddonInstall={(manifest) => toggleAddonInstallation(manifest, updateRuntimeState)}
+                onToggleGrant={(manifestId, capability) =>
+                  toggleAddonCapabilityGrant(manifestId, capability, updateRuntimeState)
+                }
+                onGrantCapabilities={(manifestId, capabilities, requestedCapabilities) =>
+                  grantAddonCapabilities(manifestId, capabilities, requestedCapabilities, updateRuntimeState)
+                }
+                onGrantTerminalWorkspaceAccess={grantAndOpenTerminalWorkspace}
+                onUpdateAddonConfig={(manifestId, config) => updateAddonConfig(manifestId, config, updateRuntimeState)}
+                onAskAugmentor={async (message) => {
+                  await sendStrategistMessage(message);
+                }}
+                onOpenArchiveReview={openArchiveReview}
+              />
+            </Suspense>
           )}
 
           {!recoveryModeActive && currentSection === "settings" && (
-            <SettingsWorkspace
-              state={state}
-              settingsSection={settingsSection}
-              settingsNotice={settingsNotice}
-              providerDiagnostics={providerDiagnostics}
-              providerDiagnosticsBusy={providerDiagnosticsBusy}
-              activeProviderProbeId={activeProviderProbeId}
-              providerSmokeResults={providerSmokeResults}
-              providerSmokeBusyId={providerSmokeBusyId}
-              providerDrafts={providerDrafts}
-              onSettingsSectionChange={setSettingsSection}
-              onUpdateProvider={(profileId, field, value) =>
-                updateProviderProfile(profileId, field, value, updateRuntimeState)
+            <Suspense
+              fallback={
+                <Panel title="Loading Settings" subtitle="System configuration">
+                  <p className="muted-copy">Preparing settings controls...</p>
+                </Panel>
               }
-              onProviderDraftChange={(profileId, value) =>
-                setProviderDrafts((current) => ({ ...current, [profileId]: value }))
-              }
-              onSaveProviderSecret={(profileId) => void handleSaveProviderSecret(profileId)}
-              onProbeProvider={(profileId) => void refreshProviderDiagnostics(profileId)}
-              onProbeAllProviders={() => void refreshProviderDiagnostics()}
-              onSmokeTestProvider={(profileId) => void runProviderSmokeTest(profileId)}
-            />
+            >
+              <SettingsWorkspace
+                state={state}
+                settingsSection={settingsSection}
+                settingsNotice={settingsNotice}
+                providerDiagnostics={providerDiagnostics}
+                providerDiagnosticsBusy={providerDiagnosticsBusy}
+                activeProviderProbeId={activeProviderProbeId}
+                providerSmokeResults={providerSmokeResults}
+                providerSmokeBusyId={providerSmokeBusyId}
+                providerDrafts={providerDrafts}
+                onSettingsSectionChange={setSettingsSection}
+                onUpdateProvider={(profileId, field, value) =>
+                  updateProviderProfile(profileId, field, value, updateRuntimeState)
+                }
+                onProviderDraftChange={(profileId, value) =>
+                  setProviderDrafts((current) => ({ ...current, [profileId]: value }))
+                }
+                onSaveProviderSecret={(profileId) => void handleSaveProviderSecret(profileId)}
+                onProbeProvider={(profileId) => void refreshProviderDiagnostics(profileId)}
+                onProbeAllProviders={() => void refreshProviderDiagnostics()}
+                onSmokeTestProvider={(profileId) => void runProviderSmokeTest(profileId)}
+              />
+            </Suspense>
           )}
         </section>
       </main>
 
+      {chatInterfaceAvailable && (
       <StrategistChatRail
-        isOpen={state.uiPreferences.chatSidebarOpen}
+        isOpen={effectiveChatOpen}
         mode={recoveryModeActive ? "emergency" : "strategist"}
         title={activeChatAgentName}
-        eyebrow={recoveryModeActive ? "Emergency recovery console" : "Persistent Strategist Chat"}
+        eyebrow={
+          recoveryModeActive
+            ? "Emergency recovery console"
+            : engineerSettingsConsoleActive
+              ? "Setup and settings assistant"
+              : "Persistent Strategist Chat"
+        }
         description={
           recoveryModeActive
             ? "The Resonant Engineer Agent handles diagnosis, recovery logging, documentation checks, and the final repair report."
+            : engineerSettingsConsoleActive
+              ? "The Resonant Engineer stays available for setup even when Augmentor Chat is disabled."
             : "Primary trusted conversation channel."
         }
         activeThread={activeThread}
@@ -1604,12 +1982,22 @@ export function App() {
         pinnedThreadIds={state.uiPreferences.pinnedChatThreadIds}
         pinnedProjectIds={state.uiPreferences.pinnedChatProjectIds ?? []}
         availableAgents={state.agents
-          .filter((agent) => agent.id === "strategist.core" || agent.id === state.recoverySession.engineerAgentId)
-          .filter((agent) => state.channels.some((channel) => channel.owningAgentId === agent.id && channel.enabled))
+          .filter((agent) =>
+            engineerSettingsConsoleActive
+              ? agent.id === state.recoverySession.engineerAgentId
+              :
+            state.channels.some(
+              (channel) =>
+                channel.owningAgentId === agent.id &&
+                channel.type === "desktop" &&
+                channel.enabled &&
+                channelAllowedByOwningAddon(state, channel),
+            ),
+          )
           .map((agent) => ({
             id: agent.id,
             displayName: agent.id === "strategist.core" ? displayedStrategistName : agent.displayName,
-            shortLabel: agent.id === "strategist.core" ? "A" : "E",
+            shortLabel: agent.id === "strategist.core" ? "A" : agent.id === state.recoverySession.engineerAgentId ? "E" : agent.displayName.slice(0, 1),
           }))}
         activeAgentId={activeThread?.owningAgentId ?? (recoveryModeActive ? state.recoverySession.engineerAgentId : "strategist.core")}
         channels={state.channels}
@@ -1630,7 +2018,7 @@ export function App() {
         contextUsageTitle={contextUsageTitle}
         contextBudget={contextBudget}
         compactState={latestCompactState}
-        historyOpen={state.uiPreferences.chatHistoryOpen}
+        historyOpen={isFloatingChatSurface ? false : state.uiPreferences.chatHistoryOpen}
         activityLabel={agentActivityLabel}
         recoveryRuntimeStatus={
           recoveryModeActive
@@ -1775,6 +2163,7 @@ export function App() {
           void saveChatMessageToArchiveIntake({
             thread: activeThread,
             message,
+            memoryProvider: resolveMemoryProviderBroker(state, allManifests),
             setChatNotice,
             setArchiveQueueBusy,
             setArchiveQueue,
@@ -1823,7 +2212,74 @@ export function App() {
         onFileAttach={(files) => void attachComposerFiles(files, setAttachments, fileInputRef)}
         onRemoveAttachment={(attachmentId) => removeComposerAttachment(attachmentId, setAttachments)}
         onStartResize={startChatRailResize}
+        onDetachChat={isFloatingChatSurface ? undefined : () => void detachChatWindow()}
       />
+      )}
+      {showFirstRunRecommendedAddOns && (
+        <div className="first-run-backdrop" role="dialog" aria-modal="true" aria-label="Choose recommended ResonantOS add-ons">
+          <section className="first-run-card">
+            <span className="eyebrow">First-run setup</span>
+            <h2>Choose the recommended default add-ons.</h2>
+            <p>
+              ResonantOS can start as a minimal shell, or you can enable the recommended replaceable defaults now.
+              You can disable or replace them later from Add-ons.
+            </p>
+            <div className="first-run-choice-list">
+              {recommendedAddOns.map((manifest) => (
+                <label key={manifest.id} className="first-run-choice">
+                  <input
+                    type="checkbox"
+                    checked={firstRunSelectionFor(manifest.id)}
+                    onChange={(event) =>
+                      setFirstRunSelections((current) => ({
+                        ...current,
+                        [manifest.id]: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span>
+                    <strong>{manifest.name}</strong>
+                    <small>{manifest.description}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div className="first-run-actions">
+              <button
+                type="button"
+                className="button-primary touch-action"
+                onClick={() => {
+                  const selectedIds = recommendedAddOns
+                    .filter((manifest) => firstRunSelectionFor(manifest.id))
+                    .map((manifest) => manifest.id);
+                  commitReadyState(applyFirstRunRecommendedAddOns(state, allManifests, selectedIds));
+                }}
+              >
+                Apply Selection
+              </button>
+              <button
+                type="button"
+                className="button-secondary touch-action"
+                onClick={() => {
+                  const nextState = markFirstRunRecommendedAddOnsReviewed(state);
+                  nextState.uiPreferences.activeSection = "addons";
+                  nextState.uiPreferences.chatSidebarOpen = false;
+                  commitReadyState(nextState);
+                }}
+              >
+                Choose Add-ons Manually
+              </button>
+              <button
+                type="button"
+                className="button-secondary touch-action"
+                onClick={() => commitReadyState(markFirstRunRecommendedAddOnsReviewed(state))}
+              >
+                Continue Minimal
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
         </div>
       </div>
     </div>
@@ -1854,6 +2310,23 @@ function DockIcon(props: { icon: DockIconId }) {
       </svg>
     );
   }
+
+  if (props.icon === "obsidian") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <use href="/icons/resonant.svg#ros-resonant-notes" />
+      </svg>
+    );
+  }
+
   return <VendorIcon icon={dockIconMap[props.icon]} />;
 }
 

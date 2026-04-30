@@ -96,3 +96,13 @@ export function PinIcon() {
 export function MoreIcon() {
   return <TablerIcon name="dots" />;
 }
+
+export function DetachIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 5h5v5" />
+      <path d="M10 14 19 5" />
+      <path d="M19 14v4.2c0 .4-.2.8-.5 1.1-.3.3-.7.5-1.1.5H5.8c-.4 0-.8-.2-1.1-.5-.3-.3-.5-.7-.5-1.1V6.6c0-.4.2-.8.5-1.1.3-.3.7-.5 1.1-.5H10" />
+    </svg>
+  );
+}

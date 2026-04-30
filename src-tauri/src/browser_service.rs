@@ -9,12 +9,15 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl};
+use tauri::{AppHandle, Manager};
+#[cfg(not(target_os = "macos"))]
+use tauri::{LogicalPosition, LogicalSize, WebviewBuilder, WebviewUrl};
 use tungstenite::{connect, Message};
 
 type CdpSocket = tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>;
 
 static BROWSER_SESSIONS: OnceLock<Mutex<HashMap<String, BrowserSession>>> = OnceLock::new();
+#[cfg(not(target_os = "macos"))]
 const NATIVE_BROWSER_WEBVIEW_LABEL: &str = "resonant-browser-native";
 
 #[derive(Debug, Deserialize)]
@@ -63,6 +66,7 @@ pub struct BrowserNativeWebviewRequest {
     pub width: f64,
     pub height: f64,
     #[serde(default)]
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub navigate: bool,
 }
 
@@ -489,6 +493,7 @@ pub fn execute_browser_close_session(
     })
 }
 
+#[cfg(not(target_os = "macos"))]
 pub fn execute_browser_native_webview_show(
     app: &AppHandle,
     request: BrowserNativeWebviewRequest,
@@ -552,6 +557,7 @@ pub fn execute_browser_native_webview_show(
     })
 }
 
+#[cfg(not(target_os = "macos"))]
 pub fn execute_browser_native_webview_resize(
     app: &AppHandle,
     request: BrowserNativeWebviewBoundsRequest,
@@ -574,6 +580,7 @@ pub fn execute_browser_native_webview_resize(
     })
 }
 
+#[cfg(not(target_os = "macos"))]
 pub fn execute_browser_native_webview_hide(
     app: &AppHandle,
 ) -> Result<BrowserNativeWebviewResult, String> {
@@ -612,6 +619,7 @@ fn normalize_browser_url(value: &str) -> Result<String, String> {
     Ok(format!("https://{trimmed}"))
 }
 
+#[cfg(not(target_os = "macos"))]
 fn assert_webview_safe_url(url: &str) -> Result<(), String> {
     let parsed = tauri::Url::parse(url)
         .map_err(|error| format!("Browser URL could not be parsed: {error}"))?;
@@ -622,6 +630,7 @@ fn assert_webview_safe_url(url: &str) -> Result<(), String> {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn normalize_webview_bounds(x: f64, y: f64, width: f64, height: f64) -> (f64, f64, f64, f64) {
     (x.max(0.0), y.max(0.0), width.max(1.0), height.max(1.0))
 }
@@ -1376,6 +1385,32 @@ mod tests {
         let _ = fs::remove_dir_all(root);
 
         assert_eq!(capture.title, "Resonant Browser Engine");
+        assert!(capture.screenshot_base64.len() > 100);
+    }
+
+    #[test]
+    #[ignore = "launches the local Chromium engine and loads the public internet; run explicitly when validating Browser add-on navigation"]
+    fn captures_public_example_dot_com_with_chromium_engine() {
+        let chromium = super::find_chromium_binary()
+            .expect("Chromium engine should be installed for this validation");
+        let root = std::env::temp_dir().join(format!(
+            "resonantos-browser-public-validation-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let (mut browser, ws_url) = super::launch_chromium(&chromium, &root).unwrap();
+        let capture = super::run_cdp_capture(
+            &ws_url,
+            "browser-public-validation",
+            "https://example.com",
+            super::normalize_viewport(Some(1000), Some(760)),
+        )
+        .unwrap();
+        let _ = browser.child.kill();
+        let _ = fs::remove_dir_all(root);
+
+        assert!(capture.final_url.starts_with("https://example.com"));
+        assert!(capture.title.contains("Example Domain"));
         assert!(capture.screenshot_base64.len() > 100);
     }
 

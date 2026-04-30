@@ -98,6 +98,15 @@
     box-shadow: var(--shadow);
   }
 
+  .shell.floating-chat-surface .chat-sidebar.open {
+    position: relative;
+    top: auto;
+    right: auto;
+    width: auto;
+    height: 100%;
+    box-shadow: none;
+  }
+
   .topbar {
     flex-wrap: wrap;
   }
@@ -224,7 +233,10 @@
 	  .agent-heading,
 	  .obsidian-addon-hero,
 		  .browser-addon-panel,
+		  .hermes-addon-head,
+		  .hermes-profile-row,
 			  .browser-addon-grant-box,
+			  .hermes-grant-strip,
 			  .obsidian-vault-controls,
 			  .obsidian-note-actions,
 			  .obsidian-intake-history-head,
@@ -276,6 +288,11 @@
   .chat-sidebar.open {
     width: calc(100vw - 84px);
     max-width: calc(100vw - 84px);
+  }
+
+  .shell.floating-chat-surface .chat-sidebar.open {
+    width: auto;
+    max-width: none;
   }
 
   .message-bubble {

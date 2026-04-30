@@ -3,6 +3,7 @@
 // Intent citation: docs/architecture/ADR-014-system-architecture-memory.md
 
 import type { ArchiveDocumentPayload, ArchiveSearchPageHit, ArchiveSystemMemoryStatus } from "../../core/contracts";
+import type { MemoryProviderBroker } from "../../core/memory-provider";
 import {
   requestArchiveDocument,
   requestArchiveSearch,
@@ -79,7 +80,12 @@ const systemMemoryPageRank = (pageId: string): number => {
   return 0;
 };
 
-export const buildSystemMemoryContextBundle = async (): Promise<SystemMemoryContextBundle | null> => {
+export const buildSystemMemoryContextBundle = async (
+  memoryProvider?: MemoryProviderBroker,
+): Promise<SystemMemoryContextBundle | null> => {
+  if (memoryProvider && !memoryProvider.supports.read) {
+    return null;
+  }
   const failures: string[] = [];
   let status = await requestArchiveSystemMemory();
   if (status.status === "missing" || status.status === "stale") {
@@ -97,7 +103,7 @@ export const buildSystemMemoryContextBundle = async (): Promise<SystemMemoryCont
   const documents = await Promise.all(
     selectedPages.map(async (page) => {
       try {
-        return await requestArchiveDocument(page.filePath);
+        return memoryProvider ? await memoryProvider.read(page.filePath) : await requestArchiveDocument(page.filePath);
       } catch (error) {
         failures.push(error instanceof Error ? error.message : `Failed to read system memory page ${page.filePath}`);
         return null;
@@ -119,13 +125,19 @@ export const buildSystemMemoryContextBundle = async (): Promise<SystemMemoryCont
   };
 };
 
-export const buildArchiveContextBundle = async (message: string): Promise<ArchiveContextBundle | null> => {
+export const buildArchiveContextBundle = async (
+  message: string,
+  memoryProvider?: MemoryProviderBroker,
+): Promise<ArchiveContextBundle | null> => {
+  if (memoryProvider && (!memoryProvider.supports.search || !memoryProvider.supports.read)) {
+    return null;
+  }
   const query = compactQuery(message);
   if (!query) {
     return null;
   }
 
-  const search = await requestArchiveSearch(query, 6);
+  const search = memoryProvider ? await memoryProvider.search(query, 6) : await requestArchiveSearch(query, 6);
   const selectedPages = [...search.pages]
     .sort((left, right) => right.score - left.score || pageRank(right) - pageRank(left))
     .slice(0, MAX_CONTEXT_PAGES);
@@ -134,7 +146,7 @@ export const buildArchiveContextBundle = async (message: string): Promise<Archiv
   const documents: Array<ArchiveDocumentPayload | null> = await Promise.all(
     selectedPages.map(async (page) => {
       try {
-        return await requestArchiveDocument(page.filePath);
+        return memoryProvider ? await memoryProvider.read(page.filePath) : await requestArchiveDocument(page.filePath);
       } catch (error) {
         failures.push(error instanceof Error ? error.message : `Failed to read ${page.filePath}`);
         return null;
