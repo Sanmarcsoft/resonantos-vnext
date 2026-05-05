@@ -141,6 +141,9 @@ Last updated: 2026-05-05
   - standalone Living Archive MCP bridge now exposes scoped status/search/read/intake/ingest-request/review/maintenance/lint tools for external clients, with live `POST /memory/{operation}` proxy mode and portable `ResonantOS_User/Memory` fallback
   - local Living Archive memory service now exposes the V1 `POST /memory/{operation}` contract over loopback for portable status/search/read/intake/review-listing/lint, giving MCP clients a real local endpoint
   - desktop Settings now includes a Memory Bridge launcher backed by Rust IPC, so users can start/stop the local memory service without terminal commands
+  - imported-library manifests can now enter the standard ingest/review/promote path from the Source Registry through `Build AI Memory`; this starts a durable AI Memory build job with persisted status/progress, while imported files remain searchable as raw evidence first and become trusted wiki memory only after the approved promotion path
+  - the Review Desk now reloads durable AI Memory build job summaries after restart, so users can see prior build status, queue pressure, promotion counts, errors, and next action
+  - persisted AI Memory jobs now expose a user-triggered `Continue Build` action that reruns the controlled provider-routed batch from the stored manifest path
 
 - Completed on 2026-04-23:
   - added a real host-mediated archive service in `src-tauri/src/archive_service.rs`
@@ -226,6 +229,7 @@ Last updated: 2026-05-05
   - kept Tauri command behavior unchanged while reducing the main archive service surface
 - Continue Living Archive hardening:
   - run real-data validation against the full ResonantOS Base folder and configured MiniMax/OpenAI routes
+  - add an automatic AI Memory job runner that continues safe build batches from persisted job state across app restarts when explicit auto-sync/provider-cost policy allows it
   - add a dedicated audited execution flow before move-on-import or source reorganisation can move files
   - upgrade the JSONL source-version ledger into local Git-style source history where appropriate
   - expose imported libraries as first-class cards with rescan/sync controls using the host registry

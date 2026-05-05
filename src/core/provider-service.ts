@@ -21,6 +21,68 @@ export type ProviderRouteResolution = {
   executionAdapter?: ProviderExecutionAdapterPolicy;
 };
 
+const ROUTABLE_RUNTIME_HEALTH: ProviderRuntimeNode["healthState"][] = ["ready", "degraded", "deployable"];
+
+const adapterPolicyForRoute = (
+  adapters: ProviderExecutionAdapterPolicy[],
+  provider: ProviderProfile,
+  node: ProviderRuntimeNode,
+): ProviderExecutionAdapterPolicy | undefined =>
+  adapters.find(
+    (adapter) =>
+      adapter.supportedProviderTypes.includes(provider.providerType) &&
+      adapter.supportedRuntimeKinds.includes(node.kind) &&
+      adapter.supportedAuthMethods.includes(provider.authMethod),
+  );
+
+const routeCanServeModel = (
+  state: ResonantShellState,
+  provider: ProviderProfile,
+  node: ProviderRuntimeNode,
+  model: string,
+  allowedRuntimeKinds?: Array<ProviderRuntimeNode["kind"]>,
+): boolean =>
+  provider.status !== "missing" &&
+  node.providerProfileId === provider.id &&
+  (node.kind !== "remote-user-owned" || String(node.endpoint ?? "").startsWith("http")) &&
+  ROUTABLE_RUNTIME_HEALTH.includes(node.healthState) &&
+  (node.healthState !== "deployable" || node.deployableOnDemand) &&
+  (!allowedRuntimeKinds?.length || allowedRuntimeKinds.includes(node.kind)) &&
+  provider.allowedModels.includes(model) &&
+  node.supportedModels.includes(model) &&
+  Boolean(adapterPolicyForRoute(state.providerRouting.executionAdapters, provider, node));
+
+const providerIdsForPreferredModel = (
+  state: ResonantShellState,
+  model: string | undefined,
+  allowedRuntimeKinds?: Array<ProviderRuntimeNode["kind"]>,
+): string[] => {
+  if (!model) {
+    return [];
+  }
+  return state.providers
+    .filter((provider) =>
+      state.runtimeNodes.some((node) => routeCanServeModel(state, provider, node, model, allowedRuntimeKinds)),
+    )
+    .map((provider) => provider.id);
+};
+
+export const selectableAgentChatModels = (
+  state: ResonantShellState,
+  agentId: string,
+): string[] => {
+  const isRecoveryAgent = agentId === state.recoverySession.engineerAgentId;
+  const allowedRuntimeKinds: Array<ProviderRuntimeNode["kind"]> = isRecoveryAgent
+    ? ["local", "cloud", "remote-user-owned"]
+    : ["cloud", "local", "remote-user-owned"];
+  const models = state.providers.flatMap((provider) =>
+    provider.allowedModels.filter((model) =>
+      state.runtimeNodes.some((node) => routeCanServeModel(state, provider, node, model, allowedRuntimeKinds)),
+    ),
+  );
+  return uniqueValues(models);
+};
+
 export const resolveAgentChatRoute = (
   state: ResonantShellState,
   agentId: string,
@@ -146,12 +208,23 @@ const resolveStrategyRoute = (
   },
 ): ProviderRoutingDecision => {
   const strategyRoutes = expandStrategyRoutes(state, strategy);
+  const preferredModelProviderIds = providerIdsForPreferredModel(
+    state,
+    options.preferredModel,
+    options.allowedRuntimeKinds,
+  );
   return resolveProviderRoute(state, {
     consumerId: options.consumerId,
-    allowedProviderProfileIds: uniqueValues(strategyRoutes.map((route) => route.providerProfileId)),
+    allowedProviderProfileIds: uniqueValues([
+      ...strategyRoutes.map((route) => route.providerProfileId),
+      ...preferredModelProviderIds,
+    ]),
     primaryProviderProfileId: strategy.primaryRoute.providerProfileId,
     fallbackProviderProfileId: strategyRoutes.find((route) => route.providerProfileId !== strategy.primaryRoute.providerProfileId)?.providerProfileId,
-    preferredProviderProfileIds: uniqueValues(strategyRoutes.map((route) => route.providerProfileId)),
+    preferredProviderProfileIds: uniqueValues([
+      ...preferredModelProviderIds,
+      ...strategyRoutes.map((route) => route.providerProfileId),
+    ]),
     preferredRuntimeNodeIds: uniqueValues(strategyRoutes.map((route) => route.runtimeNodeId)),
     preferredModels: options.preferredModel
       ? [options.preferredModel, ...uniqueValues(strategyRoutes.map((route) => route.model))]

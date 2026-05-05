@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AddOnManifest, ResonantShellState } from "./contracts";
 import { buildDefaultState } from "./defaults";
-import { normalizeState, rebaseStateOnManifests } from "./runtime";
+import { applyProviderCredentialStatuses, normalizeState, rebaseStateOnManifests } from "./runtime";
 
 describe("runtime state migration", () => {
   it("migrates legacy recovery state onto the Resonant Engineer Agent and Gemma local runtime", () => {
@@ -103,6 +103,113 @@ describe("runtime state migration", () => {
     expect(normalized.conversationThreads.find((thread) => thread.id === "thread-fork-custom")).toBeDefined();
     expect(normalized.uiPreferences.activeChatThreadId).toBe("thread-fork-custom");
     expect(normalized.uiPreferences.pinnedChatThreadIds).toContain("thread-fork-custom");
+  });
+
+  it("preserves user-created provider profiles and runtime nodes during normalization", () => {
+    const base = buildDefaultState([]);
+    const gx10Provider = {
+      ...base.providers.find((provider) => provider.id === "shared-local")!,
+      id: "provider-asus-gx10-test",
+      label: "ASUS GX10",
+      providerType: "openai-compatible" as const,
+      apiBaseUrl: "http://gx10-23bd.local:30000/v1",
+      allowedModels: ["gemma-4-26b-a4b-q4_k_m.gguf"],
+      primaryModel: "gemma-4-26b-a4b-q4_k_m.gguf",
+      fallbackModel: undefined,
+      status: "ready" as const,
+    };
+    const gx10Node = {
+      ...base.runtimeNodes.find((node) => node.id === "node-gx10-qwen")!,
+      id: "node-provider-asus-gx10-test",
+      providerProfileId: gx10Provider.id,
+      endpoint: "http://gx10-23bd.local:30000/v1",
+      supportedModels: ["gemma-4-26b-a4b-q4_k_m.gguf"],
+      healthState: "ready" as const,
+    };
+    const persisted = {
+      ...base,
+      providers: [...base.providers, gx10Provider],
+      runtimeNodes: [...base.runtimeNodes, gx10Node],
+    } satisfies ResonantShellState;
+
+    const normalized = normalizeState(persisted, base);
+
+    expect(normalized.providers.find((provider) => provider.id === gx10Provider.id)?.allowedModels).toEqual([
+      "gemma-4-26b-a4b-q4_k_m.gguf",
+    ]);
+    expect(normalized.runtimeNodes.find((node) => node.id === gx10Node.id)?.supportedModels).toEqual([
+      "gemma-4-26b-a4b-q4_k_m.gguf",
+    ]);
+  });
+
+  it("rebases execution adapter capability contracts from code defaults", () => {
+    const base = buildDefaultState([]);
+    const persisted = {
+      ...base,
+      providerRouting: {
+        ...base.providerRouting,
+        executionAdapters: base.providerRouting.executionAdapters.map((adapter) =>
+          adapter.id === "cloud-openai-compatible"
+            ? {
+                ...adapter,
+                supportedRuntimeKinds: ["cloud" as const],
+                supportedAuthMethods: ["api-key" as const],
+                requiresCredential: true,
+              }
+            : adapter,
+        ),
+      },
+    } satisfies ResonantShellState;
+
+    const normalized = normalizeState(persisted, base);
+    const adapter = normalized.providerRouting.executionAdapters.find((item) => item.id === "cloud-openai-compatible");
+
+    expect(adapter?.supportedRuntimeKinds).toContain("remote-user-owned");
+    expect(adapter?.supportedAuthMethods).toContain("local-runtime");
+    expect(adapter?.requiresCredential).toBe(false);
+  });
+
+  it("treats local-runtime OpenAI-compatible providers as credential-ready without stored secrets", () => {
+    const base = buildDefaultState([]);
+    const provider = {
+      ...base.providers.find((item) => item.id === "shared-local")!,
+      id: "provider-asus-gx10-test",
+      label: "ASUS GX10",
+      providerType: "openai-compatible" as const,
+      authMethod: "local-runtime" as const,
+      credentialStatus: "missing" as const,
+    };
+    const state = {
+      ...base,
+      providers: [...base.providers, provider],
+    } satisfies ResonantShellState;
+
+    const updated = applyProviderCredentialStatuses(state, {});
+
+    expect(updated.providers.find((item) => item.id === provider.id)?.credentialStatus).toBe("configured");
+  });
+
+  it("does not keep stale placeholder GX10 runtime health from older persisted state", () => {
+    const base = buildDefaultState([]);
+    const persisted = {
+      ...base,
+      runtimeNodes: base.runtimeNodes.map((node) =>
+        node.id === "node-gx10-qwen"
+          ? {
+              ...node,
+              endpoint: "gx10://primary-runtime",
+              supportedModels: ["qwen-3.5", "gemma-4"],
+              healthState: "degraded" as const,
+            }
+          : node,
+      ),
+    } satisfies ResonantShellState;
+
+    const normalized = normalizeState(persisted, base);
+    const gx10 = normalized.runtimeNodes.find((node) => node.id === "node-gx10-qwen");
+
+    expect(gx10?.healthState).toBe("unavailable");
+    expect(gx10?.supportedModels).toEqual([]);
   });
 
   it("adds the default workspace layout to older persisted UI preferences", () => {

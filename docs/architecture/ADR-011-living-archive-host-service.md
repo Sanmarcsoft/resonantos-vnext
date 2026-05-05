@@ -223,6 +223,53 @@ The command:
 - treats manifests as archive metadata, not trusted wiki pages
 - does not rescan source content or queue ingest requests
 
+### `archive_queue_imported_library_ingest`
+
+Queues eligible text records from a known imported-library manifest into the normal Living Archive ingest review queue.
+
+The command:
+
+- accepts only imported-library manifests already registered under Living Archive memory-domain metadata roots
+- resolves the manifest through the guarded archive document resolver
+- requires both `archive-read` and `archive-intake-write`
+- queues text-compatible source records from the managed canonical copy, not from the original external folder
+- queues the whole eligible manifest by default; callers may pass a bounded `maxRecords` only for diagnostics or explicit batch tools
+- skips unsupported file classes, missing canonical files, already queued sources, and already processed sources
+- records provenance with `origin = imported-library`, library identity, manifest path, source id, version id, and original path
+- writes review requests only; it does not create or update trusted wiki pages
+
+This command closes the imported-library memory gap: importing a folder makes the sources searchable as raw evidence, while this queue action starts the controlled path that can later produce trusted AI Memory pages through `archive_process_ingest_request`, approval, and `archive_promote_review_artifact`.
+
+### `archive_ai_memory_build_job`
+
+Runs the product-level AI Memory build workflow for an imported library.
+
+The command:
+
+- queues eligible imported-library records through `archive_queue_imported_library_ingest`
+- runs a bounded provider-routed maintenance batch
+- promotes approved review artifacts that have not already been promoted
+- writes a durable job JSON under the review `jobs` root
+- returns user-facing progress: records seen, queued this run, processed this run, promoted this run, queue remaining, review counts, errors, and next action
+- reports explicit status values such as `running`, `needs-review`, `needs-human-review`, `ready-to-promote`, `attention`, and `complete`
+
+This is the default product path for building AI Memory from an imported library. Lower-level queue/process/approve/promote commands remain available for review desk operations, debugging, and add-on integration, but the user-facing flow should prefer this job command.
+
+The Review Desk may continue an existing durable job by calling this command with the job summary's stored `manifestPath`. This continuation is intentionally user-triggered in the first implementation so provider cost, review blockers, and approval state remain visible before another model batch runs.
+
+### `archive_ai_memory_build_jobs`
+
+Lists durable AI Memory build job summaries from the review `jobs` root.
+
+The command:
+
+- restores job visibility after app restart
+- returns only stable product-facing fields, not the full maintenance payload
+- sorts newest jobs first
+- lets the Review Desk show build history, current queue pressure, review blockers, promotion counts, errors, and next action
+
+This command does not continue execution by itself. It is the persistence and visibility layer used by the Review Desk `Continue Build` action. Fully automatic scheduled continuation remains a later runner step.
+
 ### Optional Audio2TOL Add-on Bridge
 
 These commands are an interim host-mediated bridge for the future Audio2TOL add-on. They are not part of the base Living Archive user workflow and the shell must expose them only when `addon.audio2tol` is installed and enabled.

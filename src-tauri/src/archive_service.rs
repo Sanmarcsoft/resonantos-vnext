@@ -283,6 +283,64 @@ pub(crate) struct ArchiveBackgroundCycleResult {
     pub(crate) maintenance: ArchiveMaintenanceCycleResult,
 }
 
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveAiMemoryBuildRequest {
+    pub(crate) manifest_path: String,
+    pub(crate) actor_id: Option<String>,
+    pub(crate) max_queue_records: Option<usize>,
+    pub(crate) maintenance: ArchiveMaintenanceCycleRequest,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveAiMemoryBuildResult {
+    pub(crate) job_id: String,
+    pub(crate) job_file: String,
+    pub(crate) status: String,
+    pub(crate) library_name: String,
+    pub(crate) manifest_path: String,
+    pub(crate) records_seen: usize,
+    pub(crate) queued_this_run: usize,
+    pub(crate) skipped_existing_queue: usize,
+    pub(crate) skipped_processed: usize,
+    pub(crate) skipped_unsupported: usize,
+    pub(crate) skipped_missing: usize,
+    pub(crate) processed_this_run: usize,
+    pub(crate) promoted_this_run: usize,
+    pub(crate) queue_remaining: usize,
+    pub(crate) review_pending: usize,
+    pub(crate) review_approved: usize,
+    pub(crate) review_escalated: usize,
+    pub(crate) review_rejected: usize,
+    pub(crate) errors: Vec<String>,
+    pub(crate) next_action: String,
+    pub(crate) maintenance: ArchiveMaintenanceCycleResult,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveAiMemoryBuildJobSummary {
+    pub(crate) job_id: String,
+    pub(crate) job_file: String,
+    pub(crate) status: String,
+    pub(crate) library_name: String,
+    pub(crate) manifest_path: String,
+    pub(crate) started_at: String,
+    pub(crate) finished_at: Option<String>,
+    pub(crate) records_seen: usize,
+    pub(crate) queued_this_run: usize,
+    pub(crate) processed_this_run: usize,
+    pub(crate) promoted_this_run: usize,
+    pub(crate) queue_remaining: usize,
+    pub(crate) review_pending: usize,
+    pub(crate) review_approved: usize,
+    pub(crate) review_escalated: usize,
+    pub(crate) review_rejected: usize,
+    pub(crate) errors: Vec<String>,
+    pub(crate) next_action: String,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ArchiveWikiNavigationRefreshResult {
@@ -643,6 +701,28 @@ pub(crate) struct ArchiveImportedLibrarySummary {
     pub(crate) obsidian_vault_detected: bool,
     pub(crate) recommended_addon: Option<String>,
     pub(crate) records_count: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveQueueImportedLibraryRequest {
+    pub(crate) manifest_path: String,
+    pub(crate) actor_id: Option<String>,
+    pub(crate) max_records: Option<usize>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ArchiveQueueImportedLibraryResult {
+    pub(crate) manifest_path: String,
+    pub(crate) library_name: String,
+    pub(crate) records_seen: usize,
+    pub(crate) queued: usize,
+    pub(crate) skipped_existing_queue: usize,
+    pub(crate) skipped_processed: usize,
+    pub(crate) skipped_unsupported: usize,
+    pub(crate) skipped_missing: usize,
+    pub(crate) request_files: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -2572,6 +2652,184 @@ pub(crate) fn queue_archive_ingest_request(
     })
 }
 
+fn imported_library_manifest_is_known(
+    runtime: &ArchiveRuntime,
+    manifest_path: &Path,
+) -> Result<Option<ArchiveImportedLibrarySummary>, String> {
+    let normalized = manifest_path
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve imported library manifest: {error}"))?;
+    let mut libraries = Vec::new();
+    for (_, domain_root) in runtime.memory_domain_roots() {
+        collect_imported_library_manifests(&domain_root.join("metadata"), &mut libraries)?;
+    }
+    for library in libraries {
+        let candidate = PathBuf::from(&library.manifest_path)
+            .canonicalize()
+            .map_err(|error| {
+                format!("Failed to resolve known imported library manifest: {error}")
+            })?;
+        if candidate == normalized {
+            return Ok(Some(library));
+        }
+    }
+    Ok(None)
+}
+
+fn text_ingest_source_type(source_type: &str) -> bool {
+    matches!(
+        source_type.to_ascii_lowercase().as_str(),
+        "md" | "markdown"
+            | "txt"
+            | "json"
+            | "csv"
+            | "tsv"
+            | "yaml"
+            | "yml"
+            | "html"
+            | "htm"
+            | "xml"
+            | "log"
+    )
+}
+
+fn queued_source_paths(app: &AppHandle) -> Result<HashSet<String>, String> {
+    Ok(list_archive_ingest_requests(app)?
+        .into_iter()
+        .map(|request| request.source_path)
+        .collect())
+}
+
+fn processed_source_ids(runtime: &ArchiveRuntime) -> Result<HashSet<String>, String> {
+    let mut processed = HashSet::new();
+    let Some(connection) = open_archive_db(runtime)? else {
+        return Ok(processed);
+    };
+    let mut statement = connection
+        .prepare("SELECT id, raw_path FROM sources WHERE processed = 1")
+        .map_err(|error| format!("Failed to prepare processed source query: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|error| format!("Failed to run processed source query: {error}"))?;
+    for row in rows {
+        let (source_id, raw_path) =
+            row.map_err(|error| format!("Invalid processed source query row: {error}"))?;
+        processed.insert(source_id);
+        processed.insert(raw_path);
+    }
+    Ok(processed)
+}
+
+pub(crate) fn queue_imported_library_for_ingest(
+    app: &AppHandle,
+    request: ArchiveQueueImportedLibraryRequest,
+) -> Result<ArchiveQueueImportedLibraryResult, String> {
+    let runtime = ArchiveRuntime::resolve(app)?;
+    let manifest_path = resolve_document_path(&runtime, &request.manifest_path)?;
+    let library =
+        imported_library_manifest_is_known(&runtime, &manifest_path)?.ok_or_else(|| {
+            "Imported library manifest is not registered with this Living Archive.".to_string()
+        })?;
+    let manifest_raw = fs::read_to_string(&manifest_path)
+        .map_err(|error| format!("Failed to read imported library manifest: {error}"))?;
+    let payload = serde_json::from_str::<Value>(&manifest_raw)
+        .map_err(|error| format!("Invalid imported library manifest JSON: {error}"))?;
+    let records = payload
+        .get("records")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let max_records = request.max_records.map(|value| value.clamp(1, 5_000));
+    let actor_id = request
+        .actor_id
+        .unwrap_or_else(|| "strategist.core".to_string());
+    let mut queued_paths = queued_source_paths(app)?;
+    let processed_ids = processed_source_ids(&runtime)?;
+    let mut queued = 0;
+    let mut skipped_existing_queue = 0;
+    let mut skipped_processed = 0;
+    let mut skipped_unsupported = 0;
+    let mut skipped_missing = 0;
+    let mut request_files = Vec::new();
+
+    for (index, record) in records.iter().enumerate() {
+        if let Some(max_records) = max_records {
+            if index >= max_records {
+                break;
+            }
+        }
+        let source_id = record
+            .get("sourceId")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let source_type = record
+            .get("sourceType")
+            .and_then(Value::as_str)
+            .unwrap_or("source");
+        let canonical_path = record
+            .get("canonicalPath")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if canonical_path.is_empty() {
+            skipped_missing += 1;
+            continue;
+        }
+        if !text_ingest_source_type(source_type) {
+            skipped_unsupported += 1;
+            continue;
+        }
+        if queued_paths.contains(canonical_path) {
+            skipped_existing_queue += 1;
+            continue;
+        }
+        if processed_ids.contains(source_id) || processed_ids.contains(canonical_path) {
+            skipped_processed += 1;
+            continue;
+        }
+        if !Path::new(canonical_path).exists() {
+            skipped_missing += 1;
+            continue;
+        }
+
+        let result = queue_archive_ingest_request(
+            app,
+            ArchiveIngestRequestRecord {
+                actor_id: actor_id.clone(),
+                source_path: canonical_path.to_string(),
+                source_type: source_type.to_string(),
+                source_role: Some(library.domain.clone()),
+                intent: "review-and-ingest".to_string(),
+                provenance: Some(json!({
+                    "origin": "imported-library",
+                    "libraryId": library.library_id.clone(),
+                    "libraryName": library.library_name.clone(),
+                    "manifestPath": manifest_path.display().to_string(),
+                    "sourceId": source_id,
+                    "versionId": record.get("versionId").and_then(Value::as_str),
+                    "originalPath": record.get("originalPath").and_then(Value::as_str),
+                })),
+            },
+        )?;
+        queued += 1;
+        queued_paths.insert(canonical_path.to_string());
+        request_files.push(result.request_file);
+    }
+
+    Ok(ArchiveQueueImportedLibraryResult {
+        manifest_path: manifest_path.display().to_string(),
+        library_name: library.library_name,
+        records_seen: records.len(),
+        queued,
+        skipped_existing_queue,
+        skipped_processed,
+        skipped_unsupported,
+        skipped_missing,
+        request_files,
+    })
+}
+
 pub(crate) fn list_archive_ingest_requests(
     app: &AppHandle,
 ) -> Result<Vec<ArchiveQueuedIngestRequest>, String> {
@@ -2638,12 +2896,301 @@ pub(crate) fn list_archive_ingest_requests(
     Ok(entries)
 }
 
+fn review_artifact_has_promotion(
+    runtime: &ArchiveRuntime,
+    artifact_file: &str,
+) -> Result<bool, String> {
+    let artifact_path = resolve_document_path(runtime, artifact_file)?;
+    let raw = fs::read_to_string(&artifact_path)
+        .map_err(|error| format!("Failed to read archive review artifact: {error}"))?;
+    let payload = serde_json::from_str::<Value>(&raw)
+        .map_err(|error| format!("Invalid archive review artifact JSON: {error}"))?;
+    Ok(payload
+        .get("promotion")
+        .and_then(|value| value.get("status"))
+        .and_then(Value::as_str)
+        == Some("promoted"))
+}
+
+fn build_job_status(
+    queue_remaining: usize,
+    review_pending: usize,
+    review_approved: usize,
+    review_escalated: usize,
+    errors: &[String],
+) -> (String, String) {
+    if !errors.is_empty() {
+        return (
+            "attention".to_string(),
+            "Review build errors before continuing AI Memory processing.".to_string(),
+        );
+    }
+    if review_escalated > 0 {
+        return (
+            "needs-human-review".to_string(),
+            "Review escalated artifacts before they can become trusted AI Memory.".to_string(),
+        );
+    }
+    if review_pending > 0 {
+        return (
+            "needs-review".to_string(),
+            "Review pending artifacts or run maintenance with verifier approval enabled."
+                .to_string(),
+        );
+    }
+    if review_approved > 0 {
+        return (
+            "ready-to-promote".to_string(),
+            "Promote approved artifacts to trusted wiki memory.".to_string(),
+        );
+    }
+    if queue_remaining > 0 {
+        return (
+            "running".to_string(),
+            "Continue the AI Memory build to process the remaining queued sources.".to_string(),
+        );
+    }
+    (
+        "complete".to_string(),
+        "AI Memory build has no queued or pending review work remaining.".to_string(),
+    )
+}
+
+fn archive_ai_memory_jobs_root(runtime: &ArchiveRuntime) -> PathBuf {
+    runtime.review_queue_root().join("jobs")
+}
+
+fn value_string(payload: &Value, key: &str) -> String {
+    payload
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn value_usize(payload: &Value, key: &str) -> usize {
+    payload
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or_default()
+}
+
+fn read_archive_ai_memory_build_job_summary(
+    job_file: PathBuf,
+) -> Result<ArchiveAiMemoryBuildJobSummary, String> {
+    let raw = fs::read_to_string(&job_file)
+        .map_err(|error| format!("Failed to read archive AI Memory build job: {error}"))?;
+    let payload = serde_json::from_str::<Value>(&raw)
+        .map_err(|error| format!("Invalid archive AI Memory build job JSON: {error}"))?;
+    let errors = payload
+        .get("errors")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let started_at = payload
+        .get("maintenance")
+        .and_then(|maintenance| maintenance.get("startedAt"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .unwrap_or_else(|| {
+            value_string(&payload, "jobId")
+                .rsplit_once("-unix-")
+                .map(|(_, suffix)| format!("unix:{suffix}"))
+                .unwrap_or_default()
+        });
+    let finished_at = payload
+        .get("maintenance")
+        .and_then(|maintenance| maintenance.get("finishedAt"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+
+    Ok(ArchiveAiMemoryBuildJobSummary {
+        job_id: value_string(&payload, "jobId"),
+        job_file: job_file.display().to_string(),
+        status: value_string(&payload, "status"),
+        library_name: value_string(&payload, "libraryName"),
+        manifest_path: value_string(&payload, "manifestPath"),
+        started_at,
+        finished_at,
+        records_seen: value_usize(&payload, "recordsSeen"),
+        queued_this_run: value_usize(&payload, "queuedThisRun"),
+        processed_this_run: value_usize(&payload, "processedThisRun"),
+        promoted_this_run: value_usize(&payload, "promotedThisRun"),
+        queue_remaining: value_usize(&payload, "queueRemaining"),
+        review_pending: value_usize(&payload, "reviewPending"),
+        review_approved: value_usize(&payload, "reviewApproved"),
+        review_escalated: value_usize(&payload, "reviewEscalated"),
+        review_rejected: value_usize(&payload, "reviewRejected"),
+        errors,
+        next_action: value_string(&payload, "nextAction"),
+    })
+}
+
+pub(crate) fn list_archive_ai_memory_build_jobs(
+    app: &AppHandle,
+) -> Result<Vec<ArchiveAiMemoryBuildJobSummary>, String> {
+    let runtime = ArchiveRuntime::resolve(app)?;
+    let jobs_root = archive_ai_memory_jobs_root(&runtime);
+    if !jobs_root.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut jobs = Vec::new();
+    for entry in fs::read_dir(&jobs_root)
+        .map_err(|error| format!("Failed to read archive AI Memory build jobs: {error}"))?
+    {
+        let entry = entry.map_err(|error| {
+            format!("Failed to read archive AI Memory build job entry: {error}")
+        })?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        jobs.push(read_archive_ai_memory_build_job_summary(path)?);
+    }
+
+    jobs.sort_by(|left, right| {
+        right
+            .started_at
+            .cmp(&left.started_at)
+            .then_with(|| right.job_id.cmp(&left.job_id))
+    });
+    Ok(jobs)
+}
+
+pub(crate) async fn run_archive_ai_memory_build_job(
+    app: &AppHandle,
+    request: ArchiveAiMemoryBuildRequest,
+) -> Result<ArchiveAiMemoryBuildResult, String> {
+    let runtime = ArchiveRuntime::resolve(app)?;
+    let started_at = unix_timestamp();
+    let queue_result = queue_imported_library_for_ingest(
+        app,
+        ArchiveQueueImportedLibraryRequest {
+            manifest_path: request.manifest_path,
+            actor_id: request.actor_id.clone(),
+            max_records: request.max_queue_records,
+        },
+    )?;
+
+    let mut maintenance = run_archive_maintenance_cycle(app, request.maintenance).await?;
+    let promoted_from_existing = list_archive_review_artifacts(app)?
+        .into_iter()
+        .filter(|artifact| artifact.decision.status == "approved")
+        .filter(|artifact| {
+            !review_artifact_has_promotion(&runtime, &artifact.artifact_file).unwrap_or(false)
+        })
+        .filter_map(|artifact| {
+            match promote_archive_review_artifact(
+                app,
+                ArchivePromoteReviewArtifactRequest {
+                    artifact_file: artifact.artifact_file,
+                    actor_id: request
+                        .actor_id
+                        .clone()
+                        .unwrap_or_else(|| "archive-build.ai".to_string()),
+                },
+            ) {
+                Ok(result) => Some(result),
+                Err(error) => {
+                    maintenance
+                        .errors
+                        .push(format!("Failed to promote approved artifact: {error}"));
+                    None
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+    maintenance.promoted.extend(promoted_from_existing);
+
+    let queue = list_archive_ingest_requests(app)?;
+    let artifacts = list_archive_review_artifacts(app)?;
+    let review_pending = artifacts
+        .iter()
+        .filter(|artifact| artifact.decision.status == "pending")
+        .count();
+    let review_approved = artifacts
+        .iter()
+        .filter(|artifact| {
+            artifact.decision.status == "approved"
+                && !review_artifact_has_promotion(&runtime, &artifact.artifact_file)
+                    .unwrap_or(false)
+        })
+        .count();
+    let review_escalated = artifacts
+        .iter()
+        .filter(|artifact| artifact.decision.status == "escalated")
+        .count();
+    let review_rejected = artifacts
+        .iter()
+        .filter(|artifact| artifact.decision.status == "rejected")
+        .count();
+    let (status, next_action) = build_job_status(
+        queue.len(),
+        review_pending,
+        review_approved,
+        review_escalated,
+        &maintenance.errors,
+    );
+
+    let job_id = format!(
+        "{}-{}",
+        slugify(&queue_result.library_name),
+        started_at.replace(':', "-")
+    );
+    let jobs_root = archive_ai_memory_jobs_root(&runtime);
+    fs::create_dir_all(&jobs_root)
+        .map_err(|error| format!("Failed to create archive build job root: {error}"))?;
+    let job_file = jobs_root.join(format!("{job_id}.json"));
+
+    let result = ArchiveAiMemoryBuildResult {
+        job_id,
+        job_file: job_file.display().to_string(),
+        status,
+        library_name: queue_result.library_name,
+        manifest_path: queue_result.manifest_path,
+        records_seen: queue_result.records_seen,
+        queued_this_run: queue_result.queued,
+        skipped_existing_queue: queue_result.skipped_existing_queue,
+        skipped_processed: queue_result.skipped_processed,
+        skipped_unsupported: queue_result.skipped_unsupported,
+        skipped_missing: queue_result.skipped_missing,
+        processed_this_run: maintenance.processed.len(),
+        promoted_this_run: maintenance.promoted.len(),
+        queue_remaining: queue.len(),
+        review_pending,
+        review_approved,
+        review_escalated,
+        review_rejected,
+        errors: maintenance.errors.clone(),
+        next_action,
+        maintenance,
+    };
+
+    fs::write(
+        &job_file,
+        serde_json::to_string_pretty(&result)
+            .map_err(|error| format!("Failed to encode archive build job: {error}"))?,
+    )
+    .map_err(|error| format!("Failed to write archive build job: {error}"))?;
+
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{evaluate_approval_tier, render_promoted_page, slugify, wiki_page_subdir};
     use super::{
         parse_semantic_lint_findings, render_archive_index_markdown, render_archive_log_markdown,
     };
+    use super::{read_archive_ai_memory_build_job_summary, unix_timestamp};
     use super::{upsert_promoted_page_index, PromotedPageIndexInput};
     use super::{ArchiveWikiNavigationLogEntry, ArchiveWikiNavigationPage};
     use rusqlite::{params, Connection};
@@ -2715,6 +3262,54 @@ mod tests {
         );
         assert!(log.contains("# Living Archive Log"));
         assert!(log.contains("trusted_wiki_promote | augmentatism"));
+    }
+
+    #[test]
+    fn reads_persisted_ai_memory_build_job_summary() {
+        let root = std::env::temp_dir().join(format!(
+            "resonantos-ai-memory-job-test-{}",
+            unix_timestamp().replace(':', "-")
+        ));
+        fs::create_dir_all(&root).expect("test job root should be created");
+        let job_file = root.join("resonant-os-base-unix-10.json");
+        fs::write(
+            &job_file,
+            serde_json::to_string_pretty(&json!({
+                "jobId": "resonant-os-base-unix-10",
+                "status": "running",
+                "libraryName": "RESONANT_OS_BASE",
+                "manifestPath": "/tmp/resonant-os-base-manifest.json",
+                "recordsSeen": 1454,
+                "queuedThisRun": 6,
+                "processedThisRun": 6,
+                "promotedThisRun": 4,
+                "queueRemaining": 1448,
+                "reviewPending": 0,
+                "reviewApproved": 0,
+                "reviewEscalated": 0,
+                "reviewRejected": 0,
+                "errors": [],
+                "nextAction": "Continue the AI Memory build.",
+                "maintenance": {
+                    "startedAt": "unix:10",
+                    "finishedAt": "unix:12"
+                }
+            }))
+            .expect("test job JSON should encode"),
+        )
+        .expect("test job JSON should write");
+
+        let summary = read_archive_ai_memory_build_job_summary(job_file)
+            .expect("test job summary should parse");
+
+        assert_eq!(summary.job_id, "resonant-os-base-unix-10");
+        assert_eq!(summary.library_name, "RESONANT_OS_BASE");
+        assert_eq!(summary.started_at, "unix:10");
+        assert_eq!(summary.finished_at.as_deref(), Some("unix:12"));
+        assert_eq!(summary.records_seen, 1454);
+        assert_eq!(summary.queue_remaining, 1448);
+        assert_eq!(summary.next_action, "Continue the AI Memory build.");
+        fs::remove_dir_all(root).expect("test job root should be removed");
     }
 
     #[test]

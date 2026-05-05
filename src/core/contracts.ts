@@ -873,6 +873,18 @@ export interface ArchiveImportedLibrarySummary {
   recordsCount: number;
 }
 
+export interface ArchiveQueueImportedLibraryResult {
+  manifestPath: string;
+  libraryName: string;
+  recordsSeen: number;
+  queued: number;
+  skippedExistingQueue: number;
+  skippedProcessed: number;
+  skippedUnsupported: number;
+  skippedMissing: number;
+  requestFiles: string[];
+}
+
 export interface ArchiveLibraryClassificationReview {
   artifactType: string;
   createdAt: string;
@@ -1049,6 +1061,51 @@ export interface ArchiveBackgroundCycleResult {
   queuedRequestFiles: string[];
   skippedQueueSources: string[];
   maintenance: ArchiveMaintenanceCycleResult;
+}
+
+export interface ArchiveAiMemoryBuildResult {
+  jobId: string;
+  jobFile: string;
+  status: "running" | "needs-review" | "needs-human-review" | "ready-to-promote" | "attention" | "complete" | string;
+  libraryName: string;
+  manifestPath: string;
+  recordsSeen: number;
+  queuedThisRun: number;
+  skippedExistingQueue: number;
+  skippedProcessed: number;
+  skippedUnsupported: number;
+  skippedMissing: number;
+  processedThisRun: number;
+  promotedThisRun: number;
+  queueRemaining: number;
+  reviewPending: number;
+  reviewApproved: number;
+  reviewEscalated: number;
+  reviewRejected: number;
+  errors: string[];
+  nextAction: string;
+  maintenance: ArchiveMaintenanceCycleResult;
+}
+
+export interface ArchiveAiMemoryBuildJobSummary {
+  jobId: string;
+  jobFile: string;
+  status: "running" | "needs-review" | "needs-human-review" | "ready-to-promote" | "attention" | "complete" | string;
+  libraryName: string;
+  manifestPath: string;
+  startedAt: string;
+  finishedAt?: string;
+  recordsSeen: number;
+  queuedThisRun: number;
+  processedThisRun: number;
+  promotedThisRun: number;
+  queueRemaining: number;
+  reviewPending: number;
+  reviewApproved: number;
+  reviewEscalated: number;
+  reviewRejected: number;
+  errors: string[];
+  nextAction: string;
 }
 
 export interface ArchiveWikiNavigationRefreshResult {

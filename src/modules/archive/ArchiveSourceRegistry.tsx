@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import type {
+  ArchiveAiMemoryBuildResult,
   ArchiveImportedLibrarySummary,
   ArchiveRuntimeStatus,
   ArchiveSourceFolderScanResult,
@@ -14,9 +15,11 @@ type ArchiveSourceRegistryProps = {
   archiveSourceScanBusy: boolean;
   archiveSourceScanResult: ArchiveSourceFolderScanResult | null;
   archiveImportedLibraries: ArchiveImportedLibrarySummary[];
+  archiveAiMemoryBuildResult: ArchiveAiMemoryBuildResult | null;
   onRefreshArchiveSourceRegistry: () => void;
   onScanSourceFolders: (rootPath?: string) => void;
   onOpenClassificationReview: (classificationManifestPath: string) => void;
+  onQueueImportedLibraryForIngest: (manifestPath: string) => void;
 };
 
 const domainLabel = (domain: string): string => {
@@ -39,9 +42,11 @@ export function ArchiveSourceRegistry({
   archiveSourceScanBusy,
   archiveSourceScanResult,
   archiveImportedLibraries,
+  archiveAiMemoryBuildResult,
   onRefreshArchiveSourceRegistry,
   onScanSourceFolders,
   onOpenClassificationReview,
+  onQueueImportedLibraryForIngest,
 }: ArchiveSourceRegistryProps) {
   const [selectedSourceRoot, setSelectedSourceRoot] = useState("");
   const sourceRoots = archiveStatus?.sourceRoots ?? [];
@@ -199,8 +204,26 @@ export function ArchiveSourceRegistry({
                     <span>{library.classificationStatus}</span>
                     {library.obsidianVaultDetected ? <span>Obsidian vault</span> : <span>Obsidian-compatible</span>}
                   </div>
+                  {archiveAiMemoryBuildResult?.manifestPath === library.manifestPath ? (
+                    <div className="archive-maintenance-summary" role="status">
+                      <strong>AI Memory build: {archiveAiMemoryBuildResult.status}</strong>
+                      <p>
+                        {archiveAiMemoryBuildResult.queuedThisRun} queued · {archiveAiMemoryBuildResult.processedThisRun} processed ·{" "}
+                        {archiveAiMemoryBuildResult.promotedThisRun} promoted · {archiveAiMemoryBuildResult.queueRemaining} remaining
+                      </p>
+                      <p>{archiveAiMemoryBuildResult.nextAction}</p>
+                    </div>
+                  ) : null}
                   {library.classificationManifestPath ? (
                     <div className="toolbar">
+                      <button
+                        type="button"
+                        className="button-primary"
+                        onClick={() => onQueueImportedLibraryForIngest(library.manifestPath)}
+                        disabled={archiveSourceScanBusy}
+                      >
+                        Build AI Memory
+                      </button>
                       <button
                         type="button"
                         className="button-secondary"

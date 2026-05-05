@@ -146,7 +146,7 @@ Each setup template must express:
 - provider type and auth method
 - default endpoint when known
 - whether a secret or base URL is required
-- starter model list
+- optional starter model list only when the template refers to a documented cloud model catalog
 - initial provider status
 - initial runtime node health
 - execution state:
@@ -161,11 +161,12 @@ The Engineer/setup path must verify provider setup through provider-owned or run
 
 - OpenAI and OpenAI-compatible cloud/gateway routes use `GET /v1/models` with the saved credential.
 - OpenAI-compatible gateways use their documented base URL plus `/models`.
+- llama.cpp `llama-server` and other user-owned OpenAI-compatible LAN runtimes use `GET /v1/models` without a credential unless the user configured one.
 - Ollama uses `GET /api/tags` against the selected local runtime endpoint.
 - User-owned LAN runtimes such as GX10/DGX-class machines must start as non-routable placeholders until setup discovers a real HTTP runtime endpoint.
-- LAN runtime setup may try the configured endpoint, known local host aliases, and bounded local subnet discovery for Ollama `/api/tags`; routing is enabled only after a real model-list response.
+- LAN runtime setup may try the configured endpoint, known local host aliases, and bounded local subnet discovery for OpenAI-compatible `/v1/models` and Ollama `/api/tags`; routing is enabled only after a real model-list response.
 - Unsupported native providers may be saved as profiles, but the probe must return `adapter-pending` instead of inventing a model list.
-- The setup probe may update provider model lists only from discovery responses. Catalog starter models are hints, not proof of availability.
+- The setup probe may update provider model lists only from discovery responses. User-owned runtime templates must not expose guessed model names in routable selectors.
 
 ### Fallback Policy
 

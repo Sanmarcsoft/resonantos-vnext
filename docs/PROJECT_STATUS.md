@@ -40,18 +40,19 @@ The shell direction is a three-zone app:
 
 The latest deterministic check completed with:
 
-- `npm test -- --run`: 146 passed
+- `npm test -- --run`: 163 passed
 - `npm run test:living-archive-mcp`: passed
 - `npm run test:living-archive-memory-service`: passed
 - `npm run build`: passed
 - `cargo fmt --check`: passed
-- `cargo test --quiet`: 91 passed, 3 ignored
+- `cargo test`: 98 passed, 3 ignored
 - `git diff --check`: passed
+- `npm run tauri:build`: passed on macOS aarch64 and produced `ResonantOS.app` plus `ResonantOS_0.1.0_aarch64.dmg`
 
 Known validation notes:
 
 - Vite still reports the existing large chunk warning.
-- `npm run tauri:build` was not rerun after the latest Living Archive completion pass; run it before packaging a new alpha artifact.
+- The current macOS package build is locally verified; cross-platform packaging still depends on CI/tech-team machines.
 - Linux x86_64 Haswell local native packaging is partially blocked in one tech-team test by a rustc 1.95 / LLVM compiler ICE while compiling the GTK dependency path. The repo now pins Rust `1.94.1` for alpha builds; retest Linux native packaging through rustup-managed `1.94.1` before treating the failure as ResonantOS source breakage.
 
 This status document records that result as the current worktree checkpoint. Re-run the same commands before tagging a release or merging a large follow-up.
@@ -84,6 +85,7 @@ Release scope:
 Known limits for reviewers:
 
 - Living Archive import is safe-copy oriented; move/reorganisation execution is intentionally blocked
+- Living Archive AI Memory builds now persist job summaries, restore them in the Review Desk, and support user-triggered `Continue Build`; automatic background continuation across app restarts is not complete yet
 - add-ons are catalog entries and are not installed or trusted by default; the basic default catalog now exposes only recommended Augmentor Chat and Living Archive contracts
 - Browser, Obsidian, OpenCode, and Terminal add-ons are early foundations, not complete production integrations
 - Paperclip is now specified in `ADR-028` as a future optional organizational runtime add-on; development connector code exists, but it is excluded from the public default catalog until explicitly released
@@ -138,7 +140,8 @@ Known limits for reviewers:
 - Local runtimes are represented as provider runtime nodes.
 - Provider diagnostics and smoke-test paths exist.
 - Routing distinguishes normal provider use from recovery/resurrect behavior.
-- Cost-aware strategy is now recognized as a product requirement, but the full policy UI is not built.
+- The Strategy settings page now exposes editable workload routes, fallback chains, hard-stop vs fallback behavior, and cost posture labels for primary chat, recovery, archive ingest, and routine/background work.
+- User-owned LAN runtimes remain non-routable placeholders until setup discovers a real model-list endpoint; verified LAN runtimes can participate in strategy/fallback routing before the desktop emergency floor.
 
 ### Paperclip Add-on Direction
 
@@ -213,6 +216,7 @@ Current Living Archive status:
 - The Living Archive workspace is now guided by default: the first screen is a short import-oriented start page, with Review, Sources, Search, Help, and Advanced panels behind tabs instead of rendering every subsystem at once.
 - The Help tab owns explanatory copy; the default Start tab should stay action-oriented and avoid long reading blocks.
 - The Start tab now shows a persistent Current Memory overview when imported libraries already exist, including managed memory location, domain map, imported/skipped counts, and the latest canonical library path. The importer stays hidden until the user imports another folder.
+- Imported-library cards now expose `Build AI Memory`, which starts a durable AI Memory build job. The job queues eligible managed text sources, runs a bounded provider-routed maintenance batch, promotes approved artifacts, persists job state, and reports progress/status back to the user. Imported sources remain raw evidence until processed, approved, and promoted; this keeps the LLM Wiki trust boundary intact while making the promotion path visible and usable.
 - Reorganisation plans can be generated as preview-only artifacts.
 - Reorganisation plans are explicitly marked `eligibleForExecution = false`.
 - Actual file moves are not implemented and should not be added without audit, rollback, approval, and tests.
@@ -355,9 +359,9 @@ Treat this as active current state. If committing, review the full diff first be
 
 ### Provider Strategy
 
-- Cost-aware provider strategy UI.
-- User-defined fallback ladder editor.
-- Per-agent model policies that include price, latency, quality, subscription availability, and local runtime availability.
+- Strategy UX is implemented as a first editable policy surface for workload primary routes, fallback-chain selection, failure behavior, and cost posture.
+- User-defined creation/reordering of fallback chains is not complete; current UX edits the existing strategy profile and chains.
+- Per-agent/workload model policies include cost posture, locality, quality intent, subscription/local availability, and hard-stop/fallback behavior at the route level, but need richer explanatory guidance and history.
 - Provider health history.
 - Automatic route switching with clear user-visible explanation.
 - Complete Anthropic, Gemini, OpenAI, and additional local runtime support.
@@ -421,6 +425,6 @@ Treat this as active current state. If committing, review the full diff first be
 
 1. Review and commit the current hardening/refactor work if the diff is acceptable.
 2. Finish the Living Archive audited reorganisation design before building execution UI.
-3. Add cost-aware provider strategy and fallback ladder UX.
+3. Extend provider strategy from editing existing chains to creating/reordering named fallback chains with user-facing cost estimates.
 4. Continue app-shell simplification toward the launcher/workspace/chat model.
 5. Add cross-platform validation and code-splitting work before the UI grows further.

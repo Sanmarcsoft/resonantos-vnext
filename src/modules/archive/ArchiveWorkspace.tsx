@@ -4,6 +4,8 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   ArchiveDocumentPayload,
+  ArchiveAiMemoryBuildJobSummary,
+  ArchiveAiMemoryBuildResult,
   ArchiveImportedLibrarySummary,
   ArchiveLibraryClassificationReview,
   ArchiveLibraryReorganisationPlan,
@@ -60,6 +62,8 @@ type ArchiveWorkspaceProps = {
   archiveReviewDecisionResult: ArchiveReviewDecisionResult | null;
   archivePromotionResult: ArchivePromoteReviewArtifactResult | null;
   archiveMaintenanceResult: ArchiveMaintenanceCycleResult | null;
+  archiveAiMemoryBuildResult: ArchiveAiMemoryBuildResult | null;
+  archiveAiMemoryBuildJobs: ArchiveAiMemoryBuildJobSummary[];
   archiveLintResult: ArchiveLintResult | null;
   archiveSemanticLintResult: ArchiveSemanticLintResult | null;
   archiveTolBundles: ArchiveTolBundleCandidate[];
@@ -90,6 +94,7 @@ type ArchiveWorkspaceProps = {
   onAskAugmentorAboutPreflight: (report: ArchiveLibraryPreflightResult) => void;
   onOpenClassificationReview: (classificationManifestPath: string) => void;
   onGenerateReorganisationPlan: (classificationManifestPath: string) => void;
+  onQueueImportedLibraryForIngest: (manifestPath: string) => void;
   onImportLibrary: (input: {
     sourcePath: string;
     domain: ArchiveMemoryDomain;
@@ -127,6 +132,8 @@ export function ArchiveWorkspace({
   archiveReviewDecisionResult,
   archivePromotionResult,
   archiveMaintenanceResult,
+  archiveAiMemoryBuildResult,
+  archiveAiMemoryBuildJobs,
   archiveLintResult,
   archiveSemanticLintResult,
   archiveTolBundles,
@@ -152,6 +159,7 @@ export function ArchiveWorkspace({
   onAskAugmentorAboutPreflight,
   onOpenClassificationReview,
   onGenerateReorganisationPlan,
+  onQueueImportedLibraryForIngest,
   onImportLibrary,
   onQueueWatchedSource,
   onProcessArchiveRequest,
@@ -319,6 +327,8 @@ export function ArchiveWorkspace({
             archiveReviewDecisionResult={archiveReviewDecisionResult}
             archivePromotionResult={archivePromotionResult}
             archiveMaintenanceResult={archiveMaintenanceResult}
+            archiveAiMemoryBuildResult={archiveAiMemoryBuildResult}
+            archiveAiMemoryBuildJobs={archiveAiMemoryBuildJobs}
             autoMaintenanceEnabled={autoMaintenanceEnabled}
             onRefreshArchiveQueue={onRefreshArchiveQueue}
             onProcessArchiveRequest={onProcessArchiveRequest}
@@ -328,6 +338,7 @@ export function ArchiveWorkspace({
             onPromoteReviewArtifact={onPromoteReviewArtifact}
             onToggleAutoMaintenance={() => setAutoMaintenanceEnabled((current) => !current)}
             onRunArchiveMaintenance={onRunArchiveMaintenance}
+            onContinueAiMemoryBuild={onQueueImportedLibraryForIngest}
           />
           {archiveClassificationReview ? (
             <ArchiveClassificationReviewPanel
@@ -357,9 +368,11 @@ export function ArchiveWorkspace({
             archiveSourceScanBusy={archiveSourceScanBusy}
             archiveSourceScanResult={archiveSourceScanResult}
             archiveImportedLibraries={archiveImportedLibraries}
+            archiveAiMemoryBuildResult={archiveAiMemoryBuildResult}
             onRefreshArchiveSourceRegistry={onRefreshArchiveSourceRegistry}
             onScanSourceFolders={onScanSourceFolders}
             onOpenClassificationReview={onOpenClassificationReview}
+            onQueueImportedLibraryForIngest={onQueueImportedLibraryForIngest}
           />
           {archiveClassificationReview ? (
             <ArchiveClassificationReviewPanel

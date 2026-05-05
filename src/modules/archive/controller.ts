@@ -4,6 +4,8 @@
 import type { Dispatch, SetStateAction } from "react";
 import type {
   AddOnManifest,
+  ArchiveAiMemoryBuildJobSummary,
+  ArchiveAiMemoryBuildResult,
   ArchiveBackgroundCycleResult,
   ArchiveDocumentPayload,
   ArchiveImportedLibrarySummary,
@@ -35,9 +37,12 @@ import type {
 import type { MemoryProviderBroker } from "../../core/memory-provider";
 import { livingArchiveMemoryProvider } from "../../core/memory-provider";
 import { applyProviderDiagnostics } from "../../core/policies";
+import { providerCredentialReady } from "../../core/provider-credentials";
 import { resolveArchiveIngestRoute, resolveRoutineRoute, routedProviderLabel } from "../../core/provider-service";
 import {
   requestArchiveBuildTolBundle,
+  requestArchiveAiMemoryBuildJob,
+  requestArchiveAiMemoryBuildJobs,
   requestArchiveBackgroundCycle,
   requestArchiveIngestProbe,
   requestArchiveImportedLibraries,
@@ -45,6 +50,7 @@ import {
   requestArchiveLibraryClassificationReview,
   requestArchiveLibraryImport,
   requestArchiveLint,
+  requestArchiveQueueImportedLibraryIngest,
   requestArchiveSemanticLint,
   requestArchiveLibraryPreflight,
   requestArchiveLibraryReorganisationPlan,
@@ -185,6 +191,15 @@ type ArchiveLibraryReorganisationPlanControllerInput = {
   errorMessageOf: (error: unknown, fallback: string) => string;
 };
 
+type ArchiveQueueImportedLibraryControllerInput = {
+  manifestPath: string;
+  setChatNotice: Dispatch<SetStateAction<string | null>>;
+  setArchiveQueueBusy: Dispatch<SetStateAction<boolean>>;
+  setArchiveQueue: Dispatch<SetStateAction<ArchiveQueuedIngestRequest[]>>;
+  setArchiveReviewArtifacts?: Dispatch<SetStateAction<ArchiveReviewArtifact[]>>;
+  errorMessageOf: (error: unknown, fallback: string) => string;
+};
+
 type ArchiveProcessRequestControllerInput = {
   snapshot: ReadyShellSnapshot;
   requestFile: string;
@@ -235,6 +250,30 @@ type ArchiveMaintenanceCycleControllerInput = {
   setArchiveProcessResult: Dispatch<SetStateAction<ArchiveProcessIngestResult | null>>;
   setArchivePromotionResult: Dispatch<SetStateAction<ArchivePromoteReviewArtifactResult | null>>;
   setArchiveMaintenanceResult: Dispatch<SetStateAction<ArchiveMaintenanceCycleResult | null>>;
+  errorMessageOf: (error: unknown, fallback: string) => string;
+};
+
+type ArchiveAiMemoryBuildJobControllerInput = {
+  snapshot: ReadyShellSnapshot;
+  manifestPath: string;
+  commitReadyState: (state: ResonantShellState) => void;
+  setProviderDiagnostics: Dispatch<SetStateAction<ProviderDiagnosticReport[]>>;
+  setChatNotice: Dispatch<SetStateAction<string | null>>;
+  setArchiveQueueBusy: Dispatch<SetStateAction<boolean>>;
+  setArchiveQueue: Dispatch<SetStateAction<ArchiveQueuedIngestRequest[]>>;
+  setArchiveReviewArtifacts: Dispatch<SetStateAction<ArchiveReviewArtifact[]>>;
+  setArchiveProcessResult: Dispatch<SetStateAction<ArchiveProcessIngestResult | null>>;
+  setArchivePromotionResult: Dispatch<SetStateAction<ArchivePromoteReviewArtifactResult | null>>;
+  setArchiveMaintenanceResult: Dispatch<SetStateAction<ArchiveMaintenanceCycleResult | null>>;
+  setArchiveAiMemoryBuildResult: Dispatch<SetStateAction<ArchiveAiMemoryBuildResult | null>>;
+  setArchiveAiMemoryBuildJobs: Dispatch<SetStateAction<ArchiveAiMemoryBuildJobSummary[]>>;
+  errorMessageOf: (error: unknown, fallback: string) => string;
+};
+
+type ArchiveAiMemoryBuildJobsControllerInput = {
+  setChatNotice: Dispatch<SetStateAction<string | null>>;
+  setArchiveQueueBusy: Dispatch<SetStateAction<boolean>>;
+  setArchiveAiMemoryBuildJobs: Dispatch<SetStateAction<ArchiveAiMemoryBuildJobSummary[]>>;
   errorMessageOf: (error: unknown, fallback: string) => string;
 };
 
@@ -391,6 +430,23 @@ export const loadArchiveReviewQueue = async ({
     setArchiveReviewArtifacts?.(artifacts);
   } catch (error) {
     setChatNotice(errorMessageOf(error, "Failed to load archive review queue."));
+  } finally {
+    setArchiveQueueBusy(false);
+  }
+};
+
+export const loadArchiveAiMemoryBuildJobs = async ({
+  setChatNotice,
+  setArchiveQueueBusy,
+  setArchiveAiMemoryBuildJobs,
+  errorMessageOf,
+}: ArchiveAiMemoryBuildJobsControllerInput): Promise<void> => {
+  setArchiveQueueBusy(true);
+  setChatNotice(null);
+  try {
+    setArchiveAiMemoryBuildJobs(await requestArchiveAiMemoryBuildJobs());
+  } catch (error) {
+    setChatNotice(errorMessageOf(error, "Failed to load AI Memory build jobs."));
   } finally {
     setArchiveQueueBusy(false);
   }
@@ -588,6 +644,34 @@ export const generateArchiveLibraryReorganisationPlan = async ({
   }
 };
 
+export const queueImportedLibraryForIngest = async ({
+  manifestPath,
+  setChatNotice,
+  setArchiveQueueBusy,
+  setArchiveQueue,
+  setArchiveReviewArtifacts,
+  errorMessageOf,
+}: ArchiveQueueImportedLibraryControllerInput): Promise<void> => {
+  setArchiveQueueBusy(true);
+  setChatNotice(null);
+  try {
+    const result = await requestArchiveQueueImportedLibraryIngest({
+      manifestPath,
+      actorId: "strategist.core",
+    });
+    const [queue, artifacts] = await Promise.all([requestArchiveReviewQueue(), requestArchiveReviewArtifacts()]);
+    setArchiveQueue(queue);
+    setArchiveReviewArtifacts?.(artifacts);
+    setChatNotice(
+      `Queued ${result.queued} source file(s) from ${result.libraryName} for AI Memory review. ${result.skippedUnsupported} unsupported and ${result.skippedExistingQueue} already queued were skipped.`,
+    );
+  } catch (error) {
+    setChatNotice(errorMessageOf(error, "Failed to queue imported library for AI Memory review."));
+  } finally {
+    setArchiveQueueBusy(false);
+  }
+};
+
 export const pickArchiveLibraryFolder = async ({
   setChatNotice,
   errorMessageOf,
@@ -604,8 +688,8 @@ export const pickArchiveLibraryFolder = async ({
   }
 };
 
-const credentialReady = (provider: { providerType: string; credentialStatus?: string; label: string }): void => {
-  if (provider.providerType !== "local" && provider.credentialStatus !== "configured") {
+const credentialReady = (provider: { providerType: string; authMethod: string; credentialStatus?: string; label: string }): void => {
+  if (!providerCredentialReady(provider)) {
     throw new Error(`${provider.label} credential missing. Add it in Settings > Provider Profiles.`);
   }
 };
@@ -827,6 +911,87 @@ export const runArchiveMaintenanceCycle = async ({
   }
 };
 
+export const runArchiveAiMemoryBuildJob = async ({
+  snapshot,
+  manifestPath,
+  commitReadyState,
+  setProviderDiagnostics,
+  setChatNotice,
+  setArchiveQueueBusy,
+  setArchiveQueue,
+  setArchiveReviewArtifacts,
+  setArchiveProcessResult,
+  setArchivePromotionResult,
+  setArchiveMaintenanceResult,
+  setArchiveAiMemoryBuildResult,
+  setArchiveAiMemoryBuildJobs,
+  errorMessageOf,
+}: ArchiveAiMemoryBuildJobControllerInput): Promise<void> => {
+  const { state } = snapshot;
+
+  setArchiveQueueBusy(true);
+  setChatNotice("Starting AI Memory build. ResonantOS will queue imported sources, process a safe batch, and report progress.");
+  try {
+    let routedState = state;
+    try {
+      const reports = await requestProviderDiagnostics();
+      setProviderDiagnostics(reports);
+      routedState = applyProviderDiagnostics(state, reports);
+      commitReadyState(routedState);
+    } catch {
+      routedState = state;
+    }
+
+    const route = resolveArchiveIngestRoute(routedState);
+    const provider = route.provider;
+    const runtimeNode = route.runtimeNode;
+    if (!provider || !runtimeNode || !route.model) {
+      throw new Error(
+        route.decision.resolutionReason === "no-viable-route"
+          ? "No live archive ingest route is currently available under the agreed strategy."
+          : "Archive AI Memory build route is missing provider or runtime details.",
+      );
+    }
+    credentialReady(provider);
+    const verifier = verifierRouteInput(routedState);
+
+    const result = await requestArchiveAiMemoryBuildJob({
+      manifestPath,
+      actorId: "strategist.core",
+      maintenance: {
+        providerId: provider.id,
+        providerType: provider.providerType,
+        apiBaseUrl: runtimeNode.endpoint ?? provider.apiBaseUrl,
+        runtimeNodeId: runtimeNode.id,
+        runtimeNodeKind: runtimeNode.kind,
+        runtimeNodeEndpoint: runtimeNode.endpoint,
+        authTier: route.decision.authTier,
+        model: route.model,
+        ...verifier,
+        maxRequests: 6,
+        autoPromote: true,
+        actorId: "archive-build.ai",
+      },
+    });
+
+    const [queue, artifacts] = await Promise.all([requestArchiveReviewQueue(), requestArchiveReviewArtifacts()]);
+    setArchiveQueue(queue);
+    setArchiveReviewArtifacts(artifacts);
+    setArchiveMaintenanceResult(result.maintenance);
+    setArchiveProcessResult(result.maintenance.processed.at(-1) ?? null);
+    setArchivePromotionResult(result.maintenance.promoted.at(-1) ?? null);
+    setArchiveAiMemoryBuildResult(result);
+    setArchiveAiMemoryBuildJobs(await requestArchiveAiMemoryBuildJobs());
+    setChatNotice(
+      `AI Memory build ${result.status}: ${result.queuedThisRun} queued, ${result.processedThisRun} processed, ${result.promotedThisRun} promoted, ${result.queueRemaining} remaining.`,
+    );
+  } catch (error) {
+    setChatNotice(errorMessageOf(error, "Failed to run the AI Memory build job."));
+  } finally {
+    setArchiveQueueBusy(false);
+  }
+};
+
 export const runArchiveBackgroundCycle = async ({
   snapshot,
   memoryProvider = livingArchiveMemoryProvider(),
@@ -962,7 +1127,7 @@ export const runArchiveSemanticLint = async ({
           : "Archive semantic lint route is missing provider or runtime details.",
       );
     }
-    if (provider.providerType !== "local" && provider.credentialStatus !== "configured") {
+    if (!providerCredentialReady(provider)) {
       throw new Error(`${provider.label} credential missing. Add it in Settings > Provider Profiles.`);
     }
 
@@ -1072,7 +1237,7 @@ export const executeArchiveIngestProbe = async ({
           : "Archive ingest route is missing provider or runtime details.",
       );
     }
-    if (provider.providerType !== "local" && provider.credentialStatus !== "configured") {
+    if (!providerCredentialReady(provider)) {
       throw new Error(`${provider.label} credential missing. Add it in Settings > Provider Profiles.`);
     }
 

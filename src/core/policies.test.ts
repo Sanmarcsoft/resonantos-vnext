@@ -209,4 +209,38 @@ describe("provider defaults", () => {
     expect(updated.providers.find((provider) => provider.id === "shared-minimax")?.credentialStatus).toBe("missing");
     expect(updated.runtimeNodes.find((node) => node.id === "node-minimax-cloud")?.healthState).toBe("unavailable");
   });
+
+  it("keeps local-runtime OpenAI-compatible providers credential-ready after diagnostics", () => {
+    const state = buildDefaultState([]);
+    const provider = {
+      ...state.providers.find((item) => item.id === "shared-local")!,
+      id: "provider-asus-gx10-test",
+      label: "ASUS GX10",
+      providerType: "openai-compatible" as const,
+      authMethod: "local-runtime" as const,
+      credentialStatus: "configured" as const,
+      status: "ready" as const,
+    };
+    const updated = applyProviderDiagnostics(
+      { ...state, providers: [...state.providers, provider] },
+      [
+        {
+          providerId: provider.id,
+          providerLabel: provider.label,
+          providerType: provider.providerType,
+          authMethod: provider.authMethod,
+          authTier: provider.authTier,
+          executionAdapter: "cloud-openai-compatible",
+          credentialConfigured: false,
+          status: "healthy",
+          summary: "LAN runtime responded.",
+          checkedAt: "unix:1",
+          primaryModel: provider.primaryModel,
+          runtimeDiagnostics: [],
+        },
+      ],
+    );
+
+    expect(updated.providers.find((item) => item.id === provider.id)?.credentialStatus).toBe("configured");
+  });
 });

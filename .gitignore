@@ -21,6 +21,7 @@ Living_Archive/
 
 # Development-only add-on manifests excluded from the current public catalog
 public/addons/paperclip.json
+public/addons/*.local-test-backup-*
 
 # Secrets and local environment
 .env

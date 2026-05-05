@@ -22,6 +22,7 @@ import {
   updateConversationMessage,
 } from "../../core/chat";
 import { applyProviderDiagnostics } from "../../core/policies";
+import { providerCredentialReady } from "../../core/provider-credentials";
 import { resolveMemoryProviderBroker } from "../../core/memory-provider";
 import { resolveAgentChatRoute } from "../../core/provider-service";
 import {
@@ -206,7 +207,7 @@ export const executeChatTurn = async ({
       if (!engineerProvider || !engineerRuntimeNode || !engineerRoute.model) {
         throw new Error("No routed provider node is currently available for the delegated Engineer task.");
       }
-      if (engineerProvider.credentialStatus !== "configured") {
+      if (!providerCredentialReady(engineerProvider)) {
         throw new Error(`${engineerProvider.label} credential missing. Add it in Settings > Provider Profiles.`);
       }
       const engineerTargetModel =
@@ -387,7 +388,7 @@ export const executeChatTurn = async ({
           : "No routed provider node is currently available for Strategist chat.",
       );
     }
-    if (provider.credentialStatus !== "configured") {
+    if (!providerCredentialReady(provider)) {
       throw new Error(`${provider.label} credential missing. Add it in Settings > Provider Profiles.`);
     }
     const routedModel = route.model;
@@ -455,7 +456,12 @@ export const executeChatTurn = async ({
             activeRuntimeKind: runtimeNode.kind,
             localRuntimeStatus: runtimeStatusForPrompt,
           })
-        : strategistSystemPrompt(routedState, [...snapshot.bundled, ...snapshot.sideloaded]);
+        : strategistSystemPrompt(routedState, [...snapshot.bundled, ...snapshot.sideloaded], {
+            activeModel: route.model,
+            activeProviderLabel: provider.label,
+            activeRouteLabel: runtimeNode.label,
+            activeRuntimeKind: runtimeNode.kind,
+          });
 
     const recoveryAgentActive = activeThread.owningAgentId === routedState.recoverySession.engineerAgentId;
     const memoryProvider = resolveMemoryProviderBroker(routedState, [...snapshot.bundled, ...snapshot.sideloaded]);

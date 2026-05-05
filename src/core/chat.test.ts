@@ -215,4 +215,18 @@ describe("chat transcript ledger", () => {
     expect(prompt).not.toContain("Enabled add-on operating skills");
     expect(prompt).not.toContain("Design and create an approved Paperclip organizational structure.");
   });
+
+  it("adds authoritative route and model context to the Strategist prompt", () => {
+    const state = buildDefaultState([]);
+
+    const prompt = strategistSystemPrompt(state, [], {
+      activeModel: "gemma-4-26b-a4b-q4_k_m.gguf",
+      activeProviderLabel: "ASUS GX10",
+      activeRouteLabel: "ASUS GX10 Runtime",
+      activeRuntimeKind: "remote-user-owned",
+    });
+
+    expect(prompt).toContain("Current active model for this reply: gemma-4-26b-a4b-q4_k_m.gguf.");
+    expect(prompt).toContain("If the user asks which AI model you are running on");
+  });
 });

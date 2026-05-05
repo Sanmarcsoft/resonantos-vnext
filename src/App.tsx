@@ -5,6 +5,8 @@ import { Suspense, lazy, startTransition, useDeferredValue, useEffect, useRef, u
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type {
   AddOnManifest,
+  ArchiveAiMemoryBuildJobSummary,
+  ArchiveAiMemoryBuildResult,
   ArchiveBackgroundCycleResult,
   ArchiveDocumentPayload,
   ArchiveImportedLibrarySummary,
@@ -69,6 +71,7 @@ import {
   decideArchiveReviewArtifact,
   generateArchiveLibraryReorganisationPlan,
   importArchiveLibrary,
+  loadArchiveAiMemoryBuildJobs,
   loadArchiveLibraryClassificationReview,
   loadArchiveImportedLibraries,
   loadArchiveTolBundles,
@@ -81,6 +84,7 @@ import {
   promoteArchiveReviewArtifact,
   queueArchiveSourceForIngest,
   queueWatchedArchiveSourceForIngest,
+  runArchiveAiMemoryBuildJob,
   runArchiveBackgroundCycle,
   runArchiveLint,
   runArchiveSemanticLint,
@@ -129,7 +133,12 @@ import {
   loadRecoveryRuntimeSnapshot,
   markFirstRunRecommendedAddOnsReviewed,
 } from "./modules/shell/controller";
-import { buildShellViewModel, channelAllowedByOwningAddon, resolveActiveProviderForSelection } from "./modules/shell/selectors";
+import {
+  buildShellViewModel,
+  channelAllowedByOwningAddon,
+  resolveActiveProviderForSelection,
+  resolveSelectableChatModelsForSelection,
+} from "./modules/shell/selectors";
 import {
   activeSystemSlotProvider,
   hasSystemSlotManifest,
@@ -313,6 +322,8 @@ export function App() {
   const [archiveReviewDecisionResult, setArchiveReviewDecisionResult] = useState<ArchiveReviewDecisionResult | null>(null);
   const [archivePromotionResult, setArchivePromotionResult] = useState<ArchivePromoteReviewArtifactResult | null>(null);
   const [archiveMaintenanceResult, setArchiveMaintenanceResult] = useState<ArchiveMaintenanceCycleResult | null>(null);
+  const [archiveAiMemoryBuildResult, setArchiveAiMemoryBuildResult] = useState<ArchiveAiMemoryBuildResult | null>(null);
+  const [archiveAiMemoryBuildJobs, setArchiveAiMemoryBuildJobs] = useState<ArchiveAiMemoryBuildJobSummary[]>([]);
   const [archiveBackgroundResult, setArchiveBackgroundResult] = useState<ArchiveBackgroundCycleResult | null>(null);
   const [archiveLintResult, setArchiveLintResult] = useState<ArchiveLintResult | null>(null);
   const [archiveSemanticLintResult, setArchiveSemanticLintResult] = useState<ArchiveSemanticLintResult | null>(null);
@@ -342,6 +353,11 @@ export function App() {
     selectedChatModel,
     loadState.phase === "ready" ? loadState.state.uiPreferences.activeChatThreadId : undefined,
   );
+  const selectableChatModelsForSelection = resolveSelectableChatModelsForSelection(
+    loadState.phase === "ready" ? loadState.state : null,
+    loadState.phase === "ready" ? loadState.state.uiPreferences.activeChatThreadId : undefined,
+  );
+  const selectableChatModelKey = selectableChatModelsForSelection.join("\u0000");
 
   useEffect(() => {
     void (async () => {
@@ -409,13 +425,17 @@ export function App() {
   }, [loadState]);
 
   useEffect(() => {
-    if (!activeProviderForSelection) {
+    if (!activeProviderForSelection || selectableChatModelsForSelection.length === 0) {
       return;
     }
-    if (!selectedChatModel || !activeProviderForSelection.allowedModels.includes(selectedChatModel)) {
-      setSelectedChatModel(activeProviderForSelection.primaryModel);
+    if (!selectedChatModel || !selectableChatModelsForSelection.includes(selectedChatModel)) {
+      setSelectedChatModel(
+        selectableChatModelsForSelection.includes(activeProviderForSelection.primaryModel)
+          ? activeProviderForSelection.primaryModel
+          : selectableChatModelsForSelection[0],
+      );
     }
-  }, [activeProviderForSelection, selectedChatModel]);
+  }, [activeProviderForSelection, selectableChatModelKey, selectedChatModel]);
 
   useEffect(() => {
     if (loadState.phase !== "ready" || !loadState.state.recoverySession.active) {
@@ -596,6 +616,7 @@ export function App() {
     activeProvider,
     activeRuntimeNode,
     activeChatModel,
+    selectableChatModels,
     strategistRecoveryActive,
     contextBudget,
     contextUsageRatio,
@@ -843,6 +864,12 @@ export function App() {
       setArchiveReviewArtifacts,
       errorMessageOf,
     });
+    await loadArchiveAiMemoryBuildJobs({
+      setChatNotice,
+      setArchiveQueueBusy,
+      setArchiveAiMemoryBuildJobs,
+      errorMessageOf,
+    });
   };
 
   const runArchiveSearch = async (query: string) => {
@@ -934,6 +961,25 @@ export function App() {
       setChatNotice,
       setArchiveSourceScanBusy,
       setArchiveReorganisationPlan,
+      errorMessageOf,
+    });
+  };
+
+  const queueImportedLibraryIngest = async (manifestPath: string) => {
+    await runArchiveAiMemoryBuildJob({
+      snapshot: { state, bundled, sideloaded },
+      manifestPath,
+      commitReadyState,
+      setProviderDiagnostics,
+      setChatNotice,
+      setArchiveQueueBusy,
+      setArchiveQueue,
+      setArchiveReviewArtifacts,
+      setArchiveProcessResult,
+      setArchivePromotionResult,
+      setArchiveMaintenanceResult,
+      setArchiveAiMemoryBuildResult,
+      setArchiveAiMemoryBuildJobs,
       errorMessageOf,
     });
   };
@@ -1860,6 +1906,8 @@ export function App() {
                 archiveReviewDecisionResult={archiveReviewDecisionResult}
                 archivePromotionResult={archivePromotionResult}
                 archiveMaintenanceResult={archiveMaintenanceResult}
+                archiveAiMemoryBuildResult={archiveAiMemoryBuildResult}
+                archiveAiMemoryBuildJobs={archiveAiMemoryBuildJobs}
                 archiveLintResult={archiveLintResult}
                 archiveSemanticLintResult={archiveSemanticLintResult}
                 archiveTolBundles={archiveTolBundles}
@@ -1885,6 +1933,7 @@ export function App() {
                 onAskAugmentorAboutPreflight={(report) => void startArchivePreflightAugmentorSession(report)}
                 onOpenClassificationReview={(classificationManifestPath) => void openArchiveClassificationReview(classificationManifestPath)}
                 onGenerateReorganisationPlan={(classificationManifestPath) => void runArchiveReorganisationPlan(classificationManifestPath)}
+                onQueueImportedLibraryForIngest={(manifestPath) => void queueImportedLibraryIngest(manifestPath)}
                 onImportLibrary={(input) => void runArchiveLibraryImport(input)}
                 onQueueWatchedSource={(source) => void queueWatchedArchiveSource(source)}
                 onProcessArchiveRequest={(requestFile) => void runArchiveQueuedRequest(requestFile)}
@@ -2166,7 +2215,7 @@ export function App() {
         dictating={dictating}
         dictationAvailable={dictationAvailable}
         activeChatModel={activeChatModel}
-        availableModels={activeProvider?.allowedModels ?? []}
+        availableModels={selectableChatModels.length ? selectableChatModels : activeProvider?.allowedModels ?? []}
         thinkingDepth={thinkingDepth}
         contextUsageLabel={contextUsageLabel}
         contextUsageRatio={contextUsageRatio}

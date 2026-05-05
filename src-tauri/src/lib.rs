@@ -23,24 +23,28 @@ use tauri::{AppHandle, Emitter, Window};
 
 use crate::archive_service::{
     archive_system_memory_status, build_archive_tol_bundle, decide_archive_review_artifact,
-    import_archive_library, lint_archive, list_archive_ingest_requests,
-    list_archive_review_artifacts, list_archive_tol_bundle_candidates,
-    list_imported_archive_libraries, preflight_archive_library_import,
-    process_archive_ingest_request, promote_archive_review_artifact, query_archive_runtime_status,
-    queue_archive_ingest_request, read_archive_document,
+    import_archive_library, lint_archive, list_archive_ai_memory_build_jobs,
+    list_archive_ingest_requests, list_archive_review_artifacts,
+    list_archive_tol_bundle_candidates, list_imported_archive_libraries,
+    preflight_archive_library_import, process_archive_ingest_request,
+    promote_archive_review_artifact, query_archive_runtime_status, queue_archive_ingest_request,
+    queue_imported_library_for_ingest, read_archive_document,
     read_archive_library_classification_review, refresh_archive_system_memory,
-    refresh_archive_wiki_navigation, run_archive_background_cycle, run_archive_maintenance_cycle,
-    scan_archive_source_folders, search_archive, semantic_lint_archive,
-    write_archive_intake_artifact, write_archive_library_reorganisation_plan,
-    ArchiveBackgroundCycleRequest, ArchiveBackgroundCycleResult, ArchiveDocumentPayload,
-    ArchiveImportedLibrarySummary, ArchiveIngestRequestRecord, ArchiveIngestRequestResult,
-    ArchiveIntakeWriteRequest, ArchiveIntakeWriteResult, ArchiveLibraryClassificationReview,
+    refresh_archive_wiki_navigation, run_archive_ai_memory_build_job, run_archive_background_cycle,
+    run_archive_maintenance_cycle, scan_archive_source_folders, search_archive,
+    semantic_lint_archive, write_archive_intake_artifact,
+    write_archive_library_reorganisation_plan, ArchiveAiMemoryBuildJobSummary,
+    ArchiveAiMemoryBuildRequest, ArchiveAiMemoryBuildResult, ArchiveBackgroundCycleRequest,
+    ArchiveBackgroundCycleResult, ArchiveDocumentPayload, ArchiveImportedLibrarySummary,
+    ArchiveIngestRequestRecord, ArchiveIngestRequestResult, ArchiveIntakeWriteRequest,
+    ArchiveIntakeWriteResult, ArchiveLibraryClassificationReview,
     ArchiveLibraryClassificationReviewRequest, ArchiveLibraryImportRequest,
     ArchiveLibraryImportResult, ArchiveLibraryPreflightRequest, ArchiveLibraryPreflightResult,
     ArchiveLibraryReorganisationPlan, ArchiveLibraryReorganisationPlanRequest, ArchiveLintResult,
     ArchiveMaintenanceCycleRequest, ArchiveMaintenanceCycleResult, ArchiveProcessIngestRequest,
     ArchiveProcessIngestResult, ArchivePromoteReviewArtifactRequest,
-    ArchivePromoteReviewArtifactResult, ArchiveQueuedIngestRequest, ArchiveReadDocumentRequest,
+    ArchivePromoteReviewArtifactResult, ArchiveQueueImportedLibraryRequest,
+    ArchiveQueueImportedLibraryResult, ArchiveQueuedIngestRequest, ArchiveReadDocumentRequest,
     ArchiveReviewArtifact, ArchiveReviewDecisionRequest, ArchiveReviewDecisionResult,
     ArchiveRuntimeStatus, ArchiveSearchRequest, ArchiveSearchResult, ArchiveSemanticLintRequest,
     ArchiveSemanticLintResult, ArchiveSourceFolderScanRequest, ArchiveSourceFolderScanResult,
@@ -825,6 +829,15 @@ fn archive_request_ingest(
 }
 
 #[tauri::command]
+fn archive_queue_imported_library_ingest(
+    app: AppHandle,
+    request: ArchiveQueueImportedLibraryRequest,
+) -> Result<ArchiveQueueImportedLibraryResult, String> {
+    assert_living_archive_host_access(&app, &["archive-read", "archive-intake-write"])?;
+    queue_imported_library_for_ingest(&app, request)
+}
+
+#[tauri::command]
 fn archive_review_queue(app: AppHandle) -> Result<Vec<ArchiveQueuedIngestRequest>, String> {
     assert_living_archive_host_access(&app, &["archive-read"])?;
     list_archive_ingest_requests(&app)
@@ -867,6 +880,31 @@ async fn archive_maintenance_cycle(
 ) -> Result<ArchiveMaintenanceCycleResult, String> {
     assert_living_archive_host_access(&app, &["archive-read", "providers", "filesystem"])?;
     run_archive_maintenance_cycle(&app, request).await
+}
+
+#[tauri::command]
+async fn archive_ai_memory_build_job(
+    app: AppHandle,
+    request: ArchiveAiMemoryBuildRequest,
+) -> Result<ArchiveAiMemoryBuildResult, String> {
+    assert_living_archive_host_access(
+        &app,
+        &[
+            "archive-read",
+            "archive-intake-write",
+            "providers",
+            "filesystem",
+        ],
+    )?;
+    run_archive_ai_memory_build_job(&app, request).await
+}
+
+#[tauri::command]
+fn archive_ai_memory_build_jobs(
+    app: AppHandle,
+) -> Result<Vec<ArchiveAiMemoryBuildJobSummary>, String> {
+    assert_living_archive_host_access(&app, &["archive-read"])?;
+    list_archive_ai_memory_build_jobs(&app)
 }
 
 #[tauri::command]
@@ -1205,12 +1243,15 @@ pub fn run() {
             terminal_stop_pty,
             archive_write_intake_artifact,
             archive_request_ingest,
+            archive_queue_imported_library_ingest,
             archive_review_queue,
             archive_review_artifacts,
             archive_tol_bundle_candidates,
             archive_build_tol_bundle,
             archive_process_ingest_request,
             archive_maintenance_cycle,
+            archive_ai_memory_build_job,
+            archive_ai_memory_build_jobs,
             archive_background_cycle,
             archive_review_decision,
             archive_promote_review_artifact,

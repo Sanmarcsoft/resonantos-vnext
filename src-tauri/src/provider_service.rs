@@ -439,9 +439,15 @@ fn resolve_provider_execution_adapter(
     runtime_node_kind: Option<&str>,
 ) -> Result<ProviderExecutionAdapter, String> {
     match runtime_node_kind.unwrap_or("cloud") {
+        "local" if provider_type == "openai-compatible" => {
+            Ok(ProviderExecutionAdapter::CloudOpenAiCompatible)
+        }
         "local" => Ok(ProviderExecutionAdapter::LocalOllama),
         "remote-user-owned" if provider_type == "local" => {
             Ok(ProviderExecutionAdapter::LocalOllama)
+        }
+        "remote-user-owned" if provider_type == "openai-compatible" => {
+            Ok(ProviderExecutionAdapter::CloudOpenAiCompatible)
         }
         "cloud" => match provider_type {
             "minimax" => Ok(ProviderExecutionAdapter::CloudMiniMaxCompatible),
@@ -632,8 +638,44 @@ async fn fetch_ollama_tags(
     Ok((endpoint, extract_ollama_tag_model_ids(&payload)))
 }
 
+async fn fetch_openai_compatible_models(
+    client: &reqwest::Client,
+    base_url: &str,
+    api_key: Option<&str>,
+) -> Result<(String, Vec<String>), String> {
+    let endpoint = models_endpoint_for_openai_compatible(base_url);
+    let mut builder = client
+        .get(&endpoint)
+        .header("Content-Type", "application/json");
+    if let Some(key) = api_key.filter(|key| !key.trim().is_empty()) {
+        builder = builder.bearer_auth(key);
+    }
+    let response = builder.send().await.map_err(|error| {
+        format!("Failed to reach OpenAI-compatible model list at `{endpoint}`: {error}")
+    })?;
+    let status = response.status();
+    let payload = response.json::<Value>().await.map_err(|error| {
+        format!("Failed to decode OpenAI-compatible model list from `{endpoint}`: {error}")
+    })?;
+    if !status.is_success() {
+        return Err(format!(
+            "OpenAI-compatible model discovery failed with HTTP {status} at `{endpoint}`."
+        ));
+    }
+    Ok((endpoint, extract_openai_compatible_model_ids(&payload)))
+}
+
 fn normalized_ollama_base_url(url: &str) -> String {
     url.trim_end_matches('/').to_string()
+}
+
+fn normalized_openai_compatible_base_url(url: &str) -> String {
+    let trimmed = url.trim_end_matches('/');
+    if trimmed.ends_with("/v1") {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/v1")
+    }
 }
 
 fn push_unique_url(urls: &mut Vec<String>, url: String) {
@@ -644,6 +686,14 @@ fn push_unique_url(urls: &mut Vec<String>, url: String) {
 }
 
 fn local_subnet_ollama_candidates() -> Vec<String> {
+    local_subnet_http_candidates(11434, false)
+}
+
+fn local_subnet_openai_compatible_candidates() -> Vec<String> {
+    local_subnet_http_candidates(30000, true)
+}
+
+fn local_subnet_http_candidates(port: u16, openai_compatible: bool) -> Vec<String> {
     let socket = match UdpSocket::bind("0.0.0.0:0") {
         Ok(socket) => socket,
         Err(_) => return Vec::new(),
@@ -662,10 +712,21 @@ fn local_subnet_ollama_candidates() -> Vec<String> {
             if candidate == local_ip {
                 None
             } else {
-                Some(format!("http://{candidate}:11434"))
+                let base = format!("http://{candidate}:{port}");
+                Some(if openai_compatible {
+                    normalized_openai_compatible_base_url(&base)
+                } else {
+                    base
+                })
             }
         })
         .collect()
+}
+
+fn base_url_with_port(url: &str, port: u16) -> Option<String> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let host = parsed.host_str()?;
+    Some(format!("{}://{}:{port}", parsed.scheme(), host))
 }
 
 fn remote_ollama_discovery_candidates(configured_base_url: &str) -> Vec<String> {
@@ -680,6 +741,85 @@ fn remote_ollama_discovery_candidates(configured_base_url: &str) -> Vec<String> 
         push_unique_url(&mut urls, host.to_string());
     }
     urls
+}
+
+fn remote_openai_compatible_discovery_candidates(configured_base_url: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    push_unique_url(
+        &mut urls,
+        normalized_openai_compatible_base_url(configured_base_url),
+    );
+    if let Some(same_host) = base_url_with_port(configured_base_url, 30000) {
+        push_unique_url(&mut urls, normalized_openai_compatible_base_url(&same_host));
+    }
+    for host in [
+        "http://gx10.local:30000",
+        "http://asus-gx10.local:30000",
+        "http://dgx-spark.local:30000",
+        "http://gx10-23bd.local:30000",
+    ] {
+        push_unique_url(&mut urls, normalized_openai_compatible_base_url(host));
+    }
+    urls
+}
+
+async fn discover_remote_openai_compatible_runtime(
+    configured_base_url: &str,
+) -> Result<(String, Vec<String>, String), String> {
+    let fixed_client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(1_250))
+        .build()
+        .map_err(|error| format!("Failed to build HTTP client: {error}"))?;
+    let mut failures = Vec::new();
+    for candidate in remote_openai_compatible_discovery_candidates(configured_base_url) {
+        match fetch_openai_compatible_models(&fixed_client, &candidate, None).await {
+            Ok((endpoint, models)) if !models.is_empty() => {
+                return Ok((
+                    candidate,
+                    models,
+                    format!("Discovered llama-server/OpenAI-compatible runtime via `{endpoint}`."),
+                ));
+            }
+            Ok((endpoint, _)) => failures.push(format!("{endpoint}: no models returned")),
+            Err(error) => failures.push(error),
+        }
+    }
+
+    let scan_client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(320))
+        .build()
+        .map_err(|error| format!("Failed to build HTTP client: {error}"))?;
+    let mut scans = stream::iter(local_subnet_openai_compatible_candidates().into_iter().map(
+        |candidate| {
+            let client = scan_client.clone();
+            async move {
+                let result = fetch_openai_compatible_models(&client, &candidate, None).await;
+                (candidate, result)
+            }
+        },
+    ))
+    .buffer_unordered(48);
+
+    while let Some((candidate, result)) = scans.next().await {
+        match result {
+            Ok((endpoint, models)) if !models.is_empty() => {
+                return Ok((
+                    candidate,
+                    models,
+                    format!(
+                        "Discovered llama-server/OpenAI-compatible runtime via LAN scan at `{endpoint}`."
+                    ),
+                ));
+            }
+            Ok((endpoint, _)) => failures.push(format!("{endpoint}: no models returned")),
+            Err(_) => {}
+        }
+    }
+
+    Err(format!(
+        "No OpenAI-compatible llama-server runtime with models was discovered. Tried configured endpoint, common host aliases, port 30000, and the local /24 subnet. First failures: {}",
+        failures.into_iter().take(3).collect::<Vec<_>>().join(" | ")
+    ))
 }
 
 async fn discover_remote_ollama_runtime(
@@ -1275,9 +1415,10 @@ async fn execute_cloud_provider_service_chat_with_usage(
     app: &AppHandle,
     request: &ProviderServiceChatRequest,
 ) -> Result<ProviderServiceChatResponse, String> {
-    let api_key = resolve_provider_secret(app, &request.provider_id)?.ok_or_else(|| {
-        "No provider secret is configured for this Strategist profile.".to_string()
-    })?;
+    let api_key = resolve_provider_secret(app, &request.provider_id)?;
+    if api_key.is_none() && request.runtime_node_kind.as_deref() == Some("cloud") {
+        return Err("No provider secret is configured for this Strategist profile.".to_string());
+    }
 
     let base_url = resolve_provider_base_url(
         &request.provider_type,
@@ -1289,22 +1430,29 @@ async fn execute_cloud_provider_service_chat_with_usage(
         request_messages_with_system_prompt(&request.system_prompt, request.messages.clone());
 
     let client = reqwest::Client::new();
-    let response = client
+    let mut builder = client
         .post(format!(
             "{}/chat/completions",
             base_url.trim_end_matches('/')
         ))
-        .bearer_auth(api_key)
-        .header("Content-Type", "application/json")
+        .header("Content-Type", "application/json");
+    if let Some(key) = api_key {
+        builder = builder.bearer_auth(key);
+    }
+    let response = builder
         .json(&match request.provider_type.as_str() {
             "minimax" => json!({
                 "model": request.model,
                 "messages": request_messages
             }),
-            _ => json!({
+            "openai" => json!({
                 "model": request.model,
                 "messages": request_messages,
                 "reasoning_effort": request.reasoning_effort
+            }),
+            _ => json!({
+                "model": request.model,
+                "messages": request_messages
             }),
         })
         .send()
@@ -1398,9 +1546,10 @@ async fn execute_cloud_provider_service_chat_stream(
     window: &Window,
     request: &ProviderServiceChatStreamRequest,
 ) -> Result<String, String> {
-    let api_key = resolve_provider_secret(app, &request.provider_id)?.ok_or_else(|| {
-        "No provider secret is configured for this Strategist profile.".to_string()
-    })?;
+    let api_key = resolve_provider_secret(app, &request.provider_id)?;
+    if api_key.is_none() && request.runtime_node_kind.as_deref() == Some("cloud") {
+        return Err("No provider secret is configured for this Strategist profile.".to_string());
+    }
     let base_url = resolve_provider_base_url(
         &request.provider_type,
         request.api_base_url.clone(),
@@ -1417,7 +1566,7 @@ async fn execute_cloud_provider_service_chat_stream(
                 "include_usage": true
             }
         }),
-        _ => json!({
+        "openai" => json!({
             "model": request.model,
             "messages": request_messages,
             "reasoning_effort": request.reasoning_effort,
@@ -1426,15 +1575,26 @@ async fn execute_cloud_provider_service_chat_stream(
                 "include_usage": true
             }
         }),
+        _ => json!({
+            "model": request.model,
+            "messages": request_messages,
+            "stream": true,
+            "stream_options": {
+                "include_usage": true
+            }
+        }),
     };
 
-    let response = reqwest::Client::new()
+    let mut builder = reqwest::Client::new()
         .post(format!(
             "{}/chat/completions",
             base_url.trim_end_matches('/')
         ))
-        .bearer_auth(api_key)
-        .header("Content-Type", "application/json")
+        .header("Content-Type", "application/json");
+    if let Some(key) = api_key {
+        builder = builder.bearer_auth(key);
+    }
+    let response = builder
         .json(&body)
         .send()
         .await
@@ -1730,7 +1890,29 @@ pub(crate) async fn execute_provider_setup_probe(
 
     if request.provider_type == "local" && !base_url.trim_end_matches('/').ends_with("/v1") {
         let discovery = if request.runtime_node_kind.as_deref() == Some("remote-user-owned") {
-            discover_remote_ollama_runtime(&base_url).await
+            match discover_remote_openai_compatible_runtime(&base_url).await {
+                Ok((resolved_base_url, models, detail)) => Ok((
+                    resolved_base_url,
+                    models,
+                    detail,
+                    "openai-compatible-models".to_string(),
+                    "llama-server/OpenAI-compatible runtime responded with available models."
+                        .to_string(),
+                )),
+                Err(openai_error) => discover_remote_ollama_runtime(&base_url)
+                    .await
+                    .map(|(resolved_base_url, models, detail)| {
+                        (
+                            resolved_base_url,
+                            models,
+                            format!(
+                                "{detail} OpenAI-compatible scan also ran first and failed: {openai_error}"
+                            ),
+                            "ollama-tags".to_string(),
+                            "Ollama runtime responded with installed models.".to_string(),
+                        )
+                    }),
+            }
         } else {
             let client = reqwest::Client::builder()
                 .timeout(Duration::from_secs(8))
@@ -1743,11 +1925,14 @@ pub(crate) async fn execute_provider_setup_probe(
                         base_url.clone(),
                         models,
                         format!("Discovered Ollama via `{endpoint}`."),
+                        "ollama-tags".to_string(),
+                        "Ollama runtime responded with installed models.".to_string(),
                     )
                 })
         };
 
-        let (resolved_base_url, models, discovery_detail) = match discovery {
+        let (resolved_base_url, models, discovery_detail, source, success_summary) = match discovery
+        {
             Ok(discovery) => discovery,
             Err(error) => {
                 let endpoint = ollama_tags_endpoint(&base_url);
@@ -1798,12 +1983,12 @@ pub(crate) async fn execute_provider_setup_probe(
             endpoint: resolved_base_url,
             checked_at,
             summary: if has_primary {
-                "Ollama runtime responded with installed models.".to_string()
+                success_summary
             } else {
-                "Ollama responded, but no installed models were returned.".to_string()
+                "Runtime responded, but no installed models were returned.".to_string()
             },
             detail: format!("{discovery_detail} No model names were guessed."),
-            source: "ollama-tags".to_string(),
+            source,
         });
     }
 
@@ -1829,7 +2014,8 @@ pub(crate) async fn execute_provider_setup_probe(
         || request.provider_type == "openai-compatible"
         || base_url.trim_end_matches('/').ends_with("/v1")
     {
-        let endpoint = models_endpoint_for_openai_compatible(&base_url);
+        let endpoint_base_url = normalized_openai_compatible_base_url(&base_url);
+        let endpoint = models_endpoint_for_openai_compatible(&endpoint_base_url);
         let api_key = resolve_provider_secret(app, &request.provider_id)?;
         let mut builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
@@ -1867,17 +2053,20 @@ pub(crate) async fn execute_provider_setup_probe(
         let models = extract_openai_compatible_model_ids(&payload);
         let (primary, fallback) = first_two_models(&models);
         let has_primary = primary.is_some();
-        let cloud_routable = request.runtime_node_kind.as_deref().unwrap_or("cloud") == "cloud"
-            && matches!(
+        let openai_compatible_routable = matches!(
+            (
+                request.runtime_node_kind.as_deref().unwrap_or("cloud"),
                 request.provider_type.as_str(),
-                "openai" | "openai-compatible"
-            );
+            ),
+            ("cloud", "openai" | "openai-compatible")
+                | ("local" | "remote-user-owned", "local" | "openai-compatible")
+        );
         return Ok(ProviderSetupProbeResult {
             provider_id: request.provider_id,
             ok: !models.is_empty(),
             setup_state: if models.is_empty() {
                 "unavailable".to_string()
-            } else if cloud_routable {
+            } else if openai_compatible_routable {
                 "routable-now".to_string()
             } else {
                 "adapter-pending".to_string()
@@ -1885,7 +2074,7 @@ pub(crate) async fn execute_provider_setup_probe(
             discovered_models: models,
             recommended_primary_model: primary,
             recommended_fallback_model: fallback,
-            endpoint,
+            endpoint: endpoint_base_url,
             checked_at,
             summary: if has_primary {
                 "OpenAI-compatible model discovery returned available models.".to_string()

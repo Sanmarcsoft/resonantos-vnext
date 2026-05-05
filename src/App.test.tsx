@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AddOnCategory,
   AddOnManifest,
+  ArchiveAiMemoryBuildJobSummary,
   ArchiveQueuedIngestRequest,
   ArchiveReviewArtifact,
   ConversationMessage,
@@ -57,6 +58,9 @@ const {
   requestArchiveImportedLibrariesMock,
   requestArchiveLibraryClassificationReviewMock,
   requestArchiveLibraryReorganisationPlanMock,
+  requestArchiveQueueImportedLibraryIngestMock,
+  requestArchiveAiMemoryBuildJobMock,
+  requestArchiveAiMemoryBuildJobsMock,
   requestArchiveLibraryFolderSelectionMock,
   requestObsidianVaultFolderSelectionMock,
   requestObsidianVaultStatusMock,
@@ -595,6 +599,64 @@ const {
     },
   })),
   requestArchiveImportedLibrariesMock: vi.fn(async () => [] as Array<Record<string, unknown>>),
+  requestArchiveQueueImportedLibraryIngestMock: vi.fn(async () => ({
+    manifestPath:
+      "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-manifest.json",
+    libraryName: "RESONANT_OS_BASE",
+    recordsSeen: 2,
+    queued: 1,
+    skippedExistingQueue: 0,
+    skippedProcessed: 0,
+    skippedUnsupported: 1,
+    skippedMissing: 0,
+    requestFiles: ["/tmp/review/request-identity.json"],
+  })),
+  requestArchiveAiMemoryBuildJobMock: vi.fn(async () => ({
+    jobId: "resonant-os-base-unix-10",
+    jobFile: "/tmp/review/jobs/resonant-os-base-unix-10.json",
+    status: "running",
+    libraryName: "RESONANT_OS_BASE",
+    manifestPath:
+      "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-manifest.json",
+    recordsSeen: 2,
+    queuedThisRun: 1,
+    skippedExistingQueue: 0,
+    skippedProcessed: 0,
+    skippedUnsupported: 1,
+    skippedMissing: 0,
+    processedThisRun: 1,
+    promotedThisRun: 1,
+    queueRemaining: 1,
+    reviewPending: 0,
+    reviewApproved: 0,
+    reviewEscalated: 0,
+    reviewRejected: 0,
+    errors: [],
+    nextAction: "Continue the AI Memory build to process the remaining queued sources.",
+    maintenance: {
+      startedAt: "unix:11",
+      finishedAt: "unix:12",
+      processed: [],
+      promoted: [],
+      navigation: {
+        refreshedAt: "unix:12",
+        indexPath: "/tmp/wiki/index.md",
+        logPath: "/tmp/wiki/log.md",
+        pagesIndexed: 1,
+        activityEntries: 1,
+      },
+      lint: {
+        checkedAt: "unix:12",
+        reportPath: "/tmp/review/lint/unix-12-lint-report.md",
+        pagesChecked: 1,
+        sourcesChecked: 1,
+        findings: [],
+      },
+      skipped: [],
+      errors: [],
+    },
+  })),
+  requestArchiveAiMemoryBuildJobsMock: vi.fn<() => Promise<ArchiveAiMemoryBuildJobSummary[]>>(async () => []),
   requestArchiveLibraryClassificationReviewMock: vi.fn(async () => ({
     artifactType: "library-classification-review",
     createdAt: "unix:10",
@@ -1244,6 +1306,9 @@ vi.mock("./core/runtime", () => ({
   requestArchiveImportedLibraries: requestArchiveImportedLibrariesMock,
   requestArchiveLibraryClassificationReview: requestArchiveLibraryClassificationReviewMock,
   requestArchiveLibraryReorganisationPlan: requestArchiveLibraryReorganisationPlanMock,
+  requestArchiveQueueImportedLibraryIngest: requestArchiveQueueImportedLibraryIngestMock,
+  requestArchiveAiMemoryBuildJob: requestArchiveAiMemoryBuildJobMock,
+  requestArchiveAiMemoryBuildJobs: requestArchiveAiMemoryBuildJobsMock,
   requestArchiveLibraryFolderSelection: requestArchiveLibraryFolderSelectionMock,
   requestObsidianVaultFolderSelection: requestObsidianVaultFolderSelectionMock,
   requestObsidianVaultStatus: requestObsidianVaultStatusMock,
@@ -1869,6 +1934,67 @@ describe("App boot flow", () => {
     });
     requestArchiveImportedLibrariesMock.mockReset();
     requestArchiveImportedLibrariesMock.mockResolvedValue([]);
+    requestArchiveQueueImportedLibraryIngestMock.mockReset();
+    requestArchiveQueueImportedLibraryIngestMock.mockResolvedValue({
+      manifestPath:
+        "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-manifest.json",
+      libraryName: "RESONANT_OS_BASE",
+      recordsSeen: 2,
+      queued: 1,
+      skippedExistingQueue: 0,
+      skippedProcessed: 0,
+      skippedUnsupported: 1,
+      skippedMissing: 0,
+      requestFiles: ["/tmp/review/request-identity.json"],
+    });
+    requestArchiveAiMemoryBuildJobMock.mockReset();
+    requestArchiveAiMemoryBuildJobMock.mockResolvedValue({
+      jobId: "resonant-os-base-unix-10",
+      jobFile: "/tmp/review/jobs/resonant-os-base-unix-10.json",
+      status: "running",
+      libraryName: "RESONANT_OS_BASE",
+      manifestPath:
+        "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-manifest.json",
+      recordsSeen: 2,
+      queuedThisRun: 1,
+      skippedExistingQueue: 0,
+      skippedProcessed: 0,
+      skippedUnsupported: 1,
+      skippedMissing: 0,
+      processedThisRun: 1,
+      promotedThisRun: 1,
+      queueRemaining: 1,
+      reviewPending: 0,
+      reviewApproved: 0,
+      reviewEscalated: 0,
+      reviewRejected: 0,
+      errors: [],
+      nextAction: "Continue the AI Memory build to process the remaining queued sources.",
+      maintenance: {
+        startedAt: "unix:11",
+        finishedAt: "unix:12",
+        processed: [],
+        promoted: [],
+        navigation: {
+          refreshedAt: "unix:12",
+          indexPath: "/tmp/wiki/index.md",
+          logPath: "/tmp/wiki/log.md",
+          pagesIndexed: 1,
+          activityEntries: 1,
+        },
+        lint: {
+          checkedAt: "unix:12",
+          reportPath: "/tmp/review/lint/unix-12-lint-report.md",
+          pagesChecked: 1,
+          sourcesChecked: 1,
+          findings: [],
+        },
+        skipped: [],
+        errors: [],
+      },
+    });
+    requestArchiveAiMemoryBuildJobsMock.mockReset();
+    requestArchiveAiMemoryBuildJobsMock.mockResolvedValue([]);
     requestArchiveLibraryClassificationReviewMock.mockReset();
     requestArchiveLibraryClassificationReviewMock.mockResolvedValue({
       artifactType: "library-classification-review",
@@ -4461,6 +4587,117 @@ describe("App boot flow", () => {
       "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-classification-review.json",
       "strategist.core",
     );
+  });
+
+  it("queues an imported library for AI Memory review from the source registry", async () => {
+    requestArchiveImportedLibrariesMock.mockResolvedValue([
+      {
+        importedAt: "unix:10",
+        domain: "mixed-library",
+        importMode: "copy",
+        libraryId: "resonant-os-base",
+        libraryName: "RESONANT_OS_BASE",
+        originalPath: "/Users/augmentor/Documents/RESONANT_OS_BASE",
+        canonicalRoot:
+          "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/sources/resonant-os-base",
+        filesSeen: 2,
+        filesImported: 2,
+        skippedFiles: 0,
+        manifestPath:
+          "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-manifest.json",
+        versionLedgerPath:
+          "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-version-ledger.jsonl",
+        classificationManifestPath:
+          "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-classification-review.json",
+        classificationStatus: "needs-ai-assisted-classification",
+        metadataStandard: "obsidian-frontmatter-wikilinks",
+        obsidianVaultDetected: false,
+        recommendedAddon: "addon.obsidian",
+        recordsCount: 2,
+      },
+    ]);
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "Open Sources section" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Build AI Memory" }));
+
+    await waitFor(() => {
+      expect(requestArchiveAiMemoryBuildJobMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          manifestPath:
+            "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-manifest.json",
+          actorId: "strategist.core",
+          maintenance: expect.objectContaining({
+            providerId: "shared-openai",
+            model: "gpt-5.4",
+            maxRequests: 6,
+            autoPromote: true,
+          }),
+        }),
+      );
+    });
+    expect(await screen.findByText(/AI Memory build: running/i)).toBeTruthy();
+    expect(await screen.findByText(/1 queued · 1 processed · 1 promoted · 1 remaining/i)).toBeTruthy();
+    expect(requestArchiveReviewQueueMock).toHaveBeenCalled();
+    expect(requestArchiveReviewArtifactsMock).toHaveBeenCalled();
+  });
+
+  it("restores persisted AI Memory build jobs when the review desk opens", async () => {
+    requestArchiveAiMemoryBuildJobsMock.mockResolvedValue([
+      {
+        jobId: "resonant-os-base-unix-10",
+        jobFile: "/tmp/review/jobs/resonant-os-base-unix-10.json",
+        status: "running",
+        libraryName: "RESONANT_OS_BASE",
+        manifestPath:
+          "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-manifest.json",
+        startedAt: "unix:10",
+        finishedAt: "unix:12",
+        recordsSeen: 1454,
+        queuedThisRun: 6,
+        processedThisRun: 6,
+        promotedThisRun: 4,
+        queueRemaining: 1448,
+        reviewPending: 0,
+        reviewApproved: 0,
+        reviewEscalated: 0,
+        reviewRejected: 0,
+        errors: [],
+        nextAction: "Continue the AI Memory build to process the remaining queued sources.",
+      },
+    ]);
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
+    fireEvent.click(await screen.findByRole("button", { name: /Open Review.*section/ }));
+
+    expect(await screen.findByLabelText("AI Memory build history")).toBeTruthy();
+    expect(await screen.findByText("RESONANT_OS_BASE")).toBeTruthy();
+    expect(await screen.findByText(/6 queued · 6 processed · 4 promoted · 1448 remaining/i)).toBeTruthy();
+    expect(requestArchiveAiMemoryBuildJobsMock).toHaveBeenCalled();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Continue Build" }));
+
+    await waitFor(() => {
+      expect(requestArchiveAiMemoryBuildJobMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          manifestPath:
+            "/Users/augmentor/Documents/RESONANT_OS_BASE/_LivingArchive/Memory/INTAKE/imports/mixed/metadata/resonant-os-base-manifest.json",
+          actorId: "strategist.core",
+          maintenance: expect.objectContaining({
+            providerId: "shared-openai",
+            model: "gpt-5.4",
+            maxRequests: 6,
+            autoPromote: true,
+          }),
+        }),
+      );
+    });
   });
 
   it("uses the native folder picker to fill the library import path", async () => {

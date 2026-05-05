@@ -207,11 +207,11 @@ export const runtimeNodes: ProviderRuntimeNode[] = [
     kind: "remote-user-owned",
     locality: "lan-remote",
     endpoint: "gx10://primary-runtime",
-    supportedModels: ["qwen-3.5", "gemma-4"],
+    supportedModels: [],
     authTier: "supported",
     healthState: "unavailable",
     deployableOnDemand: false,
-    notes: ["User-owned remote runtime node managed through the provider fabric; setup probe must discover a real HTTP endpoint before routing."],
+    notes: ["User-owned remote runtime node managed through the provider fabric; setup probe must discover a real HTTP endpoint and model list before routing."],
   },
 ];
 
@@ -231,16 +231,16 @@ export const providerExecutionAdapters: ProviderExecutionAdapterPolicy[] = [
   },
   {
     id: "cloud-openai-compatible",
-    label: "OpenAI Compatible Cloud Adapter",
+    label: "OpenAI Compatible HTTP Adapter",
     supportedProviderTypes: ["openai", "openai-compatible"],
-    supportedRuntimeKinds: ["cloud"],
-    supportedAuthMethods: ["api-key", "subscription", "oauth", "custom"],
+    supportedRuntimeKinds: ["cloud", "local", "remote-user-owned"],
+    supportedAuthMethods: ["api-key", "subscription", "oauth", "local-runtime", "custom"],
     supportsReasoningEffort: true,
     supportsStreaming: true,
     supportsAbort: true,
-    requiresCredential: true,
+    requiresCredential: false,
     experimental: true,
-    notes: ["Uses the OpenAI-compatible cloud chat path through the host service."],
+    notes: ["Uses the OpenAI-compatible chat path for cloud providers and user-owned local HTTP runtimes."],
   },
   {
     id: "local-ollama",
@@ -265,7 +265,7 @@ export const providerRouting: ProviderRoutingState = {
       id: "core-default",
       label: "Core Default Fallback",
       orderedProviderProfileIds: ["shared-minimax", "shared-openai", "shared-local"],
-      orderedRuntimeNodeIds: ["node-minimax-cloud", "node-openai-cloud", "node-local-resurrect"],
+      orderedRuntimeNodeIds: ["node-minimax-cloud", "node-openai-cloud", "node-gx10-qwen", "node-local-resurrect"],
       allowExperimentalAuth: true,
       allowResurrection: true,
       onFailure: "degrade",
@@ -310,7 +310,6 @@ export const modelStrategy: ModelStrategyState = {
       orderedRoutes: [
         { providerProfileId: "shared-minimax", runtimeNodeId: "node-minimax-cloud", model: "MiniMax-M2.7", costPosture: "subscription", note: "Default fast route for Augmentor and the Engineer Agent." },
         { providerProfileId: "shared-openai", runtimeNodeId: "node-openai-cloud", model: "gpt-5.4", costPosture: "subscription", note: "Premium fallback for demanding moments." },
-        { providerProfileId: "shared-local", runtimeNodeId: "node-gx10-qwen", model: "qwen-3.5", costPosture: "free-local", note: "Remote user-owned runtime when available." },
       ],
       lastResortRoute: {
         providerProfileId: "shared-local",
@@ -326,7 +325,6 @@ export const modelStrategy: ModelStrategyState = {
       rule: "Prefer economical or sunk-cost routes for routine work before escalating.",
       orderedRoutes: [
         { providerProfileId: "shared-minimax", runtimeNodeId: "node-minimax-cloud", model: "MiniMax-M2.7-highspeed", costPosture: "subscription", note: "Routine and cron-style work." },
-        { providerProfileId: "shared-local", runtimeNodeId: "node-gx10-qwen", model: "qwen-3.5", costPosture: "free-local", note: "Remote local route for non-urgent background work." },
       ],
       lastResortRoute: {
         providerProfileId: "shared-local",
@@ -397,7 +395,6 @@ export const modelStrategy: ModelStrategyState = {
     orderedPromotionTargets: [
       { providerProfileId: "shared-minimax", runtimeNodeId: "node-minimax-cloud", model: "MiniMax-M2.7", costPosture: "subscription", note: "Promote to the fast cloud route first." },
       { providerProfileId: "shared-openai", runtimeNodeId: "node-openai-cloud", model: "gpt-5.4", costPosture: "subscription", note: "Premium fallback when the fast route is unavailable." },
-      { providerProfileId: "shared-local", runtimeNodeId: "node-gx10-qwen", model: "qwen-3.5", costPosture: "free-local", note: "User-owned remote runtime." },
     ],
     hardFloorRoute: {
       providerProfileId: "shared-local",

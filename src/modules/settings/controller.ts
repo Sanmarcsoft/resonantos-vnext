@@ -263,8 +263,14 @@ const applySetupProbeToProvider = async ({
         notice: `${provider.label} setup probe finished: ${setupProbe.summary}`,
       };
     }
+    const discoveredOpenAiCompatibleLocal =
+      setupProbe.source === "openai-compatible-models" &&
+      (runtimeNode.kind === "local" || runtimeNode.kind === "remote-user-owned");
     const nextProvider: ProviderProfile = {
       ...provider,
+      providerType: discoveredOpenAiCompatibleLocal ? "openai-compatible" : provider.providerType,
+      authMethod: discoveredOpenAiCompatibleLocal ? "local-runtime" : provider.authMethod,
+      authTier: discoveredOpenAiCompatibleLocal ? "supported" : provider.authTier,
       apiBaseUrl: setupProbe.endpoint.startsWith("http") ? setupProbe.endpoint : provider.apiBaseUrl,
       allowedModels: setupProbe.discoveredModels,
       primaryModel: setupProbe.recommendedPrimaryModel ?? setupProbe.discoveredModels[0] ?? provider.primaryModel,
@@ -281,6 +287,7 @@ const applySetupProbeToProvider = async ({
       ...runtimeNode,
       endpoint: setupProbe.endpoint.startsWith("http") ? setupProbe.endpoint : runtimeNode.endpoint,
       supportedModels: setupProbe.discoveredModels,
+      authTier: discoveredOpenAiCompatibleLocal ? "supported" : runtimeNode.authTier,
       healthState: setupProbe.setupState === "routable-now" ? "ready" : "unavailable",
       notes: [`${setupProbe.setupState}: ${setupProbe.summary}`, setupProbe.detail],
     };

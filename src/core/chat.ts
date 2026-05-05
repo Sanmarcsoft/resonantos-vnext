@@ -185,7 +185,31 @@ export const formatEnabledAugmentorSkillsForPrompt = (
   ].join("\n");
 };
 
-export const strategistSystemPrompt = (state: ResonantShellState, manifests: AddOnManifest[] = []): string => {
+type StrategistPromptContext = {
+  activeModel: string;
+  activeProviderLabel: string;
+  activeRouteLabel: string;
+  activeRuntimeKind: string;
+};
+
+const formatStrategistRuntimeContext = (context?: StrategistPromptContext): string[] => {
+  if (!context) {
+    return [];
+  }
+  return [
+    `Current provider route for this reply: ${context.activeProviderLabel} via ${context.activeRouteLabel}.`,
+    `Current active model for this reply: ${context.activeModel}.`,
+    `Current runtime kind: ${context.activeRuntimeKind}.`,
+    "If the user asks which AI model you are running on, answer from the current active model above. Do not answer only with your agent identity.",
+    "If the active model is missing or unknown, say that the route metadata is missing instead of guessing.",
+  ];
+};
+
+export const strategistSystemPrompt = (
+  state: ResonantShellState,
+  manifests: AddOnManifest[] = [],
+  context?: StrategistPromptContext,
+): string => {
   const strategistName = strategistDisplayName(state);
   const addOnSkills = formatEnabledAugmentorSkillsForPrompt(state, manifests);
   return [
@@ -195,6 +219,7 @@ export const strategistSystemPrompt = (state: ResonantShellState, manifests: Add
     "Do not pretend a tool, archive integration, or automation is wired if it is not.",
     "If a capability is not yet implemented, say so plainly and offer the next practical step.",
     "Respect the ResonantOS architecture: add-ons are modular, Living Archive knowledge writes belong to the Strategist-owned ingest path, and external agents are not equal to the Strategist.",
+    ...formatStrategistRuntimeContext(context),
     addOnSkills,
   ].join(" ");
 };

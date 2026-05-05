@@ -17,6 +17,7 @@ import type {
   ProviderRuntimeNode,
   ResonantShellState,
 } from "./contracts";
+import { providerNeedsStoredCredential } from "./provider-credentials";
 
 export const strategistDisplayName = (state: ResonantShellState): string =>
   state.strategistIdentity.customName?.trim() || state.strategistIdentity.defaultName;
@@ -125,7 +126,7 @@ export const applyProviderDiagnostics = (
         ...provider,
         status: providerStatusFromDiagnostic(report.status),
         credentialStatus:
-          provider.providerType === "local"
+          !providerNeedsStoredCredential(provider)
             ? "configured"
             : report.credentialConfigured
               ? "configured"

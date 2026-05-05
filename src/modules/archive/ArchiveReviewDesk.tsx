@@ -2,6 +2,8 @@
 // Intent citation: docs/architecture/ADR-011-living-archive-host-service.md
 
 import type {
+  ArchiveAiMemoryBuildJobSummary,
+  ArchiveAiMemoryBuildResult,
   ArchiveMaintenanceCycleResult,
   ArchivePromoteReviewArtifactResult,
   ArchiveProcessIngestResult,
@@ -19,6 +21,8 @@ type ArchiveReviewDeskProps = {
   archiveReviewDecisionResult: ArchiveReviewDecisionResult | null;
   archivePromotionResult: ArchivePromoteReviewArtifactResult | null;
   archiveMaintenanceResult: ArchiveMaintenanceCycleResult | null;
+  archiveAiMemoryBuildResult: ArchiveAiMemoryBuildResult | null;
+  archiveAiMemoryBuildJobs: ArchiveAiMemoryBuildJobSummary[];
   autoMaintenanceEnabled: boolean;
   onRefreshArchiveQueue: () => void;
   onProcessArchiveRequest: (requestFile: string) => void;
@@ -28,6 +32,7 @@ type ArchiveReviewDeskProps = {
   onPromoteReviewArtifact: (artifactFile: string) => void;
   onToggleAutoMaintenance: () => void;
   onRunArchiveMaintenance: () => void;
+  onContinueAiMemoryBuild: (manifestPath: string) => void;
 };
 
 type ProposedPagePreview = {
@@ -62,6 +67,8 @@ export function ArchiveReviewDesk({
   archiveReviewDecisionResult,
   archivePromotionResult,
   archiveMaintenanceResult,
+  archiveAiMemoryBuildResult,
+  archiveAiMemoryBuildJobs,
   autoMaintenanceEnabled,
   onRefreshArchiveQueue,
   onProcessArchiveRequest,
@@ -71,6 +78,7 @@ export function ArchiveReviewDesk({
   onPromoteReviewArtifact,
   onToggleAutoMaintenance,
   onRunArchiveMaintenance,
+  onContinueAiMemoryBuild,
 }: ArchiveReviewDeskProps) {
   const pendingArtifacts = archiveReviewArtifacts.filter((artifact) => artifact.decision.status === "pending").length;
   const approvedArtifacts = archiveReviewArtifacts.filter((artifact) => artifact.decision.status === "approved").length;
@@ -116,6 +124,56 @@ export function ArchiveReviewDesk({
               {archiveMaintenanceResult.navigation.activityEntries} log entries
             </p>
             <p className="mono-inline">{archiveMaintenanceResult.navigation.indexPath}</p>
+          </div>
+        ) : null}
+        {archiveAiMemoryBuildResult ? (
+          <div className="archive-maintenance-summary" role="status">
+            <strong>AI Memory build: {archiveAiMemoryBuildResult.status}</strong>
+            <p>
+              {archiveAiMemoryBuildResult.queuedThisRun} queued · {archiveAiMemoryBuildResult.processedThisRun} processed ·{" "}
+              {archiveAiMemoryBuildResult.promotedThisRun} promoted · {archiveAiMemoryBuildResult.queueRemaining} remaining
+            </p>
+            <p>{archiveAiMemoryBuildResult.nextAction}</p>
+            <p className="mono-inline">{archiveAiMemoryBuildResult.jobFile}</p>
+          </div>
+        ) : null}
+        {archiveAiMemoryBuildJobs.length ? (
+          <div className="archive-maintenance-summary" aria-label="AI Memory build history">
+            <strong>AI Memory jobs</strong>
+            <div className="archive-touch-list compact">
+              {archiveAiMemoryBuildJobs.slice(0, 5).map((job) => (
+                <article key={job.jobFile} className="archive-review-card">
+                  <div className="provider-head">
+                    <div>
+                      <span className="eyebrow">{job.status}</span>
+                      <strong>{job.libraryName || job.jobId}</strong>
+                      <p>
+                        {job.queuedThisRun} queued · {job.processedThisRun} processed · {job.promotedThisRun} promoted ·{" "}
+                        {job.queueRemaining} remaining
+                      </p>
+                    </div>
+                    <span className={job.status === "complete" ? "tone tone-active" : "tone tone-warning"}>
+                      {job.errors.length ? `${job.errors.length} error` : job.status}
+                    </span>
+                  </div>
+                  <p>{job.nextAction}</p>
+                  <p className="mono-inline">{job.jobFile}</p>
+                  {job.status !== "complete" ? (
+                    <div className="archive-review-actions">
+                      <button
+                        type="button"
+                        className="button-secondary touch-action"
+                        onClick={() => onContinueAiMemoryBuild(job.manifestPath)}
+                        disabled={archiveQueueBusy}
+                      >
+                        Continue Build
+                      </button>
+                      <span className="provider-scope">{job.finishedAt ?? job.startedAt}</span>
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
           </div>
         ) : null}
         <div className="inline-notice">

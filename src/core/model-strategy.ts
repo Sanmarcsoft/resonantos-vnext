@@ -69,6 +69,9 @@ export const buildStrategyRouteOptions = (state: ResonantShellState): StrategyRo
     if (!provider) {
       return [];
     }
+    if (runtimeNode.kind === "remote-user-owned" && !String(runtimeNode.endpoint ?? "").startsWith("http")) {
+      return [];
+    }
     const models = uniqueValues([...runtimeNode.supportedModels, ...provider.allowedModels]);
     return models.map((model) => {
       const costPosture = inferCostPosture(provider, runtimeNode);

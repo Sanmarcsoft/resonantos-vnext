@@ -23,6 +23,7 @@ import { resolveProviderPath, strategistDisplayName } from "../../core/policies"
 import {
   resolveAgentChatRoute,
   resolveStrategistChatRoute,
+  selectableAgentChatModels,
   type ProviderRouteResolution,
 } from "../../core/provider-service";
 import { canUseDictation } from "../chat/dictation";
@@ -87,6 +88,7 @@ export type ShellViewModel = {
   activeProvider: ProviderProfile | undefined;
   activeRuntimeNode: ProviderRuntimeNode | undefined;
   activeChatModel: string;
+  selectableChatModels: string[];
   strategistRecoveryActive: boolean;
   contextBudget: ContextBudget;
   contextUsageRatio: number;
@@ -121,6 +123,19 @@ export const resolveActiveProviderForSelection = (
       ),
     ).active
   );
+};
+
+export const resolveSelectableChatModelsForSelection = (
+  state: ResonantShellState | null,
+  activeThreadId?: string,
+): string[] => {
+  if (!state) {
+    return [];
+  }
+  const activeThread = activeThreadId ? state.conversationThreads.find((thread) => thread.id === activeThreadId) : null;
+  const activeAgentId =
+    activeThread?.owningAgentId ?? (state.recoverySession.active ? state.recoverySession.engineerAgentId : "strategist.core");
+  return selectableAgentChatModels(state, activeAgentId);
 };
 
 export const buildShellViewModel = ({
@@ -180,8 +195,9 @@ export const buildShellViewModel = ({
   const strategistRoute = resolveStrategistChatRoute(state, selectedChatModel);
   const activeProvider = activeRoute.provider ?? providerResolution.active;
   const activeRuntimeNode = activeRoute.runtimeNode;
+  const selectableChatModels = selectableAgentChatModels(state, activeAgentId);
   const activeChatModel =
-    selectedChatModel && activeProvider?.allowedModels.includes(selectedChatModel)
+    selectedChatModel && selectableChatModels.includes(selectedChatModel)
       ? selectedChatModel
       : activeRoute.model || activeProvider?.primaryModel || "";
   const strategistRecoveryActive =
@@ -227,6 +243,7 @@ export const buildShellViewModel = ({
     activeProvider,
     activeRuntimeNode,
     activeChatModel,
+    selectableChatModels,
     strategistRecoveryActive,
     contextBudget,
     contextUsageRatio,

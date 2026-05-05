@@ -6,6 +6,8 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   AddOnManifest,
+  ArchiveAiMemoryBuildJobSummary,
+  ArchiveAiMemoryBuildResult,
   ArchiveBackgroundCycleResult,
   ArchiveDocumentPayload,
   ArchivePromoteReviewArtifactResult,
@@ -20,6 +22,7 @@ import type {
   ArchiveIntakeWriteResult,
   ArchiveImportedLibrarySummary,
   ArchiveLibraryClassificationReview,
+  ArchiveQueueImportedLibraryResult,
   ArchiveLibraryReorganisationPlan,
   ArchiveLibraryImportMode,
   ArchiveLibraryImportResult,
@@ -86,6 +89,7 @@ import type {
 import type { BrowserToolResult } from "./browser-tools";
 import { buildDefaultState } from "./defaults";
 import { renderDelegationTaskMarkdown, validateDelegationPacket } from "./delegation";
+import { providerNeedsStoredCredential } from "./provider-credentials";
 import { createInstallationSnapshot } from "./policies";
 import { assertValidAddOnManifest } from "../sdk/addons";
 import { createBrowserToolRunner } from "./browser-tools";
@@ -388,6 +392,17 @@ export const requestArchiveLibraryReorganisationPlan = async (
     })) as ArchiveLibraryReorganisationPlan;
   }
   throw new Error("Living Archive reorganisation planning is available only in the desktop shell.");
+};
+
+export const requestArchiveQueueImportedLibraryIngest = async (input: {
+  manifestPath: string;
+  actorId?: string;
+  maxRecords?: number;
+}): Promise<ArchiveQueueImportedLibraryResult> => {
+  if (hasTauri()) {
+    return (await invoke("archive_queue_imported_library_ingest", { request: input })) as ArchiveQueueImportedLibraryResult;
+  }
+  throw new Error("Living Archive imported-library ingest queueing is available only in the desktop shell.");
 };
 
 export const requestArchiveSystemMemory = async (): Promise<ArchiveSystemMemoryStatus> => {
@@ -1075,6 +1090,45 @@ export const requestArchiveMaintenanceCycle = async (input: {
   throw new Error("Living Archive maintenance cycles are available only in the desktop shell.");
 };
 
+export const requestArchiveAiMemoryBuildJob = async (input: {
+  manifestPath: string;
+  actorId?: string;
+  maxQueueRecords?: number;
+  maintenance: {
+    providerId: string;
+    providerType: ProviderProfile["providerType"];
+    apiBaseUrl?: string;
+    runtimeNodeId?: string;
+    runtimeNodeKind?: string;
+    runtimeNodeEndpoint?: string;
+    authTier?: string;
+    model: string;
+    verifierProviderId?: string;
+    verifierProviderType?: ProviderProfile["providerType"];
+    verifierApiBaseUrl?: string;
+    verifierRuntimeNodeId?: string;
+    verifierRuntimeNodeKind?: string;
+    verifierRuntimeNodeEndpoint?: string;
+    verifierAuthTier?: string;
+    verifierModel?: string;
+    maxRequests?: number;
+    autoPromote?: boolean;
+    actorId?: string;
+  };
+}): Promise<ArchiveAiMemoryBuildResult> => {
+  if (hasTauri()) {
+    return (await invoke("archive_ai_memory_build_job", { request: input })) as ArchiveAiMemoryBuildResult;
+  }
+  throw new Error("Living Archive AI Memory build jobs are available only in the desktop shell.");
+};
+
+export const requestArchiveAiMemoryBuildJobs = async (): Promise<ArchiveAiMemoryBuildJobSummary[]> => {
+  if (hasTauri()) {
+    return (await invoke("archive_ai_memory_build_jobs")) as ArchiveAiMemoryBuildJobSummary[];
+  }
+  return [];
+};
+
 export const requestArchiveBackgroundCycle = async (input: {
   providerId: string;
   providerType: ProviderProfile["providerType"];
@@ -1358,7 +1412,7 @@ export const applyProviderCredentialStatuses = (
   ...state,
   providers: state.providers.map((profile) => ({
     ...profile,
-    credentialStatus: credentialStatuses[profile.id] ? "configured" : profile.providerType === "local" ? "configured" : "missing",
+    credentialStatus: credentialStatuses[profile.id] || !providerNeedsStoredCredential(profile) ? "configured" : "missing",
   })),
 });
 
@@ -1381,8 +1435,9 @@ const mergeConversationThreads = (
 const normalizeProviders = (
   persisted: ResonantShellState["providers"] | undefined,
   defaults: ResonantShellState["providers"],
-): ResonantShellState["providers"] =>
-  defaults.map((profile) => {
+): ResonantShellState["providers"] => {
+  const defaultIds = new Set(defaults.map((profile) => profile.id));
+  const normalizedDefaults = defaults.map((profile) => {
     const current = persisted?.find((item) => item.id === profile.id);
     if (!current) {
       return profile;
@@ -1405,17 +1460,21 @@ const normalizeProviders = (
       fallbackModel,
     };
   });
+  const extraPersisted = (persisted ?? []).filter((profile) => !defaultIds.has(profile.id));
+  return [...normalizedDefaults, ...extraPersisted];
+};
 
 const normalizeRuntimeNodes = (
   persisted: ResonantShellState["runtimeNodes"] | undefined,
   defaults: ResonantShellState["runtimeNodes"],
-): ResonantShellState["runtimeNodes"] =>
-  defaults.map((node) => {
+): ResonantShellState["runtimeNodes"] => {
+  const defaultIds = new Set(defaults.map((node) => node.id));
+  const normalizedDefaults = defaults.map((node) => {
     const current = persisted?.find((item) => item.id === node.id);
     if (!current) {
       return node;
     }
-    return {
+    const merged = {
       ...node,
       ...current,
       kind: node.kind,
@@ -1425,7 +1484,17 @@ const normalizeRuntimeNodes = (
       deployableOnDemand: node.deployableOnDemand,
       notes: node.notes,
     };
+    if (node.id === "node-gx10-qwen" && !String(merged.endpoint ?? "").startsWith("http")) {
+      return {
+        ...merged,
+        healthState: node.healthState,
+      };
+    }
+    return merged;
   });
+  const extraPersisted = (persisted ?? []).filter((node) => !defaultIds.has(node.id));
+  return [...normalizedDefaults, ...extraPersisted];
+};
 
 const normalizeAgents = (
   persisted: ResonantShellState["agents"] | undefined,
@@ -1526,6 +1595,11 @@ const normalizeProviderRouting = (
   executionAdapters: defaults.executionAdapters.map((defaultAdapter) => ({
     ...defaultAdapter,
     ...(persisted?.executionAdapters ?? []).find((adapter) => adapter.id === defaultAdapter.id),
+    supportedProviderTypes: defaultAdapter.supportedProviderTypes,
+    supportedRuntimeKinds: defaultAdapter.supportedRuntimeKinds,
+    supportedAuthMethods: defaultAdapter.supportedAuthMethods,
+    requiresCredential: defaultAdapter.requiresCredential,
+    experimental: defaultAdapter.experimental,
     supportsStreaming:
       (persisted?.executionAdapters ?? []).find((adapter) => adapter.id === defaultAdapter.id)?.supportsStreaming ??
       defaultAdapter.supportsStreaming,

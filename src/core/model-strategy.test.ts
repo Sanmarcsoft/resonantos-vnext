@@ -16,7 +16,7 @@ describe("model strategy planner", () => {
 
     expect(options.some((option) => option.key === "shared-minimax::node-minimax-cloud::MiniMax-M2.7")).toBe(true);
     expect(options.find((option) => option.runtimeNodeId === "node-local-resurrect")?.costPosture).toBe("emergency-only");
-    expect(options.find((option) => option.runtimeNodeId === "node-gx10-qwen")?.costPosture).toBe("free-local");
+    expect(options.find((option) => option.runtimeNodeId === "node-gx10-qwen")).toBeUndefined();
     expect(costPostureLabel("subscription")).toBe("Subscription");
   });
 
@@ -24,10 +24,17 @@ describe("model strategy planner", () => {
     const state = {
       ...buildDefaultState([]),
       runtimeNodes: buildDefaultState([]).runtimeNodes.map((node) =>
-        node.id === "node-gx10-qwen" ? { ...node, healthState: "ready" as const } : node,
+        node.id === "node-gx10-qwen"
+          ? {
+              ...node,
+              endpoint: "http://gx10.local:30000/v1",
+              supportedModels: ["qwen3:4b"],
+              healthState: "ready" as const,
+            }
+          : node,
       ),
     };
-    const route = routeFromOptionKey(state, "shared-local::node-gx10-qwen::qwen-3.5");
+    const route = routeFromOptionKey(state, "shared-local::node-gx10-qwen::qwen3:4b");
 
     expect(route).toBeDefined();
     const updated = updateWorkloadStrategy(state, "strategy-routine-background", {
@@ -38,11 +45,11 @@ describe("model strategy planner", () => {
     const resolved = resolveRoutineRoute(updated);
 
     expect(routeOptionKey(updated.modelStrategy.workloadStrategies.find((strategy) => strategy.id === "strategy-routine-background")!.primaryRoute)).toBe(
-      "shared-local::node-gx10-qwen::qwen-3.5",
+      "shared-local::node-gx10-qwen::qwen3:4b",
     );
     expect(resolved.provider?.id).toBe("shared-local");
     expect(resolved.runtimeNode?.id).toBe("node-gx10-qwen");
-    expect(resolved.model).toBe("qwen-3.5");
+    expect(resolved.model).toBe("qwen3:4b");
   });
 
   it("ignores unknown route option keys rather than corrupting a strategy", () => {
