@@ -3017,14 +3017,17 @@ describe("App boot flow", () => {
 
     expect((await screen.findAllByText("Launch your AI tools from one workbench.")).length).toBeGreaterThan(0);
 
-    fireEvent.change(screen.getAllByPlaceholderText("Message Augmentor")[0], {
+    const composer = screen.getAllByPlaceholderText("Message Augmentor")[0] as HTMLTextAreaElement;
+    const composerCard = composer.closest(".composer-card") as HTMLElement;
+    fireEvent.change(composer, {
       target: { value: "Delegate this provider diagnostic to the Engineer" },
     });
-    fireEvent.click(screen.getAllByRole("button", { name: "Send message" })[0]);
+    await waitFor(() => expect(composer.value).toBe("Delegate this provider diagnostic to the Engineer"));
+    fireEvent.click(within(composerCard).getByRole("button", { name: "Send message" }));
 
+    await waitFor(() => expect(requestCreateTaskWorkspaceMock).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/I created an Engineer delegation workspace/i)).toBeTruthy();
     expect(await screen.findByText(/TASK.md:/i)).toBeTruthy();
-    expect(requestCreateTaskWorkspaceMock).toHaveBeenCalledTimes(1);
     expect(requestProviderServiceChatCompletionMock).not.toHaveBeenCalled();
   });
 
