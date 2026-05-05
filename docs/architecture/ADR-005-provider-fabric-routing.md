@@ -155,6 +155,16 @@ Each setup template must express:
   - `profile-only`: the entry is recorded for inventory/planning only
 - setup note explaining what the Engineer Agent should verify or complete
 
+### Provider Setup Probe
+
+The Engineer/setup path must verify provider setup through provider-owned or runtime-owned discovery APIs when available:
+
+- OpenAI and OpenAI-compatible cloud/gateway routes use `GET /v1/models` with the saved credential.
+- OpenAI-compatible gateways use their documented base URL plus `/models`.
+- Ollama uses `GET /api/tags` against the selected local runtime endpoint.
+- Unsupported native providers may be saved as profiles, but the probe must return `adapter-pending` instead of inventing a model list.
+- The setup probe may update provider model lists only from discovery responses. Catalog starter models are hints, not proof of availability.
+
 ### Fallback Policy
 
 Must express:
