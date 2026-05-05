@@ -11,7 +11,13 @@ import type {
 } from "../../core/contracts";
 import { Panel } from "../../components/Panel";
 import type { CreateProviderProfileInput } from "./controller";
-import { providerTemplates, type ProviderTemplateId } from "./provider-templates";
+import {
+  providerTemplateCategoryLabels,
+  providerTemplates,
+  providerTemplatesByCategory,
+  type ProviderTemplateCategory,
+  type ProviderTemplateId,
+} from "./provider-templates";
 
 export type SettingsSection = "providers" | "strategy" | "memory" | "defaults" | "shell";
 
@@ -60,6 +66,24 @@ const providerSecretPlaceholder = (profile: ProviderProfile): string => {
     return "Saved on desktop side";
   }
   return profile.providerType === "minimax" ? "minimax-..." : "sk-...";
+};
+
+const providerTemplateCategoryOrder: ProviderTemplateCategory[] = [
+  "direct-provider",
+  "aggregator",
+  "local-runtime",
+  "runtime-node",
+  "custom",
+];
+
+const providerTemplateExecutionLabel = (state: string): string => {
+  if (state === "routable-now") {
+    return "Routable now";
+  }
+  if (state === "adapter-pending") {
+    return "Adapter pending";
+  }
+  return "Profile only";
 };
 
 export function SettingsWorkspace(props: SettingsWorkspaceProps) {
@@ -309,10 +333,14 @@ export function SettingsWorkspace(props: SettingsWorkspaceProps) {
                   <label className="field">
                     <span>Provider</span>
                     <select value={addProviderTemplateId} onChange={(event) => handleProviderTemplateChange(event.target.value as ProviderTemplateId)}>
-                      {providerTemplates.map((template) => (
-                        <option key={template.id} value={template.id}>
-                          {template.label}
-                        </option>
+                      {providerTemplateCategoryOrder.map((category) => (
+                        <optgroup key={category} label={providerTemplateCategoryLabels[category]}>
+                          {providerTemplatesByCategory(category).map((template) => (
+                            <option key={template.id} value={template.id}>
+                              {template.label}
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
                     </select>
                   </label>
@@ -338,7 +366,9 @@ export function SettingsWorkspace(props: SettingsWorkspaceProps) {
                     </label>
                   )}
                   <div className="provider-template-note">
-                    <strong>{selectedProviderTemplate.shortLabel}</strong>
+                    <strong>
+                      {selectedProviderTemplate.shortLabel} · {providerTemplateExecutionLabel(selectedProviderTemplate.executionState)}
+                    </strong>
                     <p>{selectedProviderTemplate.note}</p>
                   </div>
                   <div className="provider-dialog-actions">

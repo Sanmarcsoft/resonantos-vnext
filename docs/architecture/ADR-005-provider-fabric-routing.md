@@ -25,6 +25,13 @@ Remote user-owned machines are modeled as **provider runtime nodes**, not as add
 ## Rules
 
 - Routing authority belongs to ResonantOS policy, not to add-ons.
+- Provider onboarding must be catalog-driven:
+  - direct cloud providers
+  - provider aggregators and gateways
+  - local runtime software
+  - user-owned runtime machines
+  - custom OpenAI-compatible endpoints
+- The catalog must distinguish **profile creation** from **routable execution**. A provider can be known to ResonantOS before a native execution adapter exists.
 - Add-ons declare:
   - provider capabilities needed
   - model or quality preferences
@@ -129,6 +136,24 @@ Each execution adapter must declare:
 - whether host-side abort is supported
 - whether credentials are required
 - whether the adapter is experimental
+
+### Provider Catalog Template
+
+Each setup template must express:
+
+- provider or runtime label
+- category: `direct-provider`, `aggregator`, `local-runtime`, `runtime-node`, or `custom`
+- provider type and auth method
+- default endpoint when known
+- whether a secret or base URL is required
+- starter model list
+- initial provider status
+- initial runtime node health
+- execution state:
+  - `routable-now`: an existing host adapter can execute it today
+  - `adapter-pending`: the profile can be stored, but routing must not select it until a native adapter exists
+  - `profile-only`: the entry is recorded for inventory/planning only
+- setup note explaining what the Engineer Agent should verify or complete
 
 ### Fallback Policy
 

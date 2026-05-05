@@ -3606,7 +3606,7 @@ describe("App boot flow", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: /Settings/i })[0]);
     fireEvent.click(await screen.findByRole("button", { name: /Add AI Provider/i }));
-    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "local" } });
+    fireEvent.change(screen.getByLabelText("Provider"), { target: { value: "ollama" } });
     fireEvent.change(screen.getByLabelText("Name in ResonantOS"), { target: { value: "Studio Local Runtime" } });
     fireEvent.click(screen.getByRole("button", { name: "Add Provider" }));
 

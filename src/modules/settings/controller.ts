@@ -272,7 +272,7 @@ export const executeCreateProviderProfile = async ({
       modelContext: template.modelContext.map((policy) => ({ ...policy })),
       consumerScopes: [...template.consumerScopes],
       shared: true,
-      status: template.id === "local" ? "fallback" : "ready",
+      status: template.initialStatus,
       credentialStatus,
     };
     const runtimeNode: ProviderRuntimeNode = {
@@ -284,9 +284,9 @@ export const executeCreateProviderProfile = async ({
       endpoint: cleanApiBaseUrl,
       supportedModels: [...template.allowedModels],
       authTier: template.authTier,
-      healthState: template.id === "local" ? "deployable" : "ready",
-      deployableOnDemand: template.id === "local",
-      notes: [template.note],
+      healthState: template.initialRuntimeHealthState,
+      deployableOnDemand: template.deployableOnDemand,
+      notes: [`${template.executionState}: ${template.note}`],
     };
 
     if (template.requiresSecret) {
