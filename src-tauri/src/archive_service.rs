@@ -2123,6 +2123,11 @@ fn text_source_extension(path: &Path) -> bool {
 }
 
 fn source_excerpt_for_terms(content: &str, terms: &[String]) -> String {
+    let full_compact = content.split_whitespace().collect::<Vec<_>>().join(" ");
+    if full_compact.chars().count() <= 2_400 {
+        return full_compact;
+    }
+
     let matching_lines = content
         .lines()
         .filter(|line| {
@@ -3320,6 +3325,11 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("Protocol of Mixtape"));
+        assert!(hits[0]
+            .snippet
+            .as_deref()
+            .unwrap_or_default()
+            .contains("deliberate curation and friction"));
 
         let _ = fs::remove_dir_all(root);
     }

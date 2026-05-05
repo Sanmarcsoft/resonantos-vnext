@@ -215,7 +215,7 @@ export const formatArchiveContextForPrompt = (bundle: ArchiveContextBundle | nul
   return [
     "Living Archive context retrieved for this turn.",
     `Search query: ${bundle.query}`,
-    "Use this context as memory evidence. Clearly distinguish promoted wiki pages from raw/imported source evidence. If it is insufficient, say what is missing.",
+    "Use this context as memory evidence. Clearly distinguish promoted wiki pages from raw/imported source evidence. If raw source evidence contains enough information to answer, answer directly while naming the boundary; do not refuse solely because it is not yet promoted.",
     ...pageBlocks,
     sourceBlocks.length ? ["Tracked source hits:", ...sourceBlocks].join("\n") : "",
     failureBlock,

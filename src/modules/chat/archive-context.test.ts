@@ -23,6 +23,7 @@ describe("archive chat context", () => {
     const citations = archiveCitationsFromBundle(bundle);
 
     expect(prompt).toContain("raw/imported source evidence, not yet a trusted promoted wiki page");
+    expect(prompt).toContain("answer directly while naming the boundary");
     expect(prompt).toContain("Protocol of Mixtape");
     expect(citations).toEqual([
       expect.objectContaining({
