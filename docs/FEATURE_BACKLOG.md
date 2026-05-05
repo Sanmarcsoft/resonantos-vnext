@@ -144,6 +144,7 @@ Last updated: 2026-05-05
   - imported-library manifests can now enter the standard ingest/review/promote path from the Source Registry through `Build AI Memory`; this starts a durable AI Memory build job with persisted status/progress, while imported files remain searchable as raw evidence first and become trusted wiki memory only after the approved promotion path
   - the Review Desk now reloads durable AI Memory build job summaries after restart, so users can see prior build status, queue pressure, promotion counts, errors, and next action
   - persisted AI Memory jobs now expose a user-triggered `Continue Build` action that reruns the controlled provider-routed batch from the stored manifest path
+  - Archive auto-sync now continues safe persisted AI Memory jobs while the app is open, but blocks jobs with errors, escalated artifacts, or human-review status
 
 - Completed on 2026-04-23:
   - added a real host-mediated archive service in `src-tauri/src/archive_service.rs`
@@ -229,7 +230,7 @@ Last updated: 2026-05-05
   - kept Tauri command behavior unchanged while reducing the main archive service surface
 - Continue Living Archive hardening:
   - run real-data validation against the full ResonantOS Base folder and configured MiniMax/OpenAI routes
-  - add an automatic AI Memory job runner that continues safe build batches from persisted job state across app restarts when explicit auto-sync/provider-cost policy allows it
+  - persist Archive auto-sync policy across app restarts and expose provider-cost controls before unattended AI Memory batches run
   - add a dedicated audited execution flow before move-on-import or source reorganisation can move files
   - upgrade the JSONL source-version ledger into local Git-style source history where appropriate
   - expose imported libraries as first-class cards with rescan/sync controls using the host registry

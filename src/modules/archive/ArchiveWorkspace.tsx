@@ -43,6 +43,7 @@ import { ArchiveReviewDesk } from "./ArchiveReviewDesk";
 import { ArchiveSearchPanel } from "./ArchiveSearchPanel";
 import { ArchiveSourceScanResults } from "./ArchiveSourceScanResults";
 import { ArchiveSourceRegistry } from "./ArchiveSourceRegistry";
+import { selectAutoContinuableAiMemoryJob } from "./archive-ai-memory-jobs";
 
 type ArchiveWorkspaceTab = "start" | "review" | "sources" | "search" | "help" | "advanced";
 
@@ -178,6 +179,7 @@ export function ArchiveWorkspace({
   const reviewDeskRef = useRef<HTMLDivElement | null>(null);
   const importerRef = useRef<HTMLDivElement | null>(null);
   const runMaintenanceRef = useRef(onRunArchiveMaintenance);
+  const continueAiMemoryBuildRef = useRef(onQueueImportedLibraryForIngest);
   const [activeTab, setActiveTab] = useState<ArchiveWorkspaceTab>("start");
   const [autoMaintenanceEnabled, setAutoMaintenanceEnabled] = useState(false);
   const [importerOpen, setImporterOpen] = useState(false);
@@ -206,6 +208,10 @@ export function ArchiveWorkspace({
   }, [onRunArchiveMaintenance]);
 
   useEffect(() => {
+    continueAiMemoryBuildRef.current = onQueueImportedLibraryForIngest;
+  }, [onQueueImportedLibraryForIngest]);
+
+  useEffect(() => {
     if (!autoMaintenanceEnabled) {
       return;
     }
@@ -214,12 +220,19 @@ export function ArchiveWorkspace({
       if (archiveQueueBusy) {
         return;
       }
+      const resumableJob = selectAutoContinuableAiMemoryJob(archiveAiMemoryBuildJobs);
+      if (resumableJob) {
+        // Intent citation: docs/architecture/ADR-011-living-archive-host-service.md
+        continueAiMemoryBuildRef.current(resumableJob.manifestPath);
+        return;
+      }
+
       runMaintenanceRef.current();
     };
 
     const intervalId = window.setInterval(runIfWorkExists, 120_000);
     return () => window.clearInterval(intervalId);
-  }, [archiveQueueBusy, autoMaintenanceEnabled]);
+  }, [archiveAiMemoryBuildJobs, archiveQueueBusy, autoMaintenanceEnabled]);
 
   const scrollToImporter = () => {
     setActiveTab("start");

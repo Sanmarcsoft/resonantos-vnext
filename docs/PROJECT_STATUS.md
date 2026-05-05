@@ -85,7 +85,7 @@ Release scope:
 Known limits for reviewers:
 
 - Living Archive import is safe-copy oriented; move/reorganisation execution is intentionally blocked
-- Living Archive AI Memory builds now persist job summaries, restore them in the Review Desk, and support user-triggered `Continue Build`; automatic background continuation across app restarts is not complete yet
+- Living Archive AI Memory builds now persist job summaries, restore them in the Review Desk, support user-triggered `Continue Build`, and auto-continue safe jobs while Archive auto-sync is enabled; persisted auto-sync policy and provider-cost controls are not complete yet
 - add-ons are catalog entries and are not installed or trusted by default; the basic default catalog now exposes only recommended Augmentor Chat and Living Archive contracts
 - Browser, Obsidian, OpenCode, and Terminal add-ons are early foundations, not complete production integrations
 - Paperclip is now specified in `ADR-028` as a future optional organizational runtime add-on; development connector code exists, but it is excluded from the public default catalog until explicitly released

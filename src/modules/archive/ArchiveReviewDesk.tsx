@@ -177,8 +177,8 @@ export function ArchiveReviewDesk({
           </div>
         ) : null}
         <div className="inline-notice">
-          Auto sync is opt-in because provider usage can cost money. When enabled, ResonantOS periodically scans connected source
-          folders, queues new or changed files, verifier-approves routine artifacts, promotes approved pages, and refreshes wiki navigation while the app is open.
+          Auto sync is opt-in because provider usage can cost money. When enabled, ResonantOS periodically runs archive
+          maintenance, refreshes wiki navigation, and continues non-blocked AI Memory builds while the app is open.
         </div>
       </Panel>
 

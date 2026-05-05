@@ -255,7 +255,7 @@ The command:
 
 This is the default product path for building AI Memory from an imported library. Lower-level queue/process/approve/promote commands remain available for review desk operations, debugging, and add-on integration, but the user-facing flow should prefer this job command.
 
-The Review Desk may continue an existing durable job by calling this command with the job summary's stored `manifestPath`. This continuation is intentionally user-triggered in the first implementation so provider cost, review blockers, and approval state remain visible before another model batch runs.
+The Review Desk may continue an existing durable job by calling this command with the job summary's stored `manifestPath`. Manual continuation is always explicit. Automatic continuation is allowed only when Archive auto-sync is enabled and the job is not blocked by errors, escalated review, or human-review status.
 
 ### `archive_ai_memory_build_jobs`
 
@@ -268,7 +268,7 @@ The command:
 - sorts newest jobs first
 - lets the Review Desk show build history, current queue pressure, review blockers, promotion counts, errors, and next action
 
-This command does not continue execution by itself. It is the persistence and visibility layer used by the Review Desk `Continue Build` action. Fully automatic scheduled continuation remains a later runner step.
+This command does not continue execution by itself. It is the persistence and visibility layer used by the Review Desk `Continue Build` action and by the auto-sync guard that resumes safe `running` or `ready-to-promote` jobs while the app is open.
 
 ### Optional Audio2TOL Add-on Bridge
 

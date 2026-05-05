@@ -1386,6 +1386,7 @@ const providerStreamInputs = (): Array<{ systemPrompt: string; messages: Convers
 
 describe("App boot flow", () => {
   afterEach(async () => {
+    vi.useRealTimers();
     cleanup();
     if (typeof window.localStorage?.clear === "function") {
       window.localStorage.clear();
