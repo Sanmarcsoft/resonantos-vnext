@@ -102,6 +102,7 @@ const {
   requestEngineerRecoveryTurnMock,
   requestRecoveryRouteCandidatesMock,
   requestProviderDiagnosticsMock,
+  requestProviderSetupProbeMock,
   requestProviderSmokeTestMock,
   requestLivingArchiveMemoryServiceStatusMock,
   requestLivingArchiveMemoryServiceStartMock,
@@ -1143,6 +1144,19 @@ const {
     checkedAt: "unix:2",
     summary: "Provider smoke test passed.",
   })),
+  requestProviderSetupProbeMock: vi.fn(async (input) => ({
+    providerId: input.providerId,
+    ok: true,
+    setupState: "routable-now",
+    discoveredModels: ["batiai/gemma4-e2b:q4", "qwen3:4b"],
+    recommendedPrimaryModel: "batiai/gemma4-e2b:q4",
+    recommendedFallbackModel: "qwen3:4b",
+    endpoint: input.runtimeNodeEndpoint ?? input.apiBaseUrl ?? "http://127.0.0.1:11434",
+    checkedAt: "unix:3",
+    summary: "Ollama runtime responded with installed models.",
+    detail: "Discovered through Ollama /api/tags; no model names were guessed.",
+    source: "ollama-tags",
+  })),
   requestLivingArchiveMemoryServiceStatusMock: vi.fn(async () => ({
     available: true,
     running: false,
@@ -1201,6 +1215,7 @@ vi.mock("./core/runtime", () => ({
   requestArchiveIngestProbe: requestArchiveIngestProbeMock,
   requestLocalRuntimeStatus: requestLocalRuntimeStatusMock,
   requestProviderDiagnostics: requestProviderDiagnosticsMock,
+  requestProviderSetupProbe: requestProviderSetupProbeMock,
   requestProviderSmokeTest: requestProviderSmokeTestMock,
   requestLivingArchiveMemoryServiceStatus: requestLivingArchiveMemoryServiceStatusMock,
   requestLivingArchiveMemoryServiceStart: requestLivingArchiveMemoryServiceStartMock,
@@ -2480,6 +2495,20 @@ describe("App boot flow", () => {
       checkedAt: "unix:2",
       summary: "Provider smoke test passed.",
     });
+    requestProviderSetupProbeMock.mockReset();
+    requestProviderSetupProbeMock.mockImplementation(async (input) => ({
+      providerId: input.providerId,
+      ok: true,
+      setupState: "routable-now",
+      discoveredModels: ["batiai/gemma4-e2b:q4", "qwen3:4b"],
+      recommendedPrimaryModel: "batiai/gemma4-e2b:q4",
+      recommendedFallbackModel: "qwen3:4b",
+      endpoint: input.runtimeNodeEndpoint ?? input.apiBaseUrl ?? "http://127.0.0.1:11434",
+      checkedAt: "unix:3",
+      summary: "Ollama runtime responded with installed models.",
+      detail: "Discovered through Ollama /api/tags; no model names were guessed.",
+      source: "ollama-tags",
+    }));
     requestLivingArchiveMemoryServiceStatusMock.mockReset();
     requestLivingArchiveMemoryServiceStatusMock.mockResolvedValue({
       available: true,
@@ -3611,7 +3640,13 @@ describe("App boot flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add Provider" }));
 
     expect(await screen.findByText("Studio Local Runtime")).toBeTruthy();
-    expect(screen.getByText("Studio Local Runtime was added to the provider fabric.")).toBeTruthy();
+    expect(screen.getByText("Studio Local Runtime was added. Ollama runtime responded with installed models.")).toBeTruthy();
+    expect(requestProviderSetupProbeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerType: "local",
+        runtimeNodeEndpoint: "http://127.0.0.1:11434",
+      }),
+    );
   });
 
   it("starts the Living Archive memory bridge from settings", async () => {

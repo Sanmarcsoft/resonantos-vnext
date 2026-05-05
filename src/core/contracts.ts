@@ -407,6 +407,20 @@ export interface ProviderSmokeTestResult {
   summary: string;
 }
 
+export interface ProviderSetupProbeResult {
+  providerId: string;
+  ok: boolean;
+  setupState: "routable-now" | "adapter-pending" | "unavailable";
+  discoveredModels: string[];
+  recommendedPrimaryModel?: string;
+  recommendedFallbackModel?: string;
+  endpoint: string;
+  checkedAt: string;
+  summary: string;
+  detail: string;
+  source: "native-template" | "openai-compatible-models" | "ollama-tags" | "http-probe" | "unsupported-adapter";
+}
+
 export interface HermesAuditFinding {
   id: string;
   severity: "ready" | "info" | "warning" | "blocked";

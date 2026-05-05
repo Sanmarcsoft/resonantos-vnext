@@ -368,6 +368,33 @@ pub(crate) struct ProviderSmokeTestResult {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderSetupProbeRequest {
+    pub(crate) provider_id: String,
+    pub(crate) provider_type: String,
+    pub(crate) api_base_url: Option<String>,
+    pub(crate) runtime_node_kind: Option<String>,
+    pub(crate) runtime_node_endpoint: Option<String>,
+    pub(crate) auth_tier: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderSetupProbeResult {
+    pub(crate) provider_id: String,
+    pub(crate) ok: bool,
+    pub(crate) setup_state: String,
+    pub(crate) discovered_models: Vec<String>,
+    pub(crate) recommended_primary_model: Option<String>,
+    pub(crate) recommended_fallback_model: Option<String>,
+    pub(crate) endpoint: String,
+    pub(crate) checked_at: String,
+    pub(crate) summary: String,
+    pub(crate) detail: String,
+    pub(crate) source: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ArchiveIngestProbeRequest {
     pub(crate) provider_id: String,
     pub(crate) provider_type: String,
@@ -533,6 +560,51 @@ fn resolve_local_runtime_model(model: &str) -> &str {
 
 fn local_runtime_base_url(runtime_node_endpoint: Option<String>) -> String {
     runtime_node_endpoint.unwrap_or_else(|| "http://127.0.0.1:11434".to_string())
+}
+
+fn models_endpoint_for_openai_compatible(base_url: &str) -> String {
+    format!("{}/models", base_url.trim_end_matches('/'))
+}
+
+fn ollama_tags_endpoint(base_url: &str) -> String {
+    format!("{}/api/tags", base_url.trim_end_matches('/'))
+}
+
+fn extract_openai_compatible_model_ids(payload: &Value) -> Vec<String> {
+    payload
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|model| model.get("id").and_then(Value::as_str))
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn extract_ollama_tag_model_ids(payload: &Value) -> Vec<String> {
+    payload
+        .get("models")
+        .and_then(Value::as_array)
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|model| {
+                    model
+                        .get("model")
+                        .or_else(|| model.get("name"))
+                        .and_then(Value::as_str)
+                })
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn first_two_models(models: &[String]) -> (Option<String>, Option<String>) {
+    (models.first().cloned(), models.get(1).cloned())
 }
 
 fn parse_ollama_model_names(stdout: &str) -> Vec<String> {
@@ -1494,6 +1566,223 @@ pub(crate) async fn execute_provider_smoke_test(
     })
 }
 
+pub(crate) async fn execute_provider_setup_probe(
+    app: &AppHandle,
+    request: ProviderSetupProbeRequest,
+) -> Result<ProviderSetupProbeResult, String> {
+    let checked_at = now_iso_string();
+    let auth_tier_label = request.auth_tier.as_deref().unwrap_or("unknown");
+    let base_url = if request.provider_type == "local" {
+        local_runtime_base_url(
+            request
+                .runtime_node_endpoint
+                .clone()
+                .or(request.api_base_url.clone()),
+        )
+    } else {
+        resolve_provider_base_url(
+            &request.provider_type,
+            request.api_base_url.clone(),
+            request.runtime_node_endpoint.clone(),
+        )
+        .unwrap_or_else(|_| {
+            request
+                .runtime_node_endpoint
+                .clone()
+                .or(request.api_base_url.clone())
+                .unwrap_or_default()
+        })
+    };
+
+    if request.provider_type == "local" && !base_url.trim_end_matches('/').ends_with("/v1") {
+        let endpoint = ollama_tags_endpoint(&base_url);
+        let response = reqwest::Client::builder()
+            .timeout(Duration::from_secs(8))
+            .build()
+            .map_err(|error| format!("Failed to build HTTP client: {error}"))?
+            .get(&endpoint)
+            .send()
+            .await
+            .map_err(|error| {
+                format!("Failed to reach Ollama model list at `{endpoint}`: {error}")
+            })?;
+        let status = response.status();
+        let payload = response.json::<Value>().await.map_err(|error| {
+            format!("Failed to decode Ollama model list from `{endpoint}`: {error}")
+        })?;
+        if !status.is_success() {
+            return Ok(ProviderSetupProbeResult {
+                provider_id: request.provider_id,
+                ok: false,
+                setup_state: "unavailable".to_string(),
+                discovered_models: Vec::new(),
+                recommended_primary_model: None,
+                recommended_fallback_model: None,
+                endpoint,
+                checked_at,
+                summary: format!("Ollama model discovery failed with HTTP {status}."),
+                detail: "Ollama setup uses the official /api/tags model-list endpoint.".to_string(),
+                source: "ollama-tags".to_string(),
+            });
+        }
+        let models = extract_ollama_tag_model_ids(&payload);
+        let (primary, fallback) = first_two_models(&models);
+        let has_primary = primary.is_some();
+        return Ok(ProviderSetupProbeResult {
+            provider_id: request.provider_id,
+            ok: !models.is_empty(),
+            setup_state: if models.is_empty() {
+                "unavailable".to_string()
+            } else {
+                "routable-now".to_string()
+            },
+            discovered_models: models,
+            recommended_primary_model: primary,
+            recommended_fallback_model: fallback,
+            endpoint,
+            checked_at,
+            summary: if has_primary {
+                "Ollama runtime responded with installed models.".to_string()
+            } else {
+                "Ollama responded, but no installed models were returned.".to_string()
+            },
+            detail: "Discovered through Ollama /api/tags; no model names were guessed.".to_string(),
+            source: "ollama-tags".to_string(),
+        });
+    }
+
+    if request.provider_type == "minimax" {
+        return Ok(ProviderSetupProbeResult {
+            provider_id: request.provider_id,
+            ok: true,
+            setup_state: "routable-now".to_string(),
+            discovered_models: Vec::new(),
+            recommended_primary_model: None,
+            recommended_fallback_model: None,
+            endpoint: base_url,
+            checked_at,
+            summary: "MiniMax native route is configured; template models remain active.".to_string(),
+            detail:
+                "MiniMax setup uses the native ResonantOS adapter and does not guess a model-list endpoint."
+                    .to_string(),
+            source: "native-template".to_string(),
+        });
+    }
+
+    if request.provider_type == "openai"
+        || request.provider_type == "openai-compatible"
+        || base_url.trim_end_matches('/').ends_with("/v1")
+    {
+        let endpoint = models_endpoint_for_openai_compatible(&base_url);
+        let api_key = resolve_provider_secret(app, &request.provider_id)?;
+        let mut builder = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|error| format!("Failed to build HTTP client: {error}"))?
+            .get(&endpoint)
+            .header("Content-Type", "application/json");
+        if let Some(key) = api_key {
+            builder = builder.bearer_auth(key);
+        }
+        let response = builder
+            .send()
+            .await
+            .map_err(|error| format!("Failed to reach model list at `{endpoint}`: {error}"))?;
+        let status = response.status();
+        let payload = response
+            .json::<Value>()
+            .await
+            .map_err(|error| format!("Failed to decode model list from `{endpoint}`: {error}"))?;
+        if !status.is_success() {
+            return Ok(ProviderSetupProbeResult {
+                provider_id: request.provider_id,
+                ok: false,
+                setup_state: "unavailable".to_string(),
+                discovered_models: Vec::new(),
+                recommended_primary_model: None,
+                recommended_fallback_model: None,
+                endpoint,
+                checked_at,
+                summary: format!("Model discovery failed with HTTP {status}."),
+                detail: "OpenAI-compatible setup uses GET /models and the saved credential when available.".to_string(),
+                source: "openai-compatible-models".to_string(),
+            });
+        }
+        let models = extract_openai_compatible_model_ids(&payload);
+        let (primary, fallback) = first_two_models(&models);
+        let has_primary = primary.is_some();
+        let cloud_routable = request.runtime_node_kind.as_deref().unwrap_or("cloud") == "cloud"
+            && matches!(
+                request.provider_type.as_str(),
+                "openai" | "openai-compatible"
+            );
+        return Ok(ProviderSetupProbeResult {
+            provider_id: request.provider_id,
+            ok: !models.is_empty(),
+            setup_state: if models.is_empty() {
+                "unavailable".to_string()
+            } else if cloud_routable {
+                "routable-now".to_string()
+            } else {
+                "adapter-pending".to_string()
+            },
+            discovered_models: models,
+            recommended_primary_model: primary,
+            recommended_fallback_model: fallback,
+            endpoint,
+            checked_at,
+            summary: if has_primary {
+                "OpenAI-compatible model discovery returned available models.".to_string()
+            } else {
+                "Endpoint responded, but no model ids were returned.".to_string()
+            },
+            detail: "Discovered through GET /models; no model names were guessed.".to_string(),
+            source: "openai-compatible-models".to_string(),
+        });
+    }
+
+    let endpoint = base_url;
+    if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
+        let summary = match probe_http_endpoint(&endpoint).await {
+            Ok(detail) => detail,
+            Err(error) => error,
+        };
+        return Ok(ProviderSetupProbeResult {
+            provider_id: request.provider_id,
+            ok: false,
+            setup_state: "adapter-pending".to_string(),
+            discovered_models: Vec::new(),
+            recommended_primary_model: None,
+            recommended_fallback_model: None,
+            endpoint,
+            checked_at,
+            summary,
+            detail: format!(
+                "{} requires a dedicated execution adapter before ResonantOS can discover models or route traffic safely. Auth tier: {}.",
+                request.provider_type, auth_tier_label
+            ),
+            source: "http-probe".to_string(),
+        });
+    }
+
+    Ok(ProviderSetupProbeResult {
+        provider_id: request.provider_id,
+        ok: false,
+        setup_state: "adapter-pending".to_string(),
+        discovered_models: Vec::new(),
+        recommended_primary_model: None,
+        recommended_fallback_model: None,
+        endpoint,
+        checked_at,
+        summary: "No probeable endpoint is configured.".to_string(),
+        detail: format!(
+            "Provider profile was created, but setup cannot be automated until an endpoint or adapter exists. Auth tier: {}.",
+            auth_tier_label
+        ),
+        source: "unsupported-adapter".to_string(),
+    })
+}
+
 pub(crate) async fn execute_archive_ingest_probe(
     app: &AppHandle,
     request: ArchiveIngestProbeRequest,
@@ -1543,10 +1832,12 @@ pub(crate) async fn execute_archive_ingest_probe(
 mod tests {
     use super::{
         ensure_runtime_kind_supported, extract_assistant_content, extract_cloud_usage,
-        extract_local_assistant_content, extract_local_usage, filter_think_stream_delta,
-        http_probe_outcome, parse_ollama_model_names, resolve_local_runtime_model,
-        resolve_provider_base_url, resolve_provider_execution_adapter, sanitize_assistant_content,
-        sanitize_stream_delta, strip_think_blocks, ProviderExecutionAdapter,
+        extract_local_assistant_content, extract_local_usage, extract_ollama_tag_model_ids,
+        extract_openai_compatible_model_ids, filter_think_stream_delta, http_probe_outcome,
+        models_endpoint_for_openai_compatible, ollama_tags_endpoint, parse_ollama_model_names,
+        resolve_local_runtime_model, resolve_provider_base_url, resolve_provider_execution_adapter,
+        sanitize_assistant_content, sanitize_stream_delta, strip_think_blocks,
+        ProviderExecutionAdapter,
     };
     use serde_json::json;
 
@@ -1667,6 +1958,44 @@ mod tests {
         assert_eq!(
             parsed,
             vec!["batiai/gemma4-e2b:q4".to_string(), "qwen3:4b".to_string()]
+        );
+    }
+
+    #[test]
+    fn builds_model_discovery_endpoints_without_guessing_provider_paths() {
+        assert_eq!(
+            models_endpoint_for_openai_compatible("https://openrouter.ai/api/v1/"),
+            "https://openrouter.ai/api/v1/models"
+        );
+        assert_eq!(
+            ollama_tags_endpoint("http://127.0.0.1:11434/"),
+            "http://127.0.0.1:11434/api/tags"
+        );
+    }
+
+    #[test]
+    fn extracts_model_ids_from_supported_discovery_payloads() {
+        let openai_like = json!({
+            "object": "list",
+            "data": [
+                { "id": "model-a" },
+                { "id": "model-b" }
+            ]
+        });
+        assert_eq!(
+            extract_openai_compatible_model_ids(&openai_like),
+            vec!["model-a".to_string(), "model-b".to_string()]
+        );
+
+        let ollama_tags = json!({
+            "models": [
+                { "name": "gemma3:4b" },
+                { "model": "qwen3:4b" }
+            ]
+        });
+        assert_eq!(
+            extract_ollama_tag_model_ids(&ollama_tags),
+            vec!["gemma3:4b".to_string(), "qwen3:4b".to_string()]
         );
     }
 

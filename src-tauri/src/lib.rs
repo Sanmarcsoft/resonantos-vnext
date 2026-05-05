@@ -117,10 +117,11 @@ use crate::paperclip_service::{
 use crate::provider_service::{
     abort_provider_service_chat_stream, execute_archive_ingest_probe,
     execute_provider_service_chat, execute_provider_service_chat_stream,
-    execute_provider_smoke_test, query_local_runtime_status, query_provider_diagnostics,
-    query_recovery_route_candidates, ArchiveIngestProbeRequest, ArchiveIngestProbeResult,
-    ChatMessageInput, LocalRuntimeStatus, ProviderDiagnosticReport, ProviderServiceChatRequest,
-    ProviderServiceChatStreamRequest, ProviderSmokeTestResult, RecoveryRouteCandidate,
+    execute_provider_setup_probe, execute_provider_smoke_test, query_local_runtime_status,
+    query_provider_diagnostics, query_recovery_route_candidates, ArchiveIngestProbeRequest,
+    ArchiveIngestProbeResult, ChatMessageInput, LocalRuntimeStatus, ProviderDiagnosticReport,
+    ProviderServiceChatRequest, ProviderServiceChatStreamRequest, ProviderSetupProbeRequest,
+    ProviderSetupProbeResult, ProviderSmokeTestResult, RecoveryRouteCandidate,
 };
 use crate::recovery_service::{
     execute_engineer_recovery_turn, EngineerRecoveryTurnRequest, EngineerRecoveryTurnResult,
@@ -1067,6 +1068,30 @@ async fn provider_smoke_test(
 }
 
 #[tauri::command]
+async fn provider_setup_probe(
+    app: AppHandle,
+    provider_id: String,
+    provider_type: String,
+    api_base_url: Option<String>,
+    runtime_node_kind: Option<String>,
+    runtime_node_endpoint: Option<String>,
+    auth_tier: Option<String>,
+) -> Result<ProviderSetupProbeResult, String> {
+    execute_provider_setup_probe(
+        &app,
+        ProviderSetupProbeRequest {
+            provider_id,
+            provider_type,
+            api_base_url,
+            runtime_node_kind,
+            runtime_node_endpoint,
+            auth_tier,
+        },
+    )
+    .await
+}
+
+#[tauri::command]
 fn provider_service_abort_chat_completion(run_id: String) -> Result<(), String> {
     abort_provider_service_chat_stream(&run_id);
     Ok(())
@@ -1196,6 +1221,7 @@ pub fn run() {
             recovery_route_candidates,
             provider_diagnostics,
             provider_smoke_test,
+            provider_setup_probe,
             provider_service_chat_completion,
             provider_service_chat_completion_stream,
             provider_service_abort_chat_completion,

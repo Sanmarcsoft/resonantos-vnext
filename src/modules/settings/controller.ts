@@ -18,6 +18,7 @@ import {
   requestLivingArchiveMemoryServiceStatus,
   requestLivingArchiveMemoryServiceStop,
   requestProviderDiagnostics,
+  requestProviderSetupProbe,
   requestProviderSmokeTest,
   saveProviderSecret,
 } from "../../core/runtime";
@@ -293,12 +294,51 @@ export const executeCreateProviderProfile = async ({
       await saveProviderSecret(providerId, cleanSecret);
     }
 
+    let nextProvider = provider;
+    let nextRuntimeNode = runtimeNode;
+    let setupNotice = `${cleanLabel} was added to the provider fabric.`;
+
+    try {
+      const setupProbe = await requestProviderSetupProbe({
+        providerId,
+        providerType: provider.providerType,
+        apiBaseUrl: provider.apiBaseUrl,
+        runtimeNodeKind: runtimeNode.kind,
+        runtimeNodeEndpoint: runtimeNode.endpoint,
+        authTier: provider.authTier,
+      });
+      if (setupProbe.discoveredModels.length > 0) {
+        nextProvider = {
+          ...provider,
+          allowedModels: setupProbe.discoveredModels,
+          primaryModel: setupProbe.recommendedPrimaryModel ?? setupProbe.discoveredModels[0] ?? provider.primaryModel,
+          fallbackModel: setupProbe.recommendedFallbackModel ?? setupProbe.discoveredModels[1] ?? provider.fallbackModel,
+          modelContext: setupProbe.discoveredModels.map((model) => ({
+            model,
+            maxContextTokens: 32_000,
+            tokenEstimateMethod: "provider-metadata",
+            source: "provider-default",
+          })),
+          status: setupProbe.setupState === "routable-now" ? "ready" : setupProbe.setupState === "adapter-pending" ? "missing" : "missing",
+        };
+        nextRuntimeNode = {
+          ...runtimeNode,
+          supportedModels: setupProbe.discoveredModels,
+          healthState: setupProbe.setupState === "routable-now" ? "ready" : setupProbe.setupState === "adapter-pending" ? "unavailable" : "unavailable",
+          notes: [`${setupProbe.setupState}: ${setupProbe.summary}`, setupProbe.detail],
+        };
+      }
+      setupNotice = `${cleanLabel} was added. ${setupProbe.summary}`;
+    } catch (error) {
+      setupNotice = `${cleanLabel} was added, but automated setup probe failed: ${errorMessageOf(error, "Probe failed.")}`;
+    }
+
     updateRuntimeState((draft) => ({
       ...draft,
-      providers: [...draft.providers, provider],
-      runtimeNodes: [...draft.runtimeNodes, runtimeNode],
+      providers: [...draft.providers, nextProvider],
+      runtimeNodes: [...draft.runtimeNodes, nextRuntimeNode],
     }));
-    setSettingsNotice(`${cleanLabel} was added to the provider fabric.`);
+    setSettingsNotice(setupNotice);
   } catch (error) {
     setSettingsNotice(errorMessageOf(error, "Failed to add provider profile."));
   }

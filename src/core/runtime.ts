@@ -74,6 +74,7 @@ import type {
   PaperclipCreateIssueResult,
   ProviderDiagnosticReport,
   ProviderProfile,
+  ProviderSetupProbeResult,
   ProviderSmokeTestResult,
   RecoveryRouteCandidate,
   ResonantShellState,
@@ -1176,6 +1177,20 @@ export const requestProviderSmokeTest = async (input: {
     return (await invoke("provider_smoke_test", input)) as ProviderSmokeTestResult;
   }
   throw new Error("Provider smoke tests are available only in the desktop shell.");
+};
+
+export const requestProviderSetupProbe = async (input: {
+  providerId: string;
+  providerType: ProviderProfile["providerType"];
+  apiBaseUrl?: string;
+  runtimeNodeKind?: string;
+  runtimeNodeEndpoint?: string;
+  authTier?: string;
+}): Promise<ProviderSetupProbeResult> => {
+  if (hasTauri()) {
+    return (await invoke("provider_setup_probe", input)) as ProviderSetupProbeResult;
+  }
+  throw new Error("Provider setup probes are available only in the desktop shell.");
 };
 
 const readPersistedState = async (): Promise<ResonantShellState | null> => {
