@@ -28,6 +28,14 @@ For a browser-only preview:
 npm run dev
 ```
 
+## Git Workflow
+
+- Active development happens on `dev`.
+- `main` is the stable preview/release branch.
+- Commit to `dev` by default.
+- Do not commit directly to `main` unless explicitly instructed.
+- Merge or PR `dev` into `main` only after deterministic validation.
+
 ## Public Source Preview
 
 This repository is a public source preview of the new ResonantOS direction plus the SDK foundation for creating add-ons.
