@@ -60,7 +60,7 @@ ResonantOS_User/
 
 Current implementation status:
 
-- Fresh installs create the `ResonantOS_User` root under the user's Documents folder unless overridden.
+- Fresh installs create the `ResonantOS_User` root under the user's home folder unless overridden. This avoids protected-folder prompts on macOS while keeping the user-state package visible and portable.
 - `RESONANTOS_USER_STATE_ROOT` or `RESONANT_USER_STATE_ROOT` can override the location.
 - Living Archive managed memory resolves through `ResonantOS_User/Memory`.
 - Provider secrets now resolve under `ResonantOS_User/Secrets/provider-secrets.json`.

@@ -38,6 +38,7 @@ ResonantOS_User/
 ```
 
 This root is the user's portable ResonantOS identity, memory, configuration, and recovery package.
+By default, ResonantOS creates this folder directly under the user's home directory, not inside protected platform folders such as macOS Documents/Desktop/Downloads. Users may explicitly choose another location, but automatic defaults must avoid recurring operating-system privacy prompts.
 
 A user should be able to copy this folder to a new computer, install ResonantOS, select the folder, unlock the secure vault, and regain a working system in minutes.
 

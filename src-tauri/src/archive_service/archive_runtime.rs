@@ -130,8 +130,9 @@ impl ArchiveRuntime {
 
         let raw = fs::read_to_string(&config_path)
             .map_err(|error| format!("Failed to read archive config: {error}"))?;
-        let config: ArchiveConfigFile = serde_json::from_str(&raw)
+        let mut config: ArchiveConfigFile = serde_json::from_str(&raw)
             .map_err(|error| format!("Invalid archive config JSON: {error}"))?;
+        normalize_portable_archive_config(&config_path, &mut config, &portable_user_state)?;
 
         let config_root = PathBuf::from(&config.config_root);
         let mapping_file = config
@@ -285,6 +286,24 @@ fn write_default_archive_config(
     config_path: &PathBuf,
     portable_user_state: &PortableUserStateStatus,
 ) -> Result<(), String> {
+    let config = portable_archive_config(portable_user_state);
+    for directory in [
+        PathBuf::from(&config.config_root),
+        PathBuf::from(&config.logs_root),
+        PathBuf::from(&config.data_root),
+        PathBuf::from(&config.wiki_root),
+    ] {
+        fs::create_dir_all(&directory).map_err(|error| {
+            format!(
+                "Failed to create default Living Archive directory {}: {error}",
+                directory.display()
+            )
+        })?;
+    }
+    write_archive_config(config_path, &config)
+}
+
+fn portable_archive_config(portable_user_state: &PortableUserStateStatus) -> ArchiveConfigFile {
     let root = PathBuf::from(&portable_user_state.root_path);
     let memory_root = PathBuf::from(&portable_user_state.memory_root);
     let config_root = PathBuf::from(&portable_user_state.config_root);
@@ -292,16 +311,7 @@ fn write_default_archive_config(
     let index_root = memory_root.join("INDEX");
     let wiki_root = memory_root.join("AI_MEMORY").join("wiki");
 
-    for directory in [&config_root, &logs_root, &index_root, &wiki_root] {
-        fs::create_dir_all(directory).map_err(|error| {
-            format!(
-                "Failed to create default Living Archive directory {}: {error}",
-                directory.display()
-            )
-        })?;
-    }
-
-    let config = ArchiveConfigFile {
+    ArchiveConfigFile {
         mode: Some("portable-user-state".to_string()),
         vault_root: root.display().to_string(),
         managed_root: memory_root.display().to_string(),
@@ -310,8 +320,32 @@ fn write_default_archive_config(
         logs_root: logs_root.display().to_string(),
         config_root: config_root.display().to_string(),
         mapping_file: None,
-    };
+    }
+}
 
+fn normalize_portable_archive_config(
+    config_path: &PathBuf,
+    config: &mut ArchiveConfigFile,
+    portable_user_state: &PortableUserStateStatus,
+) -> Result<(), String> {
+    if config.mode.as_deref() != Some("portable-user-state") {
+        return Ok(());
+    }
+    let expected = portable_archive_config(portable_user_state);
+    if config.vault_root == expected.vault_root
+        && config.managed_root == expected.managed_root
+        && config.wiki_root == expected.wiki_root
+        && config.data_root == expected.data_root
+        && config.logs_root == expected.logs_root
+        && config.config_root == expected.config_root
+    {
+        return Ok(());
+    }
+    *config = expected;
+    write_archive_config(config_path, config)
+}
+
+fn write_archive_config(config_path: &PathBuf, config: &ArchiveConfigFile) -> Result<(), String> {
     let payload = serde_json::to_string_pretty(&config)
         .map_err(|error| format!("Failed to encode default Living Archive config: {error}"))?;
     fs::write(config_path, payload).map_err(|error| {
@@ -440,4 +474,64 @@ pub(crate) fn query_archive_runtime_status(
         stats,
         recent_activity,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_portable_archive_config, portable_archive_config, ArchiveConfigFile};
+    use crate::host_state::PortableUserStateStatus;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn portable_status(root: PathBuf) -> PortableUserStateStatus {
+        PortableUserStateStatus {
+            root_path: root.display().to_string(),
+            manifest_path: root
+                .join("Config")
+                .join("portable-state-manifest.json")
+                .display()
+                .to_string(),
+            memory_root: root.join("Memory").display().to_string(),
+            config_root: root.join("Config").display().to_string(),
+            secrets_root: root.join("Secrets").display().to_string(),
+            wallets_root: root.join("Wallets").display().to_string(),
+            logs_root: root.join("Logs").display().to_string(),
+            backups_root: root.join("Backups").display().to_string(),
+            source: "home-default".to_string(),
+            initialized: true,
+        }
+    }
+
+    #[test]
+    fn normalizes_portable_archive_config_after_root_migration() {
+        let root = std::env::temp_dir().join(format!(
+            "resonantos-archive-config-normalize-test-{}",
+            std::process::id()
+        ));
+        let target_root = root.join("ResonantOS_User");
+        let config_path = target_root.join("Config").join("ARCHIVE_CONFIG.json");
+        fs::create_dir_all(config_path.parent().expect("config should have parent"))
+            .expect("config parent should write");
+        let status = portable_status(target_root);
+        let mut config = ArchiveConfigFile {
+            mode: Some("portable-user-state".to_string()),
+            vault_root: "/Users/example/Documents/ResonantOS_User".to_string(),
+            managed_root: "/Users/example/Documents/ResonantOS_User/Memory".to_string(),
+            wiki_root: "/Users/example/Documents/ResonantOS_User/Memory/AI_MEMORY/wiki".to_string(),
+            data_root: "/Users/example/Documents/ResonantOS_User/Memory/INDEX".to_string(),
+            logs_root: "/Users/example/Documents/ResonantOS_User/Logs/archive".to_string(),
+            config_root: "/Users/example/Documents/ResonantOS_User/Config".to_string(),
+            mapping_file: None,
+        };
+
+        normalize_portable_archive_config(&config_path, &mut config, &status)
+            .expect("portable config should normalize");
+        let expected = portable_archive_config(&status);
+
+        assert_eq!(config.vault_root, expected.vault_root);
+        assert_eq!(config.managed_root, expected.managed_root);
+        assert!(config_path.exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
 }

@@ -197,7 +197,7 @@ Current Living Archive status:
 - `Mixed Library` as the staging path for imported folders or vaults that contain mixed material.
 - ADR-022 defines the Portable User State Root as the long-term single private data package for memory, config, encrypted secrets, wallet vaults, logs, and backups.
 - Source-local `_LivingArchive` output is now considered transitional; new import work should target `ResonantOS_User/Memory`.
-- First host resolver is implemented: ResonantOS initializes `ResonantOS_User`, creates the standard private-data subfolders and manifest, and routes new Living Archive managed memory through `ResonantOS_User/Memory`.
+- First host resolver is implemented: ResonantOS initializes `ResonantOS_User` in the user's home folder by default, creates the standard private-data subfolders and manifest, and routes new Living Archive managed memory through `ResonantOS_User/Memory`.
 
 ### Library Import And Reorganisation Planning
 

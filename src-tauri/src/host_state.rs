@@ -8,6 +8,8 @@ use serde_json::json;
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
+const PORTABLE_USER_STATE_FOLDER: &str = "ResonantOS_User";
+
 pub(crate) fn app_state_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let base = app
         .path()
@@ -55,6 +57,17 @@ fn portable_user_state_root_from_runtime_state(app: &AppHandle) -> Result<Option
     Ok(configured.map(PathBuf::from))
 }
 
+fn user_home_dir() -> Option<PathBuf> {
+    env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+}
+
+fn portable_user_state_root_for_home(home_dir: PathBuf) -> PathBuf {
+    home_dir.join(PORTABLE_USER_STATE_FOLDER)
+}
+
 pub(crate) fn portable_user_state_root(app: &AppHandle) -> Result<(PathBuf, String), String> {
     if let Some(path) = env::var_os("RESONANTOS_USER_STATE_ROOT") {
         return Ok((
@@ -71,14 +84,14 @@ pub(crate) fn portable_user_state_root(app: &AppHandle) -> Result<(PathBuf, Stri
     if let Some(path) = portable_user_state_root_from_runtime_state(app)? {
         return Ok((path, "runtime-state".to_string()));
     }
-    if let Ok(documents_dir) = app.path().document_dir() {
+    if let Some(home_dir) = user_home_dir() {
         return Ok((
-            documents_dir.join("ResonantOS_User"),
-            "documents-default".to_string(),
+            portable_user_state_root_for_home(home_dir),
+            "home-default".to_string(),
         ));
     }
     Ok((
-        app_state_dir(app)?.join("ResonantOS_User"),
+        app_state_dir(app)?.join(PORTABLE_USER_STATE_FOLDER),
         "app-config-default".to_string(),
     ))
 }
@@ -364,11 +377,18 @@ pub(crate) fn resolve_provider_secret(
 mod tests {
     use super::{
         assert_addon_capabilities_from_state, assert_living_archive_host_access_from_state,
-        merge_legacy_provider_secrets,
+        merge_legacy_provider_secrets, portable_user_state_root_for_home,
     };
     use std::collections::HashMap;
+    use std::path::PathBuf;
 
     use serde_json::json;
+
+    #[test]
+    fn home_default_portable_user_state_root_avoids_documents_tcc_prompt() {
+        let root = portable_user_state_root_for_home(PathBuf::from("/Users/example"));
+        assert_eq!(root, PathBuf::from("/Users/example/ResonantOS_User"));
+    }
 
     #[test]
     fn addon_capability_gate_requires_enabled_grants() {
