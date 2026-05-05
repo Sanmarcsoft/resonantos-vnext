@@ -291,16 +291,25 @@ fn read_provider_secrets_file(path: &PathBuf) -> Result<HashMap<String, String>,
 
 fn merge_legacy_provider_secrets(
     mut portable: HashMap<String, String>,
-    legacy: HashMap<String, String>,
+    legacy: &HashMap<String, String>,
 ) -> (HashMap<String, String>, bool) {
     let mut changed = false;
     for (provider_id, secret) in legacy {
-        if !secret.trim().is_empty() && !portable.contains_key(&provider_id) {
-            portable.insert(provider_id, secret);
+        if !secret.trim().is_empty() && !portable.contains_key(provider_id) {
+            portable.insert(provider_id.clone(), secret.clone());
             changed = true;
         }
     }
     (portable, changed)
+}
+
+fn legacy_provider_secrets_migrated(
+    portable: &HashMap<String, String>,
+    legacy: &HashMap<String, String>,
+) -> bool {
+    legacy
+        .iter()
+        .all(|(provider_id, secret)| secret.trim().is_empty() || portable.contains_key(provider_id))
 }
 
 pub(crate) fn read_provider_secrets(app: &AppHandle) -> Result<HashMap<String, String>, String> {
@@ -309,13 +318,21 @@ pub(crate) fn read_provider_secrets(app: &AppHandle) -> Result<HashMap<String, S
     let legacy_path = legacy_provider_secrets_file(app)?;
     let legacy_secrets = read_provider_secrets_file(&legacy_path)?;
     let (merged_secrets, migrated) =
-        merge_legacy_provider_secrets(portable_secrets, legacy_secrets);
+        merge_legacy_provider_secrets(portable_secrets, &legacy_secrets);
 
     if migrated {
         let payload = serde_json::to_string_pretty(&merged_secrets)
             .map_err(|error| format!("Failed to encode migrated provider secrets: {error}"))?;
         fs::write(&path, payload)
             .map_err(|error| format!("Failed to migrate provider secrets: {error}"))?;
+    }
+    if legacy_path.exists() && legacy_provider_secrets_migrated(&merged_secrets, &legacy_secrets) {
+        fs::remove_file(&legacy_path).map_err(|error| {
+            format!(
+                "Failed to remove migrated legacy provider secrets {}: {error}",
+                legacy_path.display()
+            )
+        })?;
     }
 
     Ok(merged_secrets)
@@ -377,7 +394,8 @@ pub(crate) fn resolve_provider_secret(
 mod tests {
     use super::{
         assert_addon_capabilities_from_state, assert_living_archive_host_access_from_state,
-        merge_legacy_provider_secrets, portable_user_state_root_for_home,
+        legacy_provider_secrets_migrated, merge_legacy_provider_secrets,
+        portable_user_state_root_for_home,
     };
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -474,7 +492,7 @@ mod tests {
             ("empty-provider".to_string(), "   ".to_string()),
         ]);
 
-        let (merged, changed) = merge_legacy_provider_secrets(portable, legacy);
+        let (merged, changed) = merge_legacy_provider_secrets(portable, &legacy);
 
         assert!(changed);
         assert_eq!(
@@ -486,5 +504,32 @@ mod tests {
             Some(&"legacy-minimax-secret".to_string())
         );
         assert!(!merged.contains_key("empty-provider"));
+    }
+
+    #[test]
+    fn provider_secret_migration_can_remove_legacy_copy_after_all_keys_exist() {
+        let portable = HashMap::from([
+            (
+                "shared-openai".to_string(),
+                "portable-openai-secret".to_string(),
+            ),
+            (
+                "shared-minimax".to_string(),
+                "legacy-minimax-secret".to_string(),
+            ),
+        ]);
+        let legacy = HashMap::from([
+            (
+                "shared-openai".to_string(),
+                "stale-legacy-openai-secret".to_string(),
+            ),
+            (
+                "shared-minimax".to_string(),
+                "legacy-minimax-secret".to_string(),
+            ),
+            ("empty-provider".to_string(), "   ".to_string()),
+        ]);
+
+        assert!(legacy_provider_secrets_migrated(&portable, &legacy));
     }
 }
