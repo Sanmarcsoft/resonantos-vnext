@@ -247,11 +247,18 @@ pub(crate) fn execute_hermes_chat(request: HermesChatRequest) -> Result<HermesCh
     if prompt.is_empty() {
         return Err("Hermes chat prompt is empty.".to_string());
     }
-    let selected_model = request.model.map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
+    let selected_model = request
+        .model
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
     validate_selected_model(&home, selected_model.as_deref())?;
 
     let mut process = hermes_command(&command);
-    process.arg("chat").arg("-Q").arg("--source").arg("resonantos");
+    process
+        .arg("chat")
+        .arg("-Q")
+        .arg("--source")
+        .arg("resonantos");
     if let Some(model) = selected_model.as_deref() {
         process.arg("-m").arg(model);
     }
@@ -309,8 +316,12 @@ pub(crate) fn install_hermes(request: HermesInstallRequest) -> Result<HermesInst
         ));
     }
 
-    fs::create_dir_all(&home)
-        .map_err(|error| format!("Failed to create Hermes profile directory {}: {error}", home.display()))?;
+    fs::create_dir_all(&home).map_err(|error| {
+        format!(
+            "Failed to create Hermes profile directory {}: {error}",
+            home.display()
+        )
+    })?;
     let installer_path = env::temp_dir().join(format!(
         "resonantos-hermes-install-{}-{}.sh",
         std::process::id(),
@@ -372,13 +383,20 @@ pub(crate) fn install_hermes(request: HermesInstallRequest) -> Result<HermesInst
     Ok(HermesInstallResult {
         success,
         profile_home: home.display().to_string(),
-        command: format!("bash {} --skip-setup --branch {} --hermes-home {}", HERMES_INSTALLER_URL, branch, home.display()),
+        command: format!(
+            "bash {} --skip-setup --branch {} --hermes-home {}",
+            HERMES_INSTALLER_URL,
+            branch,
+            home.display()
+        ),
         log,
         status,
     })
 }
 
-pub(crate) fn query_hermes_workspace_snapshot(profile_home: Option<String>) -> HermesWorkspaceSnapshot {
+pub(crate) fn query_hermes_workspace_snapshot(
+    profile_home: Option<String>,
+) -> HermesWorkspaceSnapshot {
     let install = query_hermes_status(profile_home.clone());
     HermesWorkspaceSnapshot {
         dashboard: query_hermes_dashboard_status(profile_home.clone(), None, None),
@@ -419,7 +437,8 @@ pub(crate) fn query_hermes_dashboard_status(
         .map(clean_output)
         .unwrap_or_else(|| "Hermes dashboard status is unavailable.".to_string());
     let tcp_running = socket_open(&host, port);
-    let status_running = raw_status.to_lowercase().contains("running") && !raw_status.to_lowercase().contains("no hermes dashboard");
+    let status_running = raw_status.to_lowercase().contains("running")
+        && !raw_status.to_lowercase().contains("no hermes dashboard");
     let running = tcp_running || status_running;
     let detail = if running {
         format!("Hermes dashboard is reachable at {url}.")
@@ -436,10 +455,15 @@ pub(crate) fn query_hermes_dashboard_status(
     }
 }
 
-pub(crate) fn start_hermes_dashboard(request: HermesDashboardRequest) -> Result<HermesDashboardStatus, String> {
+pub(crate) fn start_hermes_dashboard(
+    request: HermesDashboardRequest,
+) -> Result<HermesDashboardStatus, String> {
     let home = resolve_hermes_home(request.profile_home.clone());
     let Some(binary) = resolve_hermes_command(&home) else {
-        return Err("Hermes CLI was not found. Install or update Hermes before launching the dashboard.".to_string());
+        return Err(
+            "Hermes CLI was not found. Install or update Hermes before launching the dashboard."
+                .to_string(),
+        );
     };
     let host = request.host.unwrap_or_else(|| "127.0.0.1".to_string());
     let port = request.port.unwrap_or(9119);
@@ -467,13 +491,22 @@ pub(crate) fn start_hermes_dashboard(request: HermesDashboardRequest) -> Result<
         }
         std::thread::sleep(Duration::from_millis(150));
     }
-    Ok(query_hermes_dashboard_status(request.profile_home, Some(host), Some(port)))
+    Ok(query_hermes_dashboard_status(
+        request.profile_home,
+        Some(host),
+        Some(port),
+    ))
 }
 
-pub(crate) fn stop_hermes_dashboard(profile_home: Option<String>) -> Result<HermesDashboardStatus, String> {
+pub(crate) fn stop_hermes_dashboard(
+    profile_home: Option<String>,
+) -> Result<HermesDashboardStatus, String> {
     let home = resolve_hermes_home(profile_home.clone());
     let Some(binary) = resolve_hermes_command(&home) else {
-        return Err("Hermes CLI was not found. Install or update Hermes before stopping the dashboard.".to_string());
+        return Err(
+            "Hermes CLI was not found. Install or update Hermes before stopping the dashboard."
+                .to_string(),
+        );
     };
     let mut command = hermes_command(&binary);
     command
@@ -490,10 +523,7 @@ pub(crate) fn query_hermes_profiles(profile_home: Option<String>) -> Vec<HermesP
         return Vec::new();
     };
     let mut command = hermes_command(&binary);
-    command
-        .arg("profile")
-        .arg("list")
-        .env("HERMES_HOME", &home);
+    command.arg("profile").arg("list").env("HERMES_HOME", &home);
     command_output(&mut command)
         .ok()
         .map(clean_output)
@@ -539,7 +569,10 @@ pub(crate) fn query_hermes_kanban_snapshot(profile_home: Option<String>) -> Herm
         .arg("kanban")
         .arg("stats")
         .env("HERMES_HOME", &home);
-    let raw_stats = command_output(&mut stats_command).ok().map(clean_output).unwrap_or_default();
+    let raw_stats = command_output(&mut stats_command)
+        .ok()
+        .map(clean_output)
+        .unwrap_or_default();
     let mut tasks_command = hermes_command(&binary);
     tasks_command
         .arg("kanban")
@@ -552,7 +585,10 @@ pub(crate) fn query_hermes_kanban_snapshot(profile_home: Option<String>) -> Herm
         .arg("kanban")
         .arg("assignees")
         .env("HERMES_HOME", &home);
-    let assignees_raw = command_output(&mut assignees_command).ok().map(clean_output).unwrap_or_default();
+    let assignees_raw = command_output(&mut assignees_command)
+        .ok()
+        .map(clean_output)
+        .unwrap_or_default();
     HermesKanbanSnapshot {
         counts: parse_kanban_counts(&raw_stats),
         tasks: parse_kanban_tasks(&tasks_raw),
@@ -900,7 +936,8 @@ fn socket_open(host: &str, port: u16) -> bool {
     let Ok(mut addresses) = (host, port).to_socket_addrs() else {
         return false;
     };
-    addresses.any(|address| TcpStream::connect_timeout(&address, Duration::from_millis(150)).is_ok())
+    addresses
+        .any(|address| TcpStream::connect_timeout(&address, Duration::from_millis(150)).is_ok())
 }
 
 fn parse_profile_list(output: &str) -> Vec<HermesProfileSummary> {
@@ -916,7 +953,10 @@ fn parse_profile_list(output: &str) -> Vec<HermesProfileSummary> {
                 return None;
             }
             let current = trimmed.starts_with('◆') || trimmed.starts_with('*');
-            let cleaned = trimmed.trim_start_matches('◆').trim_start_matches('*').trim();
+            let cleaned = trimmed
+                .trim_start_matches('◆')
+                .trim_start_matches('*')
+                .trim();
             let parts = cleaned.split_whitespace().collect::<Vec<_>>();
             if parts.len() < 3 {
                 return None;
@@ -1302,8 +1342,8 @@ fn chrono_like_now() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        clean_hermes_chat_output, clean_hermes_failure_output, hermes_command, parse_kanban_counts,
-        install_hermes, parse_available_models_from_config, parse_current_model_from_config,
+        clean_hermes_chat_output, clean_hermes_failure_output, hermes_command, install_hermes,
+        parse_available_models_from_config, parse_current_model_from_config, parse_kanban_counts,
         parse_kanban_tasks, parse_profile_list, resolve_hermes_command, validate_selected_model,
         HermesInstallRequest,
     };
@@ -1345,7 +1385,8 @@ mod tests {
         let venv_bin = root.join("hermes-agent").join("venv").join("bin");
         fs::create_dir_all(&venv_bin).expect("venv bin should be created");
         let hermes_path = venv_bin.join("hermes");
-        fs::write(&hermes_path, "#!/bin/sh\necho 'Hermes Agent test'\n").expect("hermes should be written");
+        fs::write(&hermes_path, "#!/bin/sh\necho 'Hermes Agent test'\n")
+            .expect("hermes should be written");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1417,7 +1458,8 @@ providers:
         .expect("config should be written");
 
         assert!(validate_selected_model(&root, Some("gemma-4-26b-a4b-q4_k_m.gguf")).is_ok());
-        let error = validate_selected_model(&root, Some("minimax-m2.7")).expect_err("model should be rejected");
+        let error = validate_selected_model(&root, Some("minimax-m2.7"))
+            .expect_err("model should be rejected");
         assert!(error.contains("not declared"));
 
         let _ = fs::remove_dir_all(root);
@@ -1495,7 +1537,10 @@ providers:
             r#"[{"id":"T-1","title":"Review archive","status":"ready","assignee":"archivist"}]"#,
         );
 
-        assert_eq!(counts, vec![("triage".to_string(), 2), ("ready".to_string(), 1)]);
+        assert_eq!(
+            counts,
+            vec![("triage".to_string(), 2), ("ready".to_string(), 1)]
+        );
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "Review archive");
         assert_eq!(tasks[0].assignee.as_deref(), Some("archivist"));
