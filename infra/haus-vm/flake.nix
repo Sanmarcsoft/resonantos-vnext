@@ -1,13 +1,22 @@
 {
-  description = "haus.matthewstevens.org: Hermes-backed widget bridge VM image";
+  description = "haus.matthewstevens.org: Hermes-backed widget bridge VM image and microvm module";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
     flake-utils.url = "github:numtide/flake-utils";
+
+    # MicroVM framework. The deployment target nix.matthewstevens.org
+    # already runs microvm.nix for openclaw-vm, so we follow the same
+    # pattern for haus-vm. The host's flake imports nixosModules.default
+    # from this flake and gets a port-compatible drop-in replacement.
+    microvm.url = "github:astro/microvm.nix";
+    microvm.inputs.nixpkgs.follows = "nixpkgs";
+
     # The upstream Hermes Agent already ships a flake; we consume its package.
+    # Used by the OCI image output and by the future cli-mode Hermes wiring
+    # inside the microvm. Pinned to a sha once that wiring is exercised.
     hermes-agent = {
       url = "github:NousResearch/hermes-agent";
-      # We deliberately do NOT follow nixpkgs here: Hermes pins its own runtime.
       flake = true;
     };
   };
@@ -15,10 +24,13 @@
   # Cross-compile target follows the Sanmarcsoft Cross-Compile Law:
   # dev hosts are aarch64-darwin (Apple Silicon) and aarch64-linux (Linux ARM),
   # production target is x86_64-linux. OCI image MUST be produced for x86_64-linux.
+  # The microvm module is consumed by the host's nixosConfigurations, which
+  # already commits to x86_64-linux.
   outputs =
     { self
     , nixpkgs
     , flake-utils
+    , microvm
     , hermes-agent
     }:
     let
@@ -26,24 +38,56 @@
       buildHosts = [ "aarch64-darwin" "aarch64-linux" "x86_64-linux" ];
       # Target the image runs ON. Single target by SOP.
       targetSystem = "x86_64-linux";
+
+      # widget-bridge source tree, filtered. This is the canonical source
+      # consumed by both the OCI image and the microvm systemd unit. Stripped
+      # of node_modules and dist so neither artefact pulls in unvetted files.
+      widgetBridgeSrcGen = pkgs: pkgs.runCommand "widget-bridge-src" { } ''
+        mkdir -p $out
+        cp -r ${./widget-bridge}/. $out/
+        rm -rf $out/node_modules $out/dist
+      '';
+
+      # Internal port the widget-bridge binds inside the VM. Match the
+      # openclaw-vm guest port (19100) so caddy's existing
+      # /api/* upstream at 127.0.0.1:19101 keeps reaching the chat
+      # service across the cutover. No caddy change required.
+      internalWidgetPort = 19100;
+
+      # Host port → VM port mapping. This MATCHES the openclaw-vm hostfwd
+      # surface byte for byte, so haus-vm is a true drop-in replacement.
+      # Ports we do not implement yet (gateway 18789/18790, MCP 3103/3203)
+      # are still forwarded into the VM and will 502 the same way they do
+      # today, until services are bound inside the VM in a follow-up.
+      hausHostforwards = [
+        # SSH into the VM for ops, mirrors openclaw-vm:2223.
+        { protocol = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 2223;  guest.address = ""; guest.port = 22;    }
+        # Gateway, currently inactive. Reserved for future haus-vm services.
+        { protocol = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 18789; guest.address = ""; guest.port = 18789; }
+        { protocol = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 18790; guest.address = ""; guest.port = 18790; }
+        # Widget chat. Caddy on the host already routes
+        # /api/* → 127.0.0.1:19101, which lands here as VM port 19100.
+        { protocol = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 19101; guest.address = ""; guest.port = internalWidgetPort; }
+        # Zorin MCP. claude-peers' systemd zorin-port-relay terminates at
+        # 10.0.0.112:3113 and forwards into here as VM port 3103. The MCP
+        # service inside haus-vm is a follow-up; the hostfwd is reserved
+        # now so claude-peers does not have to change at cutover.
+        { protocol = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 3103;  guest.address = ""; guest.port = 3103;  }
+        { protocol = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 3203;  guest.address = ""; guest.port = 3103;  }
+      ];
     in
-    flake-utils.lib.eachSystem buildHosts (system:
+    # Per-build-host outputs: the OCI image (kept for sovereign-registry path)
+    # and the devshell. The microvm module sits outside this loop because it
+    # binds to a specific target system (x86_64-linux) and is consumed by a
+    # host nixosConfigurations.
+    (flake-utils.lib.eachSystem buildHosts (system:
       let
         pkgs = import nixpkgs { inherit system; };
         pkgsTarget = import nixpkgs {
           inherit system;
           crossSystem = { config = "x86_64-unknown-linux-gnu"; };
         };
-
-        # widget-bridge is a Bun TypeScript service. We install Bun into the image
-        # and copy the source tree; the entrypoint runs `bun src/server.ts`.
-        # Filter out node_modules and dist so the OCI image never ships
-        # unvetted artefacts; Bun resolves at boot from the committed lockfile.
-        widgetBridgeSrc = pkgs.runCommand "widget-bridge-src" { } ''
-          mkdir -p $out
-          cp -r ${./widget-bridge}/. $out/
-          rm -rf $out/node_modules $out/dist
-        '';
+        widgetBridgeSrc = widgetBridgeSrcGen pkgs;
 
         entrypoint = pkgs.writeShellScript "haus-vm-entrypoint" ''
           #!${pkgsTarget.bash}/bin/bash
@@ -61,32 +105,20 @@
             bun
             cacert
             coreutils
-            # hermes-agent.packages.${targetSystem}.default
-            # ^ Wire this in once we confirm the upstream attribute name.
-            # For 0.1.0 scaffold the stub client does not need Hermes installed.
           ];
           extraCommands = ''
             mkdir -p app
             cp -r ${widgetBridgeSrc} app/widget-bridge
             chmod -R u+rwX,go+rX app
-            # Minimal /etc/passwd and /etc/group so the numeric User
-            # below resolves to a name when downstream tools consult them.
             mkdir -p etc
             echo "haus:x:1000:1000:haus-vm:/app:/sbin/nologin" > etc/passwd
             echo "haus:x:1000:" > etc/group
           '';
           config = {
             Entrypoint = [ "${entrypoint}" ];
-            # Non-root execution. The container does not need root for any
-            # operation: the bridge binds an unprivileged port and reads
-            # only from /app/widget-bridge.
             User = "1000:1000";
             Env = [
               "PORT=8080"
-              # Default to loopback inside the container: production sits
-              # behind a reverse proxy (Caddy/Traefik or Scaleway LB), which
-              # is the only path that should reach the bridge. Override to
-              # 0.0.0.0 only when no proxy fronts the container.
               "HOST=127.0.0.1"
               "NODE_ENV=production"
               "HERMES_MODE=stub"
@@ -103,8 +135,6 @@
         };
       in
       {
-        # `nix build .#packages.<buildHost>.oci-image` always produces an
-        # x86_64-linux image, regardless of the host you build from.
         packages = {
           oci-image = ociImage;
           default = ociImage;
@@ -115,16 +145,55 @@
             bun
             nodejs_20
             skopeo
-            # Pulumi is installed separately via the workstation toolchain;
-            # not pinned here to avoid pulling the closure into every dev shell.
           ];
           shellHook = ''
             echo "haus-vm devshell. Bun $(bun --version)"
-            echo "  build OCI:   nix build .#packages.${system}.oci-image"
-            echo "  push (SOP):  skopeo copy docker-archive:./result \\"
-            echo "                   docker://rg.fr-par.scw.cloud/sanmarcsoft/haus-vm:testing"
+            echo "  build OCI:    nix build .#packages.${system}.oci-image"
+            echo "  build microvm: nix build .#nixosConfigurations.haus-vm.config.microvm.declaredRunner"
           '';
         };
       }
-    );
+    )) // {
+      # --- microvm module -----------------------------------------------------
+      #
+      # The host (nix.matthewstevens.org) imports `nixosModules.default` from
+      # this flake. That module declares one microvm, `haus-vm`, that takes
+      # over the hostfwd surface previously owned by openclaw-vm. The host
+      # config disables openclaw-vm and adds this module in the same rebuild.
+      #
+      # Pattern follows microvm.nix's declarative `microvm.vms.<name>` route,
+      # which auto-wires the systemd service on the host side. We also expose
+      # a complete `nixosConfigurations.haus-vm` so the guest can be built and
+      # inspected standalone via `nix flake check` and friends.
+
+      nixosModules.default = { config, lib, pkgs, ... }: {
+        imports = [ microvm.nixosModules.host ];
+
+        microvm.vms.haus-vm = {
+          flake = self;
+          # Pull the guest config directly from this flake's
+          # nixosConfigurations.haus-vm so the deployment is one-shot.
+          config = (import ./microvm-config.nix) {
+            inherit lib pkgs microvm internalWidgetPort hausHostforwards;
+            widgetBridgeSrc = widgetBridgeSrcGen pkgs;
+          };
+        };
+      };
+
+      # The guest, available standalone for validation:
+      #   nix build .#nixosConfigurations.haus-vm.config.system.build.toplevel
+      #   nix run   .#nixosConfigurations.haus-vm.config.microvm.declaredRunner
+      nixosConfigurations.haus-vm = nixpkgs.lib.nixosSystem {
+        system = targetSystem;
+        modules = [
+          microvm.nixosModules.microvm
+          ((import ./microvm-config.nix) {
+            lib = nixpkgs.lib;
+            pkgs = import nixpkgs { system = targetSystem; };
+            inherit microvm internalWidgetPort hausHostforwards;
+            widgetBridgeSrc = widgetBridgeSrcGen (import nixpkgs { system = targetSystem; });
+          })
+        ];
+      };
+    };
 }
