@@ -127,7 +127,7 @@ describe("LiveHermesClient", () => {
     expect(p.ready).toEqual(["zorin"]);
   });
 
-  test("injects an EI hint system message just before the user turn when eiEnabled", async () => {
+  test("merges EI hint into the single system message (not a second system turn)", async () => {
     let captured: { messages: Array<{ role: string; content: string }> } | null = null;
     const fetcher = (async (_url: string | URL, init?: RequestInit) => {
       captured = JSON.parse((init?.body as string) ?? "{}");
@@ -142,9 +142,12 @@ describe("LiveHermesClient", () => {
     expect(r.ok).toBe(true);
     expect(captured).not.toBeNull();
     const roles = captured!.messages.map((m) => m.role);
-    expect(roles).toEqual(["system", "system", "user"]);
-    expect(captured!.messages[1]!.content).toContain("[EI hint]");
-    expect(captured!.messages[1]!.content).toMatch(/worry|fear|sadness/);
+    // Exactly one system turn; some providers (MLX-served Gemma) return
+    // HTTP 500 on two consecutive system messages.
+    expect(roles).toEqual(["system", "user"]);
+    expect(captured!.messages[0]!.content).toContain("Max Zorin");
+    expect(captured!.messages[0]!.content).toContain("[EI hint]");
+    expect(captured!.messages[0]!.content).toMatch(/worry|fear|sadness/);
   });
 
   test("re-asks once when the draft mis-fits the inbound EI shape", async () => {
@@ -170,10 +173,13 @@ describe("LiveHermesClient", () => {
     expect(callCount).toBe(2);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.reply).toContain("I hear the runway");
-    // The retry call should contain the previous draft as assistant + a corrective system note.
+    // The retry call carries the previous draft as assistant + a corrective
+    // user note. No mid-stream system messages on retry either.
     const retry = seen[1]!;
     expect(retry.some((m) => m.role === "assistant" && m.content.startsWith("Cut the marketing"))).toBe(true);
-    expect(retry.some((m) => m.role === "system" && m.content.includes("[EI corrective]"))).toBe(true);
+    expect(retry.some((m) => m.role === "user" && m.content.includes("[EI corrective]"))).toBe(true);
+    // Verify retry has exactly one system turn (the merged Zorin + hint).
+    expect(retry.filter((m) => m.role === "system").length).toBe(1);
   });
 
   test("does not re-ask when draft already aligns with inbound", async () => {

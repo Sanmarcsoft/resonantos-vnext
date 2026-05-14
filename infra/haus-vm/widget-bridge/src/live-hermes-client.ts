@@ -165,14 +165,17 @@ export class LiveHermesClient implements HermesClient {
     const conversationId = req.conversationId ?? crypto.randomUUID();
     const history = conversationCache.get(conversationId)?.messages ?? [];
 
-    // Pre-hook: classify the inbound user turn. The hint is injected as a
-    // system message immediately before the user turn so the model has it
-    // in context without polluting the persisted conversation history.
+    // Pre-hook: classify the inbound user turn. The hint is merged into the
+    // single system message rather than injected as a second system turn —
+    // some providers (notably MLX-served Gemma 3 4B QAT) reject two
+    // consecutive system messages with HTTP 500.
     const inboundEi: EiClassification | null = this.eiEnabled ? classifyEI(req.message) : null;
+    const systemContent = inboundEi
+      ? `${this.systemPrompt}\n\n${inboundEi.promptHint}`
+      : this.systemPrompt;
     const messages: ProviderMessage[] = [
-      { role: "system", content: this.systemPrompt },
+      { role: "system", content: systemContent },
       ...history.slice(-CONVERSATION_TURN_LIMIT),
-      ...(inboundEi ? [{ role: "system" as const, content: inboundEi.promptHint }] : []),
       { role: "user", content: req.message },
     ];
 
@@ -187,11 +190,13 @@ export class LiveHermesClient implements HermesClient {
       const draftEi = classifyEI(first.reply);
       const corrective = recommendDraftFix(inboundEi, draftEi);
       if (corrective) {
+        // Corrective is delivered as a USER turn (not a mid-stream system
+        // message) for the same provider-compatibility reason as the
+        // pre-hook merge above.
         const retryMessages: ProviderMessage[] = [
           ...messages,
           { role: "assistant", content: first.reply },
-          { role: "system", content: corrective },
-          { role: "user", content: "Revise your previous reply per the corrective above. Keep it tight." },
+          { role: "user", content: `${corrective}\n\nRevise your previous reply per the corrective above. Keep it tight.` },
         ];
         const retry = await this.callProvider(retryMessages);
         if (retry.ok) {
