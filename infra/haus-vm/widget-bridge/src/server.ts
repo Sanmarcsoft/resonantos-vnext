@@ -34,6 +34,7 @@ import type {
   WidgetChatResponse,
 } from "./types";
 import { StubHermesClient, resolveProfile, type HermesClient } from "./hermes-client";
+import { LiveHermesClient } from "./live-hermes-client";
 
 const VERSION = "0.1.0";
 const STARTED_AT = Date.now();
@@ -83,7 +84,11 @@ function selectClient(): HermesClient {
     case "stub":
       return new StubHermesClient();
     case "cli":
-      throw new Error("HERMES_MODE=cli not implemented in 0.1.0 scaffold");
+      // Stage 1 of Hermes Agency: an OpenAI-compatible /chat/completions
+      // client with a Zorin persona system prompt. Stage 2 (full
+      // hermes-agent gateway integration) plugs in here without changing
+      // the server contract.
+      return new LiveHermesClient();
     default:
       throw new Error(`Unknown HERMES_MODE: ${HERMES_MODE}`);
   }
@@ -237,7 +242,7 @@ async function handleChat(req: Request): Promise<Response> {
     const result = await client.chat({ ...parsed.value, botId: resolvedBotId });
     const latencyMs = Math.round(performance.now() - t0);
     if (!result.ok) {
-      const status = result.code === "profile-not-found" ? 404 : 502;
+      const status = result.code === "profile-not-found" ? 404 : result.code === "timeout" ? 504 : 502;
       return json<WidgetChatError>({ error: result.code, detail: result.detail }, status);
     }
     const response: WidgetChatResponse = {

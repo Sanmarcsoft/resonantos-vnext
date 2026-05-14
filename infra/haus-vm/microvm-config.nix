@@ -40,9 +40,26 @@ in
     # flake.nix as the single source of truth for the wire surface.
     forwardPorts = hausHostforwards;
 
-    # No virtiofs shares: the widget-bridge is fully self-contained in
-    # /nix/store. The image is reproducible from flake.lock alone.
-    shares = [ ];
+    # One virtiofs share: the host-managed bridge env file at
+    # /etc/haus-vm/bridge.env. Holding BRIDGE_TOKEN out of the nix
+    # store and out of the guest image means the secret can rotate
+    # without a rebuild; the host file is root-owned 0600 and the
+    # guest's systemd (PID 1) reads it before dropping to the haus
+    # user. Migration to sops-nix in-guest is a follow-up.
+    shares = [{
+      proto = "virtiofs";
+      tag = "haus-secrets";
+      source = "/etc/haus-vm";
+      mountPoint = "/etc/haus-vm";
+    }];
+  };
+
+  # Mount the shared bridge env directory at boot. fileSystems entries
+  # are required so the guest knows what to mount the virtiofs tag at.
+  fileSystems."/etc/haus-vm" = {
+    device = "haus-secrets";
+    fsType = "virtiofs";
+    options = [ "ro" ];
   };
 
   # Allow the widget-bridge to receive traffic inside the VM. Hostfwd
@@ -78,7 +95,15 @@ in
         "PORT=${toString internalWidgetPort}"
         "HOST=0.0.0.0"
         "NODE_ENV=production"
-        "HERMES_MODE=stub"
+        # Hermes Agency Stage 1: real LLM via OpenAI-compatible
+        # /chat/completions, Zorin system prompt baked in the client.
+        # Required provider env (HERMES_PROVIDER_URL, HERMES_PROVIDER_KEY,
+        # HERMES_MODEL) is read from /etc/haus-vm/bridge.env via the
+        # EnvironmentFile above. If HERMES_PROVIDER_KEY is empty the
+        # client returns a structured runtime-error per turn; it does
+        # NOT block startup, so the service stays up while the operator
+        # provisions the key.
+        "HERMES_MODE=cli"
         "ALLOWED_HOSTS=haus.matthewstevens.org,localhost,127.0.0.1,10.0.0.112"
       ];
       ExecStart = "${widgetBridgeLauncher}";
