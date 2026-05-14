@@ -1,0 +1,21 @@
+{
+  "name": "@resonantos/haus-vm-pulumi",
+  "version": "0.1.0",
+  "description": "Pulumi TypeScript program for the haus.matthewstevens.org Hermes VM.",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "preview": "pulumi preview",
+    "up": "pulumi up",
+    "destroy": "pulumi destroy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pulumi/pulumi": "^3.130.0",
+    "@pulumi/scaleway": "^1.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.6.0"
+  }
+}
