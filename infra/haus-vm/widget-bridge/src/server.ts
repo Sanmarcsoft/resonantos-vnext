@@ -23,6 +23,21 @@
  *                                              comma-separated list of Host
  *                                              header values accepted on /api.
  *   HERMES_MODE    (default "stub"):          "stub" | "cli" (cli not implemented yet).
+ *   STT_BASE_URL   (default http://10.0.0.96:8001):
+ *                                              Percy STT base. The bridge
+ *                                              proxies multipart audio to
+ *                                              `{STT_BASE_URL}/transcribe` so
+ *                                              browsers reaching the
+ *                                              Cloudflare-tunnelled origin do
+ *                                              not need LAN access.
+ *   TTS_BASE_URL   (default http://10.0.0.96:8080):
+ *                                              Qwen3TTS base. The bridge POSTs
+ *                                              `{text, voice}` and streams the
+ *                                              returned audio bytes back to
+ *                                              the browser.
+ *   TTS_TIMEOUT_MS (default 20000):            cap on TTS synthesis call.
+ *   STT_TIMEOUT_MS (default 20000):            cap on STT transcribe call.
+ *   STT_MAX_BYTES  (default 5_242_880, 5 MiB): cap on inbound audio body.
  */
 
 import { timingSafeEqual } from "node:crypto";
@@ -52,6 +67,13 @@ const ALLOWED_HOSTS = (process.env["ALLOWED_HOSTS"] ?? "haus.matthewstevens.org,
 const MAX_BODY_BYTES = 32 * 1024;
 const MAX_MESSAGE_LEN = 8000;
 const CHAT_TIMEOUT_MS = 8000;
+
+const STT_BASE_URL = (process.env["STT_BASE_URL"] ?? "http://10.0.0.96:8001").replace(/\/$/, "");
+const TTS_BASE_URL = (process.env["TTS_BASE_URL"] ?? "http://10.0.0.96:8080").replace(/\/$/, "");
+const STT_TIMEOUT_MS = Number(process.env["STT_TIMEOUT_MS"] ?? 20000);
+const TTS_TIMEOUT_MS = Number(process.env["TTS_TIMEOUT_MS"] ?? 20000);
+const STT_MAX_BYTES = Number(process.env["STT_MAX_BYTES"] ?? 5 * 1024 * 1024);
+const MAX_TTS_TEXT_LEN = 4000;
 
 const BOT_ID_RE = /^[a-z][a-z0-9_-]{0,31}$/;
 const ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
@@ -286,6 +308,174 @@ function handleLivez(): Response {
 }
 
 /**
+ * STT proxy. Accepts the browser's multipart/form-data POST and forwards
+ * the raw body and content-type to Percy's `/transcribe` endpoint, then
+ * returns Percy's JSON response verbatim. The bridge owns the auth + host
+ * guard so the public origin can speak STT without exposing the LAN-only
+ * Percy host.
+ */
+async function handleStt(req: Request): Promise<Response> {
+  if (!hostOk(req)) return json<WidgetChatError>({ error: "forbidden-host" }, 403);
+  if (!authOk(req)) return json<WidgetChatError>({ error: "unauthorized" }, 401);
+
+  const contentLength = Number(req.headers.get("content-length") ?? "0");
+  if (contentLength > STT_MAX_BYTES) {
+    return json<WidgetChatError>(
+      { error: "payload-too-large", detail: `max ${STT_MAX_BYTES} bytes` },
+      413,
+    );
+  }
+  const contentType = req.headers.get("content-type") ?? "";
+  if (!contentType.startsWith("multipart/form-data")) {
+    return json<WidgetChatError>(
+      { error: "bad-request", detail: "content-type must be multipart/form-data" },
+      400,
+    );
+  }
+
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), STT_TIMEOUT_MS);
+  let body: ArrayBuffer;
+  try {
+    body = await req.arrayBuffer();
+  } catch (err) {
+    clearTimeout(timer);
+    return json<WidgetChatError>(
+      { error: "bad-request", detail: `failed to read body: ${err instanceof Error ? err.message : String(err)}` },
+      400,
+    );
+  }
+  if (body.byteLength > STT_MAX_BYTES) {
+    clearTimeout(timer);
+    return json<WidgetChatError>(
+      { error: "payload-too-large", detail: `max ${STT_MAX_BYTES} bytes` },
+      413,
+    );
+  }
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${STT_BASE_URL}/transcribe`, {
+      method: "POST",
+      headers: { "content-type": contentType },
+      body,
+      signal: ac.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    const msg = err instanceof Error ? err.message : String(err);
+    return json<WidgetChatError>(
+      { error: ac.signal.aborted ? "timeout" : "runtime-error", detail: `STT proxy failed: ${msg}` },
+      ac.signal.aborted ? 504 : 502,
+    );
+  }
+  clearTimeout(timer);
+
+  const upstreamText = await upstream.text().catch(() => "");
+  if (!upstream.ok) {
+    return json<WidgetChatError>(
+      { error: "runtime-error", detail: `STT upstream HTTP ${upstream.status}: ${upstreamText.slice(0, 256)}` },
+      502,
+    );
+  }
+  return new Response(upstreamText, {
+    status: 200,
+    headers: { "content-type": "application/json", ...SECURITY_HEADERS },
+  });
+}
+
+/**
+ * TTS proxy. Accepts `{text, voice}` JSON and POSTs to the Qwen3TTS server
+ * with the same shape, streaming the returned audio bytes back to the
+ * browser. Voice defaults to "zorin". The bridge owns the auth + host guard.
+ */
+async function handleTts(req: Request): Promise<Response> {
+  if (!hostOk(req)) return json<WidgetChatError>({ error: "forbidden-host" }, 403);
+  if (!authOk(req)) return json<WidgetChatError>({ error: "unauthorized" }, 401);
+
+  const contentLengthRaw = req.headers.get("content-length");
+  if (contentLengthRaw !== null) {
+    const contentLength = Number(contentLengthRaw);
+    if (!Number.isFinite(contentLength) || contentLength > MAX_BODY_BYTES) {
+      return json<WidgetChatError>(
+        { error: "payload-too-large", detail: `max ${MAX_BODY_BYTES} bytes` },
+        413,
+      );
+    }
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return json<WidgetChatError>({ error: "invalid-json" }, 400);
+  }
+  if (typeof body !== "object" || body === null) {
+    return json<WidgetChatError>({ error: "bad-request", detail: "body must be JSON object" }, 400);
+  }
+  const r = body as Record<string, unknown>;
+  const text = r["text"];
+  const voice = typeof r["voice"] === "string" && r["voice"].length > 0 ? r["voice"] : "zorin";
+  if (typeof text !== "string" || text.length === 0) {
+    return json<WidgetChatError>({ error: "bad-request", detail: "text must be a non-empty string" }, 400);
+  }
+  if (text.length > MAX_TTS_TEXT_LEN) {
+    return json<WidgetChatError>(
+      { error: "bad-request", detail: `text exceeds ${MAX_TTS_TEXT_LEN}-char cap` },
+      400,
+    );
+  }
+  if (CONTROL_CHAR_RE.test(text)) {
+    return json<WidgetChatError>(
+      { error: "bad-request", detail: "text contains disallowed control characters" },
+      400,
+    );
+  }
+  if (!/^[a-z][a-z0-9_-]{0,31}$/.test(voice)) {
+    return json<WidgetChatError>({ error: "bad-request", detail: "voice must match [a-z][a-z0-9_-]{0,31}" }, 400);
+  }
+
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), TTS_TIMEOUT_MS);
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${TTS_BASE_URL}/synthesize`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text, voice }),
+      signal: ac.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    const msg = err instanceof Error ? err.message : String(err);
+    return json<WidgetChatError>(
+      { error: ac.signal.aborted ? "timeout" : "runtime-error", detail: `TTS proxy failed: ${msg}` },
+      ac.signal.aborted ? 504 : 502,
+    );
+  }
+  clearTimeout(timer);
+
+  if (!upstream.ok) {
+    const t = await upstream.text().catch(() => "");
+    return json<WidgetChatError>(
+      { error: "runtime-error", detail: `TTS upstream HTTP ${upstream.status}: ${t.slice(0, 256)}` },
+      502,
+    );
+  }
+  const audio = await upstream.arrayBuffer();
+  const upstreamCt = upstream.headers.get("content-type") ?? "audio/mpeg";
+  return new Response(audio, {
+    status: 200,
+    headers: {
+      "content-type": upstreamCt,
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "no-referrer",
+    },
+  });
+}
+
+/**
  * Start a server instance. Exported so tests can boot a fresh instance on a
  * random port without the module-load side-effect of binding to PORT.
  */
@@ -293,15 +483,17 @@ export function startServer(opts: { port?: number; hostname?: string } = {}) {
   return Bun.serve({
     port: opts.port ?? PORT,
     hostname: opts.hostname ?? HOST,
-    idleTimeout: 10,
-    maxRequestBodySize: MAX_BODY_BYTES,
+    idleTimeout: 30,
     async fetch(req): Promise<Response> {
       const url = new URL(req.url);
       if (req.method === "GET" && url.pathname === "/livez") return handleLivez();
       if (req.method === "GET" && url.pathname === "/health") return handleHealth(req);
       if (req.method === "POST" && url.pathname === "/api/widget/chat") return handleChat(req);
+      if (req.method === "POST" && url.pathname === "/api/stt/transcribe") return handleStt(req);
+      if (req.method === "POST" && url.pathname === "/api/tts/synthesize") return handleTts(req);
       return json<WidgetChatError>({ error: "not-found" }, 404);
     },
+    maxRequestBodySize: Math.max(MAX_BODY_BYTES, STT_MAX_BYTES),
   });
 }
 

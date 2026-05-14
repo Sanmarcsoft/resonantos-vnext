@@ -179,6 +179,51 @@ ssh nix '
 
 Either route brings openclaw-vm back online and stops haus-vm.
 
+## Phase 6: STT + TTS + avatar pulse on `/chat`
+
+The chat HTML at `/home/matt/nixos-config/monitoring/chat/chat-with-zorin.html` is mirrored in this repo at `infra/haus-vm/chat/chat-with-zorin.html`. Treat the in-repo file as the source of truth and `scp` it across on every change. The widget-bridge gained two new routes (`/api/stt/transcribe`, `/api/tts/synthesize`) which proxy to Percy and Qwen3TTS on the host LAN, so the browser never needs LAN access.
+
+```bash
+# 1. Ship the chat HTML.
+scp infra/haus-vm/chat/chat-with-zorin.html \
+  nix:/home/matt/nixos-config/monitoring/chat/chat-with-zorin.html
+
+# 2. Patch caddy in /home/matt/nixos-config/flake.nix to inject the bearer
+#    for the two new routes (same pattern as /api/widget/chat). Add these
+#    two blocks immediately above the generic `handle /api/*`:
+#
+#      handle /api/stt/* {
+#        request_header Authorization "Bearer {env.BRIDGE_TOKEN}"
+#        reverse_proxy 127.0.0.1:${toString openclawResonantosDashboardPort}
+#      }
+#      handle /api/tts/* {
+#        request_header Authorization "Bearer {env.BRIDGE_TOKEN}"
+#        reverse_proxy 127.0.0.1:${toString openclawResonantosDashboardPort}
+#      }
+#
+# 3. Make sure /etc/haus-vm/bridge.env carries (defaults shown):
+#      STT_BASE_URL=http://10.0.0.96:8001
+#      TTS_BASE_URL=http://10.0.0.96:8080
+#      STT_TIMEOUT_MS=20000
+#      TTS_TIMEOUT_MS=20000
+#      STT_MAX_BYTES=5242880
+#
+# 4. Rebuild and reload.
+ssh nix 'sudo nixos-rebuild switch --flake /home/matt/nixos-config#nixos-host'
+ssh nix 'sudo systemctl reload caddy'
+
+# 5. Restart the widget-bridge inside haus-vm so it picks up the new env.
+ssh nix 'sudo machinectl shell root@haus-vm /bin/sh -c "systemctl restart haus-widget-bridge"'
+
+# 6. Verify in the browser. Open https://haus.matthewstevens.org/chat
+#    - Hold the mic icon, speak, release. The transcript should drop into the
+#      composer textarea; status line briefly shows "transcribing...".
+#    - Send a message. Voice playback fires on reply; the avatar pulses while
+#      audio plays; voice toggle in the header turns it off.
+```
+
+The avatar pulses on a generic CSS animation while audio plays. Real animated `zorin-<emotion>.mp4` clips on `narrator.matthewstevens.org/static/personas/anim/` do not exist yet; see `docs/architecture/ADR-032-real-hermes-runtime-in-haus-vm.md` and the avatar-clip generation pipeline (a separate art workstream) for the upgrade path.
+
 ## Follow-ups (deferred, separate commits)
 
 - Replace `/etc/haus-vm/bridge.env` with a sops-nix-encrypted file in `nixos-config`.
