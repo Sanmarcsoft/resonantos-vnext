@@ -61,19 +61,19 @@
       # today, until services are bound inside the VM in a follow-up.
       hausHostforwards = [
         # SSH into the VM for ops, mirrors openclaw-vm:2223.
-        { protocol = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 2223;  guest.address = ""; guest.port = 22;    }
+        { proto = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 2223;  guest.address = ""; guest.port = 22;    }
         # Gateway, currently inactive. Reserved for future haus-vm services.
-        { protocol = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 18789; guest.address = ""; guest.port = 18789; }
-        { protocol = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 18790; guest.address = ""; guest.port = 18790; }
+        { proto = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 18789; guest.address = ""; guest.port = 18789; }
+        { proto = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 18790; guest.address = ""; guest.port = 18790; }
         # Widget chat. Caddy on the host already routes
         # /api/* → 127.0.0.1:19101, which lands here as VM port 19100.
-        { protocol = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 19101; guest.address = ""; guest.port = internalWidgetPort; }
+        { proto = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 19101; guest.address = ""; guest.port = internalWidgetPort; }
         # Zorin MCP. claude-peers' systemd zorin-port-relay terminates at
         # 10.0.0.112:3113 and forwards into here as VM port 3103. The MCP
         # service inside haus-vm is a follow-up; the hostfwd is reserved
         # now so claude-peers does not have to change at cutover.
-        { protocol = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 3103;  guest.address = ""; guest.port = 3103;  }
-        { protocol = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 3203;  guest.address = ""; guest.port = 3103;  }
+        { proto = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 3103;  guest.address = ""; guest.port = 3103;  }
+        { proto = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 3203;  guest.address = ""; guest.port = 3103;  }
       ];
     in
     # Per-build-host outputs: the OCI image (kept for sovereign-registry path)
@@ -170,9 +170,8 @@
         imports = [ microvm.nixosModules.host ];
 
         microvm.vms.haus-vm = {
-          flake = self;
-          # Pull the guest config directly from this flake's
-          # nixosConfigurations.haus-vm so the deployment is one-shot.
+          # Fully-declarative VM. microvm.nix does not accept both
+          # `flake` and `config` here; we supply the guest config inline.
           config = (import ./microvm-config.nix) {
             inherit lib pkgs microvm internalWidgetPort hausHostforwards;
             widgetBridgeSrc = widgetBridgeSrcGen pkgs;
