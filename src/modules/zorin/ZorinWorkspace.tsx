@@ -13,18 +13,23 @@
 // with operator metadata.
 
 import { useState } from "react";
+import { ZorinNative } from "./ZorinNative";
 import "./zorin-workspace.css";
 
 const CANONICAL_CHAT_URL = "https://haus.matthewstevens.org/chat";
 
+type ZorinSurface = "native" | "remote";
+
 type ZorinWorkspaceProps = {
   active: boolean;
   chatUrl?: string;
+  initialSurface?: ZorinSurface;
 };
 
-export function ZorinWorkspace({ active, chatUrl }: ZorinWorkspaceProps) {
+export function ZorinWorkspace({ active, chatUrl, initialSurface = "native" }: ZorinWorkspaceProps) {
   const [reloadKey, setReloadKey] = useState(0);
   const [revealEndpoint, setRevealEndpoint] = useState(false);
+  const [surface, setSurface] = useState<ZorinSurface>(initialSurface);
   const url = chatUrl ?? CANONICAL_CHAT_URL;
 
   if (!active) {
@@ -47,18 +52,31 @@ export function ZorinWorkspace({ active, chatUrl }: ZorinWorkspaceProps) {
           <button
             type="button"
             className="zorin-workspace__action"
-            onClick={() => setRevealEndpoint((current) => !current)}
-            aria-pressed={revealEndpoint}
+            onClick={() => setSurface((current) => (current === "native" ? "remote" : "native"))}
+            aria-pressed={surface === "native"}
+            title="Toggle between the native OpenUI surface and the iframe fallback"
           >
-            {revealEndpoint ? "Hide endpoint" : "Show endpoint"}
+            {surface === "native" ? "Surface: native" : "Surface: remote"}
           </button>
-          <button
-            type="button"
-            className="zorin-workspace__action"
-            onClick={() => setReloadKey((key) => key + 1)}
-          >
-            Reload
-          </button>
+          {surface === "remote" && (
+            <button
+              type="button"
+              className="zorin-workspace__action"
+              onClick={() => setRevealEndpoint((current) => !current)}
+              aria-pressed={revealEndpoint}
+            >
+              {revealEndpoint ? "Hide endpoint" : "Show endpoint"}
+            </button>
+          )}
+          {surface === "remote" && (
+            <button
+              type="button"
+              className="zorin-workspace__action"
+              onClick={() => setReloadKey((key) => key + 1)}
+            >
+              Reload
+            </button>
+          )}
           <a className="zorin-workspace__action" href={url} target="_blank" rel="noopener noreferrer">
             Open in browser
           </a>
@@ -74,13 +92,17 @@ export function ZorinWorkspace({ active, chatUrl }: ZorinWorkspaceProps) {
         </div>
       )}
       <div className="zorin-workspace__frame-wrap">
-        <iframe
-          key={reloadKey}
-          className="zorin-workspace__frame"
-          src={url}
-          title="Chat with Zorin"
-          allow="clipboard-write"
-        />
+        {surface === "native" ? (
+          <ZorinNative />
+        ) : (
+          <iframe
+            key={reloadKey}
+            className="zorin-workspace__frame"
+            src={url}
+            title="Chat with Zorin"
+            allow="clipboard-write"
+          />
+        )}
       </div>
     </section>
   );
