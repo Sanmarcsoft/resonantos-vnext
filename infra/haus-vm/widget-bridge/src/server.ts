@@ -30,11 +30,16 @@
  *                                              browsers reaching the
  *                                              Cloudflare-tunnelled origin do
  *                                              not need LAN access.
- *   TTS_BASE_URL   (default http://10.0.0.96:8080):
+ *   TTS_BASE_URL   (default http://10.0.0.96:8880):
  *                                              Qwen3TTS base. The bridge POSTs
- *                                              `{text, voice}` and streams the
- *                                              returned audio bytes back to
- *                                              the browser.
+ *                                              `{model, voice, input}` to
+ *                                              `{TTS_BASE_URL}{TTS_PATH}` and
+ *                                              streams audio bytes back to the
+ *                                              browser. Qwen3TTS speaks the
+ *                                              OpenAI-compatible /v1/audio/speech
+ *                                              contract.
+ *   TTS_PATH       (default /v1/audio/speech): endpoint path appended to TTS_BASE_URL.
+ *   TTS_MODEL      (default qwen3-tts):         model identifier sent in the body.
  *   TTS_TIMEOUT_MS (default 20000):            cap on TTS synthesis call.
  *   STT_TIMEOUT_MS (default 20000):            cap on STT transcribe call.
  *   STT_MAX_BYTES  (default 5_242_880, 5 MiB): cap on inbound audio body.
@@ -69,7 +74,9 @@ const MAX_MESSAGE_LEN = 8000;
 const CHAT_TIMEOUT_MS = 8000;
 
 const STT_BASE_URL = (process.env["STT_BASE_URL"] ?? "http://10.0.0.96:8001").replace(/\/$/, "");
-const TTS_BASE_URL = (process.env["TTS_BASE_URL"] ?? "http://10.0.0.96:8080").replace(/\/$/, "");
+const TTS_BASE_URL = (process.env["TTS_BASE_URL"] ?? "http://10.0.0.96:8880").replace(/\/$/, "");
+const TTS_PATH = process.env["TTS_PATH"] ?? "/v1/audio/speech";
+const TTS_MODEL = process.env["TTS_MODEL"] ?? "qwen3-tts";
 const STT_TIMEOUT_MS = Number(process.env["STT_TIMEOUT_MS"] ?? 20000);
 const TTS_TIMEOUT_MS = Number(process.env["TTS_TIMEOUT_MS"] ?? 20000);
 const STT_MAX_BYTES = Number(process.env["STT_MAX_BYTES"] ?? 5 * 1024 * 1024);
@@ -470,10 +477,12 @@ async function handleTts(req: Request): Promise<Response> {
   const timer = setTimeout(() => ac.abort(), TTS_TIMEOUT_MS);
   let upstream: Response;
   try {
-    upstream = await fetch(`${TTS_BASE_URL}/synthesize`, {
+    // Qwen3TTS speaks the OpenAI-compatible /v1/audio/speech contract:
+    //   { model, voice, input } -> audio/mpeg bytes.
+    upstream = await fetch(`${TTS_BASE_URL}${TTS_PATH}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text: speakable, voice }),
+      body: JSON.stringify({ model: TTS_MODEL, voice, input: speakable }),
       signal: ac.signal,
     });
   } catch (err) {
