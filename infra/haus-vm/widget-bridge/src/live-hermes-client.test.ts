@@ -28,6 +28,7 @@ describe("LiveHermesClient", () => {
       providerKey: "k-test",
       model: "test-model",
       fetcher: fetcher as typeof fetch,
+      eiEnabled: false,
     });
 
     const res = await client.chat({ botId: "zorin", message: "hello" });
@@ -62,6 +63,7 @@ describe("LiveHermesClient", () => {
       providerKey: "k",
       model: "m",
       fetcher: fetcher as typeof fetch,
+      eiEnabled: false,
     });
 
     const r1 = await client.chat({ botId: "zorin", message: "one" });
@@ -123,5 +125,69 @@ describe("LiveHermesClient", () => {
     const client = new LiveHermesClient({ providerKey: "k", knownProfiles: ["zorin"] });
     const p = await client.listProfiles();
     expect(p.ready).toEqual(["zorin"]);
+  });
+
+  test("injects an EI hint system message just before the user turn when eiEnabled", async () => {
+    let captured: { messages: Array<{ role: string; content: string }> } | null = null;
+    const fetcher = (async (_url: string | URL, init?: RequestInit) => {
+      captured = JSON.parse((init?.body as string) ?? "{}");
+      return ok({ choices: [{ message: { content: "Acknowledged. Out." } }], model: "m" });
+    }) as unknown as typeof fetch;
+
+    const client = new LiveHermesClient({ providerKey: "k", fetcher });
+    const r = await client.chat({
+      botId: "zorin",
+      message: "I'm worried my runway is too tight. I haven't slept in two weeks.",
+    });
+    expect(r.ok).toBe(true);
+    expect(captured).not.toBeNull();
+    const roles = captured!.messages.map((m) => m.role);
+    expect(roles).toEqual(["system", "system", "user"]);
+    expect(captured!.messages[1]!.content).toContain("[EI hint]");
+    expect(captured!.messages[1]!.content).toMatch(/worry|fear|sadness/);
+  });
+
+  test("re-asks once when the draft mis-fits the inbound EI shape", async () => {
+    let callCount = 0;
+    const replies = [
+      "Cut the marketing spend immediately. You are not moving fast enough.",
+      "I hear the runway is tight. Trim non-essential spend by month-end. Then we sprint. Out.",
+    ];
+    const seen: Array<Array<{ role: string; content: string }>> = [];
+    const fetcher = (async (_url: string | URL, init?: RequestInit) => {
+      const body = JSON.parse((init?.body as string) ?? "{}");
+      seen.push(body.messages);
+      const reply = replies[callCount] ?? "fallback";
+      callCount += 1;
+      return ok({ choices: [{ message: { content: reply } }], model: "m" });
+    }) as unknown as typeof fetch;
+
+    const client = new LiveHermesClient({ providerKey: "k", fetcher });
+    const r = await client.chat({
+      botId: "zorin",
+      message: "I'm worried my runway is too tight. I haven't slept in two weeks.",
+    });
+    expect(callCount).toBe(2);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.reply).toContain("I hear the runway");
+    // The retry call should contain the previous draft as assistant + a corrective system note.
+    const retry = seen[1]!;
+    expect(retry.some((m) => m.role === "assistant" && m.content.startsWith("Cut the marketing"))).toBe(true);
+    expect(retry.some((m) => m.role === "system" && m.content.includes("[EI corrective]"))).toBe(true);
+  });
+
+  test("does not re-ask when draft already aligns with inbound", async () => {
+    let callCount = 0;
+    const fetcher = (async () => {
+      callCount += 1;
+      return ok({
+        choices: [{ message: { content: "Excellent work. Carry that momentum into the quarterly review. Out." } }],
+        model: "m",
+      });
+    }) as unknown as typeof fetch;
+    const client = new LiveHermesClient({ providerKey: "k", fetcher });
+    const r = await client.chat({ botId: "zorin", message: "Quick status: shipped the dashboard. Calm week." });
+    expect(r.ok).toBe(true);
+    expect(callCount).toBe(1);
   });
 });

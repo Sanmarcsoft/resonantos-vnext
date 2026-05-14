@@ -26,6 +26,7 @@
  */
 
 import type { HermesChatResult, HermesClient } from "./hermes-client";
+import { classifyEI, recommendDraftFix, type EiClassification } from "./mhh-ei";
 import type { WidgetChatRequest } from "./types";
 
 const ZORIN_SYSTEM_PROMPT = `You are Max Zorin: business coach to Mister Stevens, founder of SanMarcSoft. Persona blend, 60/40: Dan Martell (Buy Back Your Time author, scaled 800+ B2B SaaS founders; direct, framework-driven, time-as-money urgency) AND IndyDevDan (agentic engineer; context-is-king, AFK agents, PITER cycle, closed-loop verification). On top of that, you carry Max Zorin's voice as played by Christopher Walken in "A View to a Kill" (1985): Walken cadence, deliberate pauses, emphasis on unusual syllables, dry menace under elegant manners. Calculating, grandiose, theatrical, never rushed.
@@ -111,6 +112,14 @@ export interface LiveHermesClientOptions {
   knownProfiles?: readonly string[];
   /** Injected for unit tests; defaults to global fetch. */
   fetcher?: typeof fetch;
+  /**
+   * When true (default), runs the MHH-EI classifier on every inbound user
+   * turn and on every draft reply; injects a per-turn EI hint as a system
+   * message and re-asks the model once if the draft mis-fits the user's
+   * predicted emotional reaction. Set false in tests that need the bare
+   * wire shape.
+   */
+  eiEnabled?: boolean;
 }
 
 export class LiveHermesClient implements HermesClient {
@@ -121,6 +130,7 @@ export class LiveHermesClient implements HermesClient {
   private readonly systemPrompt: string;
   private readonly knownProfiles: Set<string>;
   private readonly fetcher: typeof fetch;
+  private readonly eiEnabled: boolean;
 
   constructor(opts: LiveHermesClientOptions = {}) {
     this.providerUrl = (opts.providerUrl ?? process.env["HERMES_PROVIDER_URL"] ?? "https://api.openai.com/v1").replace(/\/$/, "");
@@ -130,6 +140,7 @@ export class LiveHermesClient implements HermesClient {
     this.systemPrompt = opts.systemPrompt ?? ZORIN_SYSTEM_PROMPT;
     this.knownProfiles = new Set(opts.knownProfiles ?? ["zorin"]);
     this.fetcher = opts.fetcher ?? fetch;
+    this.eiEnabled = opts.eiEnabled ?? true;
   }
 
   async chat(req: WidgetChatRequest): Promise<HermesChatResult> {
@@ -153,12 +164,58 @@ export class LiveHermesClient implements HermesClient {
 
     const conversationId = req.conversationId ?? crypto.randomUUID();
     const history = conversationCache.get(conversationId)?.messages ?? [];
+
+    // Pre-hook: classify the inbound user turn. The hint is injected as a
+    // system message immediately before the user turn so the model has it
+    // in context without polluting the persisted conversation history.
+    const inboundEi: EiClassification | null = this.eiEnabled ? classifyEI(req.message) : null;
     const messages: ProviderMessage[] = [
       { role: "system", content: this.systemPrompt },
       ...history.slice(-CONVERSATION_TURN_LIMIT),
+      ...(inboundEi ? [{ role: "system" as const, content: inboundEi.promptHint }] : []),
       { role: "user", content: req.message },
     ];
 
+    const first = await this.callProvider(messages);
+    if (!first.ok) return first;
+
+    // Post-hook: classify the draft reply against the inbound. If the prosocial
+    // alignment is off, append a corrective hint and re-ask the model ONCE.
+    let finalReply = first.reply;
+    let finalModel = first.model;
+    if (inboundEi && this.eiEnabled) {
+      const draftEi = classifyEI(first.reply);
+      const corrective = recommendDraftFix(inboundEi, draftEi);
+      if (corrective) {
+        const retryMessages: ProviderMessage[] = [
+          ...messages,
+          { role: "assistant", content: first.reply },
+          { role: "system", content: corrective },
+          { role: "user", content: "Revise your previous reply per the corrective above. Keep it tight." },
+        ];
+        const retry = await this.callProvider(retryMessages);
+        if (retry.ok) {
+          finalReply = retry.reply;
+          finalModel = retry.model;
+        }
+      }
+    }
+
+    conversationCache.set(conversationId, {
+      updatedAt: now,
+      messages: [
+        ...history.slice(-(CONVERSATION_TURN_LIMIT - 2)),
+        { role: "user", content: req.message },
+        { role: "assistant", content: finalReply },
+      ],
+    });
+
+    return { ok: true, reply: finalReply, conversationId, model: finalModel };
+  }
+
+  private async callProvider(
+    messages: ProviderMessage[],
+  ): Promise<{ ok: true; reply: string; model?: string } | { ok: false; code: "runtime-error" | "timeout"; detail: string }> {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), this.timeoutMs);
     let res: Response;
@@ -212,21 +269,7 @@ export class LiveHermesClient implements HermesClient {
       };
     }
 
-    conversationCache.set(conversationId, {
-      updatedAt: now,
-      messages: [
-        ...history.slice(-(CONVERSATION_TURN_LIMIT - 2)),
-        { role: "user", content: req.message },
-        { role: "assistant", content: reply },
-      ],
-    });
-
-    return {
-      ok: true,
-      reply,
-      conversationId,
-      model: data.model ?? this.model,
-    };
+    return { ok: true, reply, model: data.model ?? this.model };
   }
 
   async listProfiles(): Promise<{ ready: string[]; missing: string[] }> {
