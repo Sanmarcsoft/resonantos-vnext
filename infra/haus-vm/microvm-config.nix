@@ -95,7 +95,7 @@ in
         "PORT=${toString internalWidgetPort}"
         "HOST=0.0.0.0"
         "NODE_ENV=production"
-        # Hermes Agency Stage 1: real LLM via OpenAI-compatible
+        # Stage 1 (pre-Hermes): real LLM via OpenAI-compatible
         # /chat/completions, Zorin system prompt baked in the client.
         # Required provider env (HERMES_PROVIDER_URL, HERMES_PROVIDER_KEY,
         # HERMES_MODEL) is read from /etc/haus-vm/bridge.env via the

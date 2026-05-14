@@ -84,7 +84,7 @@ function selectClient(): HermesClient {
     case "stub":
       return new StubHermesClient();
     case "cli":
-      // Stage 1 of Hermes Agency: an OpenAI-compatible /chat/completions
+      // Stage 1 (pre-Hermes): an OpenAI-compatible /chat/completions
       // client with a Zorin persona system prompt. Stage 2 (full
       // hermes-agent gateway integration) plugs in here without changing
       // the server contract.

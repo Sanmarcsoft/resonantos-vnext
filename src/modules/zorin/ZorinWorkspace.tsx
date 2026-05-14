@@ -1,7 +1,7 @@
 // Intent citation: docs/architecture/ADR-016-haus-vm-hermes-replacement.md
 //
 // Embeds the polished /chat page served from haus.matthewstevens.org
-// (the haus-vm widget bridge backed by Hermes Agency Stage 1) inside the
+// (the haus-vm widget bridge, oMLX backed today, Hermes agent runtime next) inside the
 // resonantos-vnext shell. The remote page already handles the full chat
 // loop: composer, markdown rendering, conversation history, typing
 // indicator, persona persistence in its own localStorage.
@@ -45,7 +45,7 @@ export function ZorinWorkspace({ active, chatUrl, initialSurface = "native" }: Z
           </span>
           <div className="zorin-workspace__title-text">
             <h2>Zorin</h2>
-            <p>Autonomous agent on haus-vm. Hermes Agency Stage 1, gemma4 via Ollama.</p>
+            <p>Autonomous agent on haus-vm. oMLX-backed today; Hermes agent runtime next.</p>
           </div>
         </div>
         <div className="zorin-workspace__actions">
