@@ -75,6 +75,26 @@ const TTS_TIMEOUT_MS = Number(process.env["TTS_TIMEOUT_MS"] ?? 20000);
 const STT_MAX_BYTES = Number(process.env["STT_MAX_BYTES"] ?? 5 * 1024 * 1024);
 const MAX_TTS_TEXT_LEN = 4000;
 
+/**
+ * Strip non-speakable annotations from text destined for TTS. Removes:
+ *   - parenthesised stage directions, e.g. "(A pause, deliberate.)"
+ *   - bracketed metadata, e.g. "[whispered]"
+ *   - markdown emphasis markers, keeping the inner word(s)
+ * The Zorin persona prompt encourages parentheticals for cinematic effect;
+ * those reads beautifully on screen but turns to mush in a synthetic voice
+ * unless we drop them before synthesis. Applied server-side so every TTS
+ * caller (the /chat HTML today; future agents tomorrow) benefits without
+ * each having to know about it.
+ */
+export function stripStageDirections(text: string): string {
+  return text
+    .replace(/\s*\([^)]*\)\s*/g, " ")
+    .replace(/\s*\[[^\]]*\]\s*/g, " ")
+    .replace(/(\*\*|\*)([^*]+)\1/g, "$2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 const BOT_ID_RE = /^[a-z][a-z0-9_-]{0,31}$/;
 const ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const CONTROL_CHAR_RE = /[\x00-\x08\x0B-\x1F\x7F]/;
@@ -435,6 +455,17 @@ async function handleTts(req: Request): Promise<Response> {
     return json<WidgetChatError>({ error: "bad-request", detail: "voice must match [a-z][a-z0-9_-]{0,31}" }, 400);
   }
 
+  // Strip parentheticals + bracketed cues + markdown emphasis BEFORE
+  // forwarding to the synthesiser. If the strip leaves nothing speakable,
+  // refuse cheaply rather than waste a synth call.
+  const speakable = stripStageDirections(text);
+  if (speakable.length === 0) {
+    return json<WidgetChatError>(
+      { error: "bad-request", detail: "text contained only stage directions; nothing to speak" },
+      400,
+    );
+  }
+
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), TTS_TIMEOUT_MS);
   let upstream: Response;
@@ -442,7 +473,7 @@ async function handleTts(req: Request): Promise<Response> {
     upstream = await fetch(`${TTS_BASE_URL}/synthesize`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text, voice }),
+      body: JSON.stringify({ text: speakable, voice }),
       signal: ac.signal,
     });
   } catch (err) {
