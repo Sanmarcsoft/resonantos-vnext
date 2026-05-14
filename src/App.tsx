@@ -127,6 +127,7 @@ import { Panel } from "./components/Panel";
 import { HermesWorkspace } from "./modules/hermes/HermesWorkspace";
 import { OpenCodeWorkspace } from "./modules/opencode/OpenCodeWorkspace";
 import { PaperclipWorkspace } from "./modules/paperclip/PaperclipWorkspace";
+import { ZorinWorkspace } from "./modules/zorin/ZorinWorkspace";
 import { promoteRecoveryRoute, RECOVERY_RUNBOOK_PROMPT, setRecoveryMode } from "./modules/recovery/controller";
 import {
   applyFirstRunRecommendedAddOns,
@@ -245,6 +246,7 @@ const navItems: Array<{ id: Section; label: string; eyebrow: string; icon: DockI
   { id: "delegation", label: "Delegation", eyebrow: "tasks", icon: "delegation", pinned: true },
   { id: "addons", label: "Add-ons", eyebrow: "catalog", icon: "addons", pinned: true },
   { id: "strategist", label: "Agent Identity", eyebrow: "identity", icon: "agent" },
+  { id: "zorin", label: "Zorin", eyebrow: "chat", icon: "agent", pinned: true },
   { id: "settings", label: "Settings", eyebrow: "system", icon: "settings", pinned: true },
 ];
 
@@ -2126,6 +2128,10 @@ export function App() {
               onModelMetadataChange={updateHermesModelMetadata}
               onAskAugmentor={sendStrategistMessage}
             />
+          )}
+
+          {!recoveryModeActive && (
+            <ZorinWorkspace active={currentSection === "zorin"} />
           )}
 
           {!recoveryModeActive && currentSection === "terminal" && (

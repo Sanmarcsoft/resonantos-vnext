@@ -2300,6 +2300,7 @@ export interface UiPreferences {
     | "opencode"
     | "paperclip"
     | "hermes"
+    | "zorin"
     | "terminal"
     | "settings";
   activeChatThreadId: string;
