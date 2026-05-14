@@ -9,13 +9,13 @@
 
 ## Context
 
-`haus.matthewstevens.org` is currently a VHost on the `nix` host (`10.0.0.112`) serving a legacy ResonantOS Gemma chatbot widget at `POST /api/widget/chat` with a hardcoded `botId=zorin001`. That endpoint is the documented fallback path inside `claude-peers-mcp/bridge.ts`: when the primary Zorin MCP server at `http://127.0.0.1:3116/mcp` is unreachable, the bridge sends `/greet` to the Gemma widget instead. `bridge.ts` rewrites the `Host` header to `haus.matthewstevens.org` and posts `{ botId: "zorin001", message }` to `http://10.0.0.112:80/api/widget/chat`.
+`haus.matthewstevens.org` is currently served by the legacy ResonantOS Gemma chatbot on the nixOS host `nix.matthewstevens.org` (`10.0.0.112`). It exposes `POST /api/widget/chat` with a hardcoded wire id `botId=zorin001`. That endpoint is the documented fallback path inside `claude-peers-mcp/bridge.ts`: when the primary Zorin MCP server at `http://127.0.0.1:3116/mcp` is unreachable, the bridge sends `/greet` to the Gemma widget instead. `bridge.ts` rewrites the `Host` header to `haus.matthewstevens.org` and posts `{ botId: "zorin001", message }` to `http://10.0.0.112:80/api/widget/chat`.
 
 This arrangement has three problems:
 
-1. **Single-tenant by accident.** The widget only knows `zorin001`. Every other persona (M, 007, Q, Moneypenny) has no chatbot fallback at all and silently degrades to text.
+1. **Hardcoded wire id treated as identity.** `zorin001` is an internal id from the old Gemma demo, not the persona's name. The canonical identity is **Zorin** (profile id `zorin`, matching the claude-peers voice id). Conflating the wire key with the profile name has leaked into every caller and into the add-on contract.
 2. **Legacy runtime drift.** The Gemma chatbot was a quick demo. It has no relationship to the ResonantOS vNext add-on contract that the rest of the platform now uses (`public/addons/hermes.json`).
-3. **Non-sovereign substrate.** The VM lives on a single physical machine inside the LAN. The Sanmarcsoft Sovereign Architecture SOP (effective 2026-03-13) requires production workloads to be Nix-built, x86_64-linux-targeted, and pushed to Scaleway Container Registry in `fr-par`.
+3. **Non-sovereign substrate.** The service runs as a bare vhost on a single LAN host. The Sanmarcsoft Sovereign Architecture SOP (effective 2026-03-13) requires production workloads to be Nix-built, x86_64-linux-targeted, and pushed to Scaleway Container Registry in `fr-par`.
 
 The ResonantOS Toolkit field guide names "Hermes" as a development-track add-on for communication and coordination. The Hermes Agent project at github.com/NousResearch/hermes-agent is the obvious upstream: MIT-licensed, multi-provider, gateway-capable, designed to "run on a $5 VPS" with Telegram/Matrix/Slack/Signal front ends, and already shipping its own Nix flake.
 
@@ -24,7 +24,7 @@ The ResonantOS Toolkit field guide names "Hermes" as a development-track add-on 
 Replace the legacy Gemma chatbot VM at `haus.matthewstevens.org` with a new VM, `haus-vm`, that:
 
 1. **Preserves the `POST /api/widget/chat` wire contract byte-for-byte** so `claude-peers-mcp/bridge.ts` keeps working through the cutover. A thin "widget-bridge" HTTP shim sits in front of Hermes and accepts the legacy `{ botId, message }` payload.
-2. **Maps each `botId` to a Hermes profile.** `zorin001`, `m`, `007`, `q`, and `moneypenny` are first-class profiles with independent personalities, models, and memory namespaces. Adding a new persona becomes a profile-create operation, not a code change.
+2. **Runs exactly one Hermes profile: `zorin`.** The legacy wire id `zorin001` is accepted as an alias and translated to `zorin` inside the widget-bridge (see `resolveProfile` in `widget-bridge/src/hermes-client.ts`). Other personas (M, 007, Q, Moneypenny) already have their own agent backends in `claude-peers-mcp`'s broker `agent_routes` and are explicitly out of scope here. Treating Zorin's chatbot fallback as a multi-persona system was the original architectural mistake; this ADR corrects it.
 3. **Honours the existing Hermes add-on contract** in `public/addons/hermes.json`. The widget-bridge implements the `agentRuntime.invocationTool = "hermes.chat"` semantics from the manifest: a single shell-out per turn, assistant-reply-only output filtering, no streaming (yet), approval-gated outbound sends.
 4. **Builds via Nix `pkgs.dockerTools.buildLayeredImage`** for `x86_64-linux`. No Dockerfile. The image is reproducible from `flake.nix` pinned to `nixos-25.05` and cross-compiles cleanly from Apple Silicon dev hosts via OrbStack.
 5. **Deploys to Scaleway Container Registry `rg.fr-par.scw.cloud/sanmarcsoft/haus-vm:<tag>`** via `skopeo copy`, with Pulumi TypeScript IaC and state in Scaleway Object Storage (`s3://sanmarcsoft-pulumi-state`).

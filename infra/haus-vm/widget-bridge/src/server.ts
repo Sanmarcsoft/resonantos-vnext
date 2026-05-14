@@ -7,11 +7,11 @@
  * `HermesClient` abstraction.
  *
  * Env vars:
- *   PORT          (default 8080)  — bind port
- *   HOST          (default 0.0.0.0)
- *   BRIDGE_TOKEN  (optional)      — if set, requests must carry
+ *   PORT          (default 8080):   bind port
+ *   HOST          (default 0.0.0.0): bind host
+ *   BRIDGE_TOKEN  (optional):        if set, requests must carry
  *                                    `Authorization: Bearer <token>`
- *   HERMES_MODE   (default "stub")— "stub" | "cli" (cli not implemented yet)
+ *   HERMES_MODE   (default "stub"):  "stub" | "cli" (cli not implemented yet)
  */
 
 import type {
@@ -20,7 +20,7 @@ import type {
   WidgetChatRequest,
   WidgetChatResponse,
 } from "./types";
-import { StubHermesClient, type HermesClient } from "./hermes-client";
+import { StubHermesClient, resolveProfile, type HermesClient } from "./hermes-client";
 
 const VERSION = "0.1.0";
 const STARTED_AT = Date.now();
@@ -73,8 +73,14 @@ async function handleChat(req: Request): Promise<Response> {
     return json<WidgetChatError>({ error: "bad-request", detail: parsed.detail }, 400);
   }
 
+  // Translate wire id (legacy bridge.ts sends "zorin001") to the canonical
+  // profile id before dispatching. Echo the caller's id back in the response
+  // so the wire contract stays byte-identical to the legacy widget.
+  const wireBotId = parsed.value.botId;
+  const resolvedBotId = resolveProfile(wireBotId);
+
   const t0 = performance.now();
-  const result = await client.chat(parsed.value);
+  const result = await client.chat({ ...parsed.value, botId: resolvedBotId });
   const latencyMs = Math.round(performance.now() - t0);
 
   if (!result.ok) {
@@ -83,7 +89,7 @@ async function handleChat(req: Request): Promise<Response> {
   }
 
   const response: WidgetChatResponse = {
-    botId: parsed.value.botId,
+    botId: wireBotId,
     reply: result.reply,
     conversationId: result.conversationId,
     engine: HERMES_MODE === "stub" ? "stub" : "hermes",

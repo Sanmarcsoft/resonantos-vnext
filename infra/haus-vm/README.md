@@ -1,6 +1,10 @@
-# haus.matthewstevens.org — Hermes-Agent VM
+# haus.matthewstevens.org: Hermes-Agent VM
 
-Replacement infrastructure for the legacy ResonantOS Gemma chatbot VM at `haus.matthewstevens.org`. The legacy VM serves `POST /api/widget/chat` with hardcoded `botId=zorin001` on the `nix` host (10.0.0.112). This directory replaces that VM with a Hermes-Agent-powered service that preserves the same wire contract and grows it into a multi-personality, capability-gated communication agent aligned with the ResonantOS vNext Hermes add-on (`public/addons/hermes.json`).
+Replacement infrastructure for the legacy ResonantOS Gemma chatbot VM at `haus.matthewstevens.org`. The legacy service ran on the nixOS host `nix.matthewstevens.org` (10.0.0.112) and served `POST /api/widget/chat` with a hardcoded wire id `botId=zorin001`.
+
+This directory replaces that service with a Hermes-Agent-powered shim that preserves the same wire contract and routes every turn to a single canonical Hermes profile named **`zorin`**. The wire id `zorin001` is accepted as a legacy alias and translated to `zorin` internally so `claude-peers-mcp/bridge.ts` keeps working unchanged. The new service is aligned with the ResonantOS vNext Hermes add-on (`public/addons/hermes.json`).
+
+**Scope:** Hermes profile is `zorin` only. Other personas (M, 007, Q, Moneypenny) already have their own agent backends (see `claude-peers-mcp` broker `agent_routes`) and are not provisioned here.
 
 ## Architecture
 
@@ -25,12 +29,11 @@ Replacement infrastructure for the legacy ResonantOS Gemma chatbot VM at `haus.m
                 |
        +--------v---------+
        |  Hermes Agent    |  Nous Research Hermes (MIT)
-       |  Profiles:       |  github.com/NousResearch/hermes-agent
-       |  - zorin001      |
-       |  - m             |  Each botId maps to a Hermes profile
-       |  - 007           |  with its own personality, model, and
-       |  - q             |  memory namespace.
-       |  - moneypenny    |
+       |  Profile:        |  github.com/NousResearch/hermes-agent
+       |  - zorin         |
+       |                  |  Wire alias `zorin001` -> profile `zorin`.
+       |                  |  Single-profile by design. Other personas
+       |                  |  route through their own agent backends.
        +------------------+
 ```
 
@@ -47,6 +50,9 @@ Content-Type: application/json
   "botId": "zorin001",
   "message": "<user prompt>"
 }
+// `zorin001` is the legacy wire id used by claude-peers-mcp/bridge.ts.
+// The widget-bridge translates it to the canonical Hermes profile `zorin`.
+// Callers MAY also send `botId: "zorin"` directly; both are accepted.
 ```
 
 The widget-bridge MUST preserve this request shape and continue to accept the `Host: haus.matthewstevens.org` header. The response shape is documented in `widget-bridge/src/types.ts`.
@@ -74,7 +80,7 @@ Per the Sanmarcsoft Sovereign Architecture SOP this directory MUST:
 # Build OCI image on Apple Silicon dev for x86_64-linux deploy
 nix build .#packages.x86_64-linux.oci-image
 
-# Push to Scaleway (sovereign registry) — example only, deploy is gated
+# Push to Scaleway (sovereign registry). Example only, deploy is gated.
 skopeo copy \
   docker-archive:./result \
   docker://rg.fr-par.scw.cloud/sanmarcsoft/haus-vm:testing
@@ -107,6 +113,6 @@ The legacy `haus.matthewstevens.org` is referenced from `claude-peers-mcp/bridge
 ## Related
 
 - `docs/architecture/ADR-016-haus-vm-hermes-replacement.md`
-- `public/addons/hermes.json` — the ResonantOS Hermes add-on contract this VM implements
-- `docs/architecture/addon-skills/hermes/AUGMENTOR_SKILL.md` — the Augmentor-side skill that talks to this VM
-- `../../examples/living-archive-mcp.mjs` — sibling local-service reference
+- `public/addons/hermes.json`: the ResonantOS Hermes add-on contract this VM implements
+- `docs/architecture/addon-skills/hermes/AUGMENTOR_SKILL.md`: the Augmentor-side skill that talks to this VM
+- `../../examples/living-archive-mcp.mjs`: sibling local-service reference

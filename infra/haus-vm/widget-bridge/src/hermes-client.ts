@@ -16,13 +16,32 @@ import type { WidgetChatRequest, WidgetChatResponse } from "./types";
 export interface HermesClient {
   /**
    * Run a single chat turn against a Hermes profile.
-   * Implementations MUST NOT throw for "profile missing" — they MUST return
+   * Implementations MUST NOT throw for "profile missing"; they MUST return
    * a structured error so the HTTP layer can map it to a 404 cleanly.
    */
   chat(req: WidgetChatRequest): Promise<HermesChatResult>;
 
-  /** List ready profile ids (e.g. ["zorin001", "m", "007"]). */
+  /** List ready profile ids. Default scaffold returns ["zorin"]. */
   listProfiles(): Promise<{ ready: string[]; missing: string[] }>;
+}
+
+/**
+ * Wire-id translation. Maps legacy widget botIds (used by the existing
+ * `claude-peers-mcp/bridge.ts` caller) onto canonical Hermes profile ids.
+ *
+ * - `zorin001` was a hardcoded internal id in the legacy ResonantOS Gemma
+ *   widget. It is NOT the persona's name. The canonical profile id is `zorin`,
+ *   matching the claude-peers voice id and the broker's agent_routes entry.
+ *
+ * Unknown ids pass through unchanged so unintentional renames surface as
+ * profile-not-found 404s, not silent mis-routing.
+ */
+const WIRE_ALIASES: Record<string, string> = {
+  zorin001: "zorin",
+};
+
+export function resolveProfile(wireBotId: string): string {
+  return WIRE_ALIASES[wireBotId] ?? wireBotId;
 }
 
 export type HermesChatResult =
@@ -38,7 +57,7 @@ export type HermesChatResult =
 export class StubHermesClient implements HermesClient {
   private readonly knownProfiles: Set<string>;
 
-  constructor(knownProfiles: readonly string[] = ["zorin001", "m", "007", "q", "moneypenny"]) {
+  constructor(knownProfiles: readonly string[] = ["zorin"]) {
     this.knownProfiles = new Set(knownProfiles);
   }
 

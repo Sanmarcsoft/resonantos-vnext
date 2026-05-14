@@ -9,7 +9,12 @@
 
 /** Inbound widget chat request, byte-compatible with the legacy widget. */
 export interface WidgetChatRequest {
-  /** Profile id. Legacy widget used "zorin001". Hermes profiles match these names. */
+  /**
+   * Profile id. The canonical Hermes profile is `zorin`. The legacy ResonantOS
+   * Gemma widget called itself `zorin001`; the bridge accepts that as a wire
+   * alias and translates it to `zorin` internally so existing callers keep
+   * working without change.
+   */
   botId: string;
   /** End-user prompt. Plain text. */
   message: string;
