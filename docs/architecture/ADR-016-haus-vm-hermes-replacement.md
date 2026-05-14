@@ -81,15 +81,35 @@ The widget-bridge is also where capability-gating, audit logging, and the approv
 
 ## Implementation status
 
-- [x] `infra/haus-vm/widget-bridge/` Bun TypeScript service with `POST /api/widget/chat` and `GET /health`
+- [x] `infra/haus-vm/widget-bridge/` Bun TypeScript service with `POST /api/widget/chat`, `GET /health`, `GET /livez`
 - [x] `infra/haus-vm/flake.nix` Nix flake building an `x86_64-linux` OCI image from any supported build host
 - [x] `infra/haus-vm/pulumi/` Pulumi TypeScript skeleton wired to the Scaleway Object Storage backend
-- [x] Smoke tests for the wire contract (`widget-bridge/src/server.test.ts`)
-- [ ] Replace the StubHermesClient with a real Hermes runtime client (shell-out, then gateway)
+- [x] Smoke tests for the wire contract (`widget-bridge/src/server.test.ts`, 34 tests)
+- [x] Security hardening pass (mandatory `BRIDGE_TOKEN` in prod, Host allowlist, body cap, input regex, security headers, non-root container, loopback bind)
+- [x] Accept both legacy `messages[]` and simple `message` wire shapes
+- [x] Dedicated CI workflow at `.github/workflows/haus-vm.yml` (typecheck, test, Gitleaks)
+- [ ] Replace the StubHermesClient with a real Hermes runtime client (shell-out, then gateway). Pin `hermes-agent` flake input to a rev sha at the same commit.
 - [ ] Cross-compile OCI image build verified on Apple Silicon and pushed to a `:scaffold` tag in Scaleway CR
 - [ ] Stage on NAS (a1.matthewstevens.org)
 - [ ] Parity tests against `claude-peers-mcp/bridge.ts`
 - [ ] Promote staging image to `:production`, deploy to Scaleway, cut DNS, decommission legacy Gemma VM
+
+## Security posture (0.1.0)
+
+The widget-bridge enforces the following at the HTTP boundary; full table in `infra/haus-vm/README.md`.
+
+- `BRIDGE_TOKEN` bearer is mandatory when `NODE_ENV=production`; the process refuses to boot without it (`assertBootSafety` in `server.ts`).
+- Bearer compare is constant-time via `crypto.timingSafeEqual`.
+- Host header is allowlisted (default `haus.matthewstevens.org,localhost,127.0.0.1`).
+- Body capped at 32 KiB; `message` capped at 8000 chars; `botId`, `caller`, and `conversationId` constrained by tight regex.
+- Per-request `AbortController` with 8 s budget; server `idleTimeout` 10 s.
+- Standard hardening headers on every response (`nosniff`, `X-Frame-Options: DENY`, `no-referrer`, `no-store`).
+- Container binds to `127.0.0.1` by default; reverse proxy (Caddy/Traefik on the nixOS VM, or the Scaleway LB) is the only ingress path.
+- Container runs as UID/GID 1000.
+- `/health` returns `{status:"ok"}` to unauthenticated callers; the detailed `HealthResponse` (version, uptime, profile inventory) is gated behind a real bearer token even in dev/test.
+- `/livez` is the always-200 load-balancer probe path.
+
+Items deferred to 0.2.0 (Hermes CLI wiring): command-and-argument injection via `botId` (use `spawn(cmd, [args])` array form and `--` terminator), minimal env passed to the child process, hard SIGKILL after SIGTERM grace, stdout/stderr stream bounds, structured logging with redaction. These are tracked in the red-team report referenced from this ADR.
 
 ## References
 

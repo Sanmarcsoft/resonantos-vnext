@@ -1,5 +1,5 @@
 {
-  description = "haus.matthewstevens.org — Hermes-backed widget bridge VM image";
+  description = "haus.matthewstevens.org: Hermes-backed widget bridge VM image";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
@@ -37,9 +37,12 @@
 
         # widget-bridge is a Bun TypeScript service. We install Bun into the image
         # and copy the source tree; the entrypoint runs `bun src/server.ts`.
+        # Filter out node_modules and dist so the OCI image never ships
+        # unvetted artefacts; Bun resolves at boot from the committed lockfile.
         widgetBridgeSrc = pkgs.runCommand "widget-bridge-src" { } ''
           mkdir -p $out
           cp -r ${./widget-bridge}/. $out/
+          rm -rf $out/node_modules $out/dist
         '';
 
         entrypoint = pkgs.writeShellScript "haus-vm-entrypoint" ''
@@ -66,12 +69,26 @@
             mkdir -p app
             cp -r ${widgetBridgeSrc} app/widget-bridge
             chmod -R u+rwX,go+rX app
+            # Minimal /etc/passwd and /etc/group so the numeric User
+            # below resolves to a name when downstream tools consult them.
+            mkdir -p etc
+            echo "haus:x:1000:1000:haus-vm:/app:/sbin/nologin" > etc/passwd
+            echo "haus:x:1000:" > etc/group
           '';
           config = {
             Entrypoint = [ "${entrypoint}" ];
+            # Non-root execution. The container does not need root for any
+            # operation: the bridge binds an unprivileged port and reads
+            # only from /app/widget-bridge.
+            User = "1000:1000";
             Env = [
               "PORT=8080"
-              "HOST=0.0.0.0"
+              # Default to loopback inside the container: production sits
+              # behind a reverse proxy (Caddy/Traefik or Scaleway LB), which
+              # is the only path that should reach the bridge. Override to
+              # 0.0.0.0 only when no proxy fronts the container.
+              "HOST=127.0.0.1"
+              "NODE_ENV=production"
               "HERMES_MODE=stub"
             ];
             ExposedPorts = { "8080/tcp" = { }; };
@@ -102,7 +119,7 @@
             # not pinned here to avoid pulling the closure into every dev shell.
           ];
           shellHook = ''
-            echo "haus-vm devshell — Bun $(bun --version)"
+            echo "haus-vm devshell. Bun $(bun --version)"
             echo "  build OCI:   nix build .#packages.${system}.oci-image"
             echo "  push (SOP):  skopeo copy docker-archive:./result \\"
             echo "                   docker://rg.fr-par.scw.cloud/sanmarcsoft/haus-vm:testing"

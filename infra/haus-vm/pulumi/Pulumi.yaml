@@ -2,7 +2,10 @@ name: haus-vm
 runtime:
   name: nodejs
   options:
-    packagemanager: npm
+    # Sanmarcsoft SOP: bun is the only package manager. `bun install` in
+    # this directory generates `bun.lock`; CI MUST run `bun install
+    # --frozen-lockfile` against that lock before `pulumi preview`.
+    packagemanager: bun
 description: |
   Pulumi TypeScript program for the Hermes-backed haus.matthewstevens.org VM.
   Provisions a Scaleway Instance plus the Scaleway Container Registry tag
@@ -10,9 +13,9 @@ description: |
   (s3://sanmarcsoft-pulumi-state) per the Sanmarcsoft IaC Law.
 
 # Stacks:
-#   dev      — local docker-compose tunnel (no Scaleway resources)
-#   staging  — NAS-resident testing stack (no Scaleway resources, used for parity tests)
-#   prod     — Scaleway fr-par production stack
+#   dev      : local docker-compose tunnel (no Scaleway resources)
+#   staging  : NAS-resident testing stack (no Scaleway resources, used for parity tests)
+#   prod     : Scaleway fr-par production stack
 
 config:
   scaleway:region:

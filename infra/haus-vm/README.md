@@ -39,7 +39,7 @@ This directory replaces that service with a Hermes-Agent-powered shim that prese
 
 ## Drop-in contract
 
-The legacy caller (`claude-peers-mcp/bridge.ts`) hits:
+The legacy caller (`claude-peers-mcp/bridge.ts:1270-1290`) actually sends a `messages` array, not a single `message` string:
 
 ```http
 POST http://10.0.0.112:80/api/widget/chat
@@ -48,14 +48,31 @@ Content-Type: application/json
 
 {
   "botId": "zorin001",
-  "message": "<user prompt>"
+  "messages": [
+    { "role": "user", "content": "<user prompt>" }
+  ]
 }
-// `zorin001` is the legacy wire id used by claude-peers-mcp/bridge.ts.
-// The widget-bridge translates it to the canonical Hermes profile `zorin`.
-// Callers MAY also send `botId: "zorin"` directly; both are accepted.
 ```
 
-The widget-bridge MUST preserve this request shape and continue to accept the `Host: haus.matthewstevens.org` header. The response shape is documented in `widget-bridge/src/types.ts`.
+The widget-bridge accepts both wire shapes (`{message}` and `{messages:[{role,content}]}`) and normalises internally. `zorin001` is translated to the canonical Hermes profile `zorin`. Callers MAY also send `botId: "zorin"` directly. The response shape is documented in `widget-bridge/src/types.ts`.
+
+## Security posture
+
+The bridge ships with the following gates enabled:
+
+| Gate | Default | How to override |
+|------|---------|-----------------|
+| Auth | `BRIDGE_TOKEN` bearer required when `NODE_ENV=production`; refuses to boot otherwise. Constant-time compare. | Set `BRIDGE_TOKEN`. |
+| Host allowlist | `haus.matthewstevens.org,localhost,127.0.0.1` | `ALLOWED_HOSTS` env var (comma-separated). |
+| Body cap | 32 KiB per request. Oversized = 413. | `MAX_BODY_BYTES` (compile-time constant). |
+| Message cap | 8000 chars. | `MAX_MESSAGE_LEN` (compile-time constant). |
+| Input regex | `botId` matches `^[a-z][a-z0-9_-]{0,31}$`; `conversationId` and `caller` match `^[A-Za-z0-9._-]{1,64}$`. Control chars rejected in `message`. | Constants in `server.ts`. |
+| Request timeout | 8 s per chat handler (AbortController). Server `idleTimeout` 10 s. | `CHAT_TIMEOUT_MS` (compile-time constant). |
+| Response headers | `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`. | n/a. |
+| Bind interface | `127.0.0.1` inside the container. Reverse proxy fronts it. | `HOST=0.0.0.0` if no proxy. |
+| Container user | UID/GID 1000 (non-root). | `User` field in `flake.nix`. |
+| `/health` | `{status:"ok"}` only without bearer. Full payload behind `Authorization: Bearer <BRIDGE_TOKEN>`. | n/a. |
+| `/livez` | Always 200 ok. Use for load-balancer probes. | n/a. |
 
 ## Why Hermes
 
