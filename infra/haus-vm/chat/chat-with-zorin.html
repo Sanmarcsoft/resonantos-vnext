@@ -1,0 +1,835 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zorin</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg-0: #0a0a0b;
+      --bg-1: #131316;
+      --bg-2: #1c1c20;
+      --bg-3: #25252a;
+      --line: #2e2e34;
+      --fg-0: #eaeaee;
+      --fg-1: #c2c2c8;
+      --fg-2: #888892;
+      --zorin: #c0392b;
+      --zorin-soft: rgba(192, 57, 43, 0.12);
+      --user: #2f6fb0;
+      --user-soft: rgba(47, 111, 176, 0.16);
+      --danger: #ff6b6b;
+      --ok: #4ade80;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+      background: var(--bg-0);
+      color: var(--fg-0);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+    }
+
+    header {
+      flex: none;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 22px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-1);
+    }
+    header .avatar {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: var(--zorin);
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      font-size: 16px;
+      color: #fff;
+      position: relative;
+      transition: box-shadow 0.18s ease, transform 0.18s ease;
+    }
+    header .avatar::after {
+      content: "";
+      position: absolute;
+      bottom: -1px; right: -1px;
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--ok);
+      border: 2px solid var(--bg-1);
+    }
+    /* Speaking pulse: subtle outward halo while TTS audio is playing.
+       Replaces a real animated avatar clip until zorin-<emotion>.mp4 assets
+       exist on narrator.matthewstevens.org. */
+    header .avatar.speaking {
+      animation: avatar-pulse 1.1s ease-in-out infinite;
+      box-shadow: 0 0 0 0 rgba(192, 57, 43, 0.6);
+    }
+    @keyframes avatar-pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(192, 57, 43, 0.55); transform: scale(1); }
+      50%  { box-shadow: 0 0 0 8px rgba(192, 57, 43, 0); transform: scale(1.04); }
+      100% { box-shadow: 0 0 0 0 rgba(192, 57, 43, 0); transform: scale(1); }
+    }
+    /* Emotion tint per MHH-EI predictedER.group from the most recent reply. */
+    header .avatar[data-emotion="anger"] { background: #c0392b; }
+    header .avatar[data-emotion="shame"], header .avatar[data-emotion="regret"] { background: #8e44ad; }
+    header .avatar[data-emotion="worry"], header .avatar[data-emotion="fear"] { background: #d4a017; }
+    header .avatar[data-emotion="sadness"] { background: #2c3e50; }
+    header .avatar[data-emotion="pride"], header .avatar[data-emotion="happiness"], header .avatar[data-emotion="anticipation"] { background: #2f6fb0; }
+    header .title {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      line-height: 1.15;
+    }
+    header .title h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    header .title .meta {
+      color: var(--fg-2);
+      font-size: 12px;
+    }
+    header .actions { display: flex; gap: 6px; }
+    header button.icon {
+      background: transparent;
+      border: 1px solid var(--line);
+      color: var(--fg-1);
+      font-size: 12px;
+      padding: 7px 11px;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    }
+    header button.icon:hover {
+      background: var(--bg-2);
+      border-color: var(--bg-3);
+      color: var(--fg-0);
+    }
+
+    main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 22px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      scroll-behavior: smooth;
+    }
+    main::-webkit-scrollbar { width: 10px; }
+    main::-webkit-scrollbar-track { background: transparent; }
+    main::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 10px; }
+
+    .empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      gap: 14px;
+      color: var(--fg-2);
+      padding-bottom: 60px;
+      text-align: center;
+    }
+    .empty .glyph {
+      width: 60px; height: 60px;
+      border-radius: 50%;
+      background: var(--zorin-soft);
+      color: var(--zorin);
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      font-size: 26px;
+    }
+    .empty h2 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--fg-0);
+      letter-spacing: -0.01em;
+    }
+    .empty p { margin: 0; max-width: 320px; }
+    .empty .examples {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      justify-content: center;
+      margin-top: 6px;
+    }
+    .empty .examples button {
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      color: var(--fg-1);
+      padding: 8px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+      transition: all 0.12s ease;
+    }
+    .empty .examples button:hover {
+      border-color: var(--zorin);
+      color: var(--fg-0);
+    }
+
+    .msg {
+      display: flex;
+      gap: 10px;
+      max-width: 760px;
+      width: 100%;
+      align-self: center;
+      animation: msg-in 0.22s ease both;
+    }
+    @keyframes msg-in {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .msg .pip {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      flex: none;
+      display: grid; place-items: center;
+      font-size: 12px; font-weight: 700;
+      margin-top: 2px;
+    }
+    .msg.user .pip { background: var(--user-soft); color: var(--user); }
+    .msg.zorin .pip { background: var(--zorin-soft); color: var(--zorin); }
+    .msg .body {
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 14px;
+      flex: 1;
+      min-width: 0;
+    }
+    .msg.user .body { background: var(--user-soft); border-color: rgba(47, 111, 176, 0.35); }
+    .msg .body p { margin: 0; }
+    .msg .body p + p { margin-top: 8px; }
+    .msg .body strong { font-weight: 600; color: var(--fg-0); }
+    .msg .body em { font-style: italic; }
+    .msg .body code {
+      background: var(--bg-3);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    .msg .body pre {
+      background: var(--bg-0);
+      border: 1px solid var(--line);
+      padding: 12px 14px;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 8px 0;
+    }
+    .msg .body pre code {
+      background: transparent;
+      padding: 0;
+      font-size: 13px;
+    }
+    .msg .body ul, .msg .body ol { margin: 6px 0; padding-left: 22px; }
+    .msg .body li { margin: 2px 0; }
+    .msg .body a { color: #6ea8d6; text-decoration: underline; }
+    .msg .meta-row {
+      font-size: 11px;
+      color: var(--fg-2);
+      margin-top: 6px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .msg .meta-row .badge {
+      background: var(--bg-3);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    .msg.error .body {
+      background: rgba(255, 107, 107, 0.08);
+      border-color: rgba(255, 107, 107, 0.4);
+      color: var(--danger);
+    }
+
+    .typing {
+      display: inline-flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .typing span {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--fg-2);
+      animation: typing-blink 1.2s infinite ease-in-out;
+    }
+    .typing span:nth-child(2) { animation-delay: 0.15s; }
+    .typing span:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes typing-blink {
+      0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+      30% { opacity: 1; transform: translateY(-2px); }
+    }
+
+    footer {
+      flex: none;
+      padding: 12px 18px 18px;
+      background: var(--bg-1);
+      border-top: 1px solid var(--line);
+    }
+    .composer {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    .composer-input {
+      flex: 1;
+      display: flex;
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 14px;
+      transition: border-color 0.12s ease;
+    }
+    .composer-input:focus-within { border-color: var(--zorin); }
+    .composer textarea {
+      flex: 1;
+      background: transparent;
+      border: 0;
+      color: var(--fg-0);
+      font: inherit;
+      resize: none;
+      outline: none;
+      max-height: 200px;
+      line-height: 1.5;
+      padding: 0;
+    }
+    .composer textarea::placeholder { color: var(--fg-2); }
+    .composer button.send {
+      background: var(--zorin);
+      border: 0;
+      color: #fff;
+      font: inherit;
+      font-weight: 600;
+      padding: 0 18px;
+      height: 42px;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.12s ease, transform 0.05s ease;
+    }
+    .composer button.send:hover:not(:disabled) { background: #d44a3a; }
+    .composer button.send:active:not(:disabled) { transform: scale(0.98); }
+    .composer button.send:disabled { background: var(--bg-3); color: var(--fg-2); cursor: not-allowed; }
+
+    /* PTT (push-to-talk) button. Hold to record, release to transcribe. */
+    .composer button.ptt {
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      color: var(--fg-1);
+      font: inherit;
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+      user-select: none;
+      touch-action: none;
+    }
+    .composer button.ptt:hover:not(:disabled) { background: var(--bg-3); border-color: var(--bg-3); color: var(--fg-0); }
+    .composer button.ptt:disabled { color: var(--fg-2); cursor: not-allowed; }
+    .composer button.ptt.recording {
+      background: var(--zorin);
+      border-color: var(--zorin);
+      color: #fff;
+      animation: ptt-pulse 1s ease-in-out infinite;
+    }
+    @keyframes ptt-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(192, 57, 43, 0.5); }
+      50%      { box-shadow: 0 0 0 6px rgba(192, 57, 43, 0); }
+    }
+    .composer button.ptt svg { width: 18px; height: 18px; }
+
+    .composer .hint {
+      max-width: 760px;
+      margin: 6px auto 0;
+      font-size: 11px;
+      color: var(--fg-2);
+      text-align: center;
+    }
+    .composer .hint .status {
+      color: var(--zorin);
+      font-weight: 600;
+    }
+
+    @media (max-width: 600px) {
+      main { padding: 16px 14px 8px; gap: 14px; }
+      footer { padding: 10px 14px 14px; }
+      header { padding: 12px 16px; }
+      header .title h1 { font-size: 15px; }
+      header button.icon { padding: 6px 9px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="avatar" id="avatar" data-emotion="">Z</div>
+    <div class="title">
+      <h1>Zorin</h1>
+      <span class="meta" id="model-info">stub mode</span>
+    </div>
+    <div class="actions">
+      <button class="icon" id="tts-toggle" title="Toggle voice playback" aria-pressed="true">Voice on</button>
+      <button class="icon" id="clear-btn" title="Clear conversation">Clear</button>
+    </div>
+  </header>
+
+  <main id="messages"></main>
+
+  <footer>
+    <form class="composer" id="form">
+      <button class="ptt" type="button" id="ptt" title="Push-to-talk (hold)" aria-label="Push-to-talk">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
+          <path d="M5 10a1 1 0 0 1 2 0 5 5 0 0 0 10 0 1 1 0 0 1 2 0 7 7 0 0 1-6 6.92V20h2a1 1 0 0 1 0 2H9a1 1 0 0 1 0-2h2v-3.08A7 7 0 0 1 5 10z"></path>
+        </svg>
+      </button>
+      <div class="composer-input">
+        <textarea id="input" rows="1" placeholder="Speak, Mister Stevens..." autocomplete="off" autofocus></textarea>
+      </div>
+      <button class="send" type="submit" id="send">Send</button>
+    </form>
+    <div class="hint">Enter to send. Shift+Enter for a new line. Hold the mic to dictate. <span class="status" id="status"></span></div>
+  </footer>
+
+  <script>
+  (function () {
+    const STORE_KEY = 'haus-chat-zorin-history-v1';
+    const STORE_CONV = 'haus-chat-zorin-conv-v1';
+
+    const STORE_TTS = 'haus-chat-zorin-tts-v1';
+
+    const messages = document.getElementById('messages');
+    const form = document.getElementById('form');
+    const input = document.getElementById('input');
+    const send = document.getElementById('send');
+    const clearBtn = document.getElementById('clear-btn');
+    const modelInfo = document.getElementById('model-info');
+    const pttBtn = document.getElementById('ptt');
+    const ttsToggle = document.getElementById('tts-toggle');
+    const statusEl = document.getElementById('status');
+    const avatar = document.getElementById('avatar');
+
+    function setStatus(text) {
+      statusEl.textContent = text || '';
+    }
+
+    let ttsEnabled = (localStorage.getItem(STORE_TTS) ?? '1') === '1';
+    function refreshTtsToggle() {
+      ttsToggle.setAttribute('aria-pressed', ttsEnabled ? 'true' : 'false');
+      ttsToggle.textContent = ttsEnabled ? 'Voice on' : 'Voice off';
+    }
+    refreshTtsToggle();
+    ttsToggle.addEventListener('click', () => {
+      ttsEnabled = !ttsEnabled;
+      localStorage.setItem(STORE_TTS, ttsEnabled ? '1' : '0');
+      refreshTtsToggle();
+      if (!ttsEnabled) stopSpeaking();
+    });
+
+    let conversationId = localStorage.getItem(STORE_CONV) || null;
+    let history = [];
+    try { history = JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch {}
+
+    // tiny markdown — bold, italic, inline code, code fence, links, lists, paragraphs.
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    function renderMarkdown(text) {
+      const lines = text.split('\n');
+      const out = [];
+      let inFence = false;
+      let fenceLang = '';
+      let fenceBuf = [];
+      let listType = null;
+      let listBuf = [];
+      let para = [];
+
+      function flushPara() {
+        if (para.length) { out.push('<p>' + inline(para.join(' ').trim()) + '</p>'); para = []; }
+      }
+      function flushList() {
+        if (listType && listBuf.length) {
+          const tag = listType === 'ul' ? 'ul' : 'ol';
+          out.push('<' + tag + '>' + listBuf.map(li => '<li>' + inline(li) + '</li>').join('') + '</' + tag + '>');
+        }
+        listType = null; listBuf = [];
+      }
+      function inline(s) {
+        let r = escapeHtml(s);
+        r = r.replace(/`([^`]+)`/g, '<code>$1</code>');
+        r = r.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        r = r.replace(/(^|[^\*])\*([^*]+)\*/g, '$1<em>$2</em>');
+        r = r.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        return r;
+      }
+
+      for (const raw of lines) {
+        const line = raw.replace(/\s+$/, '');
+        const fence = line.match(/^```(\w*)\s*$/);
+        if (fence) {
+          if (inFence) {
+            out.push('<pre><code>' + escapeHtml(fenceBuf.join('\n')) + '</code></pre>');
+            inFence = false; fenceBuf = []; fenceLang = '';
+          } else {
+            flushPara(); flushList();
+            inFence = true; fenceLang = fence[1];
+          }
+          continue;
+        }
+        if (inFence) { fenceBuf.push(raw); continue; }
+
+        const ul = line.match(/^\s*[-*+]\s+(.+)$/);
+        const ol = line.match(/^\s*\d+\.\s+(.+)$/);
+        if (ul) { flushPara(); if (listType !== 'ul') flushList(); listType = 'ul'; listBuf.push(ul[1]); continue; }
+        if (ol) { flushPara(); if (listType !== 'ol') flushList(); listType = 'ol'; listBuf.push(ol[1]); continue; }
+        flushList();
+
+        if (line.trim() === '') { flushPara(); continue; }
+        para.push(line);
+      }
+      if (inFence) out.push('<pre><code>' + escapeHtml(fenceBuf.join('\n')) + '</code></pre>');
+      flushList();
+      flushPara();
+      return out.join('');
+    }
+
+    function renderEmpty() {
+      messages.innerHTML = '';
+      const div = document.createElement('div');
+      div.className = 'empty';
+      div.innerHTML = '' +
+        '<div class="glyph">Z</div>' +
+        '<h2>Zorin online</h2>' +
+        '<p>Backed by the haus-vm widget bridge. Real model, Walken cadence, dry menace.</p>' +
+        '<div class="examples">' +
+          '<button data-prompt="Identify yourself in one sentence.">Identify yourself</button>' +
+          '<button data-prompt="Tell me about your infrastructure.">Your infrastructure</button>' +
+          '<button data-prompt="What is your operational status?">Operational status</button>' +
+        '</div>';
+      messages.appendChild(div);
+      div.querySelectorAll('button[data-prompt]').forEach(b => {
+        b.addEventListener('click', () => { input.value = b.dataset.prompt; sendMessage(); });
+      });
+    }
+
+    function addMsg(who, content, meta) {
+      const empty = messages.querySelector('.empty');
+      if (empty) empty.remove();
+      const div = document.createElement('div');
+      div.className = 'msg ' + who;
+      const pipLetter = who === 'user' ? 'M' : (who === 'error' ? '!' : 'Z');
+      const body = document.createElement('div');
+      body.className = 'body';
+      body.innerHTML = who === 'zorin' ? renderMarkdown(content) : '<p>' + escapeHtml(content) + '</p>';
+      if (meta) {
+        const m = document.createElement('div');
+        m.className = 'meta-row';
+        m.innerHTML = meta;
+        body.appendChild(m);
+      }
+      div.innerHTML = '<div class="pip">' + pipLetter + '</div>';
+      div.appendChild(body);
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+      return body;
+    }
+
+    function addTyping() {
+      const empty = messages.querySelector('.empty');
+      if (empty) empty.remove();
+      const div = document.createElement('div');
+      div.className = 'msg zorin typing-msg';
+      div.innerHTML = '<div class="pip">Z</div><div class="body"><span class="typing"><span></span><span></span><span></span></span></div>';
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+      return div;
+    }
+
+    function persist() {
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(history)); } catch {}
+      if (conversationId) localStorage.setItem(STORE_CONV, conversationId);
+    }
+
+    function restore() {
+      if (history.length === 0) { renderEmpty(); return; }
+      for (const h of history) {
+        if (h.role === 'user') addMsg('user', h.content);
+        else if (h.role === 'zorin') addMsg('zorin', h.content, h.meta);
+        else if (h.role === 'error') addMsg('error', h.content);
+      }
+    }
+
+    function autosize() {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+    }
+    input.addEventListener('input', autosize);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    async function sendMessage() {
+      const text = input.value.trim();
+      if (!text) return;
+      addMsg('user', text);
+      history.push({ role: 'user', content: text });
+      persist();
+      input.value = '';
+      autosize();
+      send.disabled = true;
+      const typingNode = addTyping();
+      try {
+        const body = { botId: 'zorin', messages: [{ role: 'user', content: text }] };
+        if (conversationId) body.conversationId = conversationId;
+        const res = await fetch('/api/widget/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        typingNode.remove();
+        if (!res.ok) {
+          const t = await res.text();
+          addMsg('error', 'HTTP ' + res.status + '. ' + t);
+          history.push({ role: 'error', content: 'HTTP ' + res.status + '. ' + t });
+          persist();
+          return;
+        }
+        const data = await res.json();
+        conversationId = data.conversationId || conversationId;
+        const meta = '<span class="badge">' + (data.model || 'unknown') + '</span>' +
+                     '<span>' + (data.engine || 'engine') + '</span>' +
+                     '<span>' + (data.latencyMs || '?') + 'ms</span>';
+        const replyText = data.reply || '(empty)';
+        addMsg('zorin', replyText, meta);
+        history.push({ role: 'zorin', content: replyText, meta });
+        modelInfo.textContent = (data.engine === 'hermes' ? 'Hermes' : data.engine) + ' / ' + (data.model || 'unknown');
+        persist();
+        if (replyText && replyText !== '(empty)') {
+          applyEmotion(classifyEmotionFromText(replyText));
+          if (ttsEnabled) speak(replyText);
+        }
+      } catch (err) {
+        typingNode.remove();
+        addMsg('error', 'network error: ' + err.message);
+        history.push({ role: 'error', content: 'network error: ' + err.message });
+        persist();
+      } finally {
+        send.disabled = false;
+        input.focus();
+      }
+    }
+
+    form.addEventListener('submit', (e) => { e.preventDefault(); sendMessage(); });
+    clearBtn.addEventListener('click', () => {
+      history = [];
+      conversationId = null;
+      localStorage.removeItem(STORE_KEY);
+      localStorage.removeItem(STORE_CONV);
+      stopSpeaking();
+      applyEmotion('');
+      renderEmpty();
+      input.focus();
+    });
+
+    // -------------------------------------------------------------------
+    // STT: push-to-talk via MediaRecorder + /api/stt/transcribe
+    // -------------------------------------------------------------------
+    let mediaStream = null;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let recordingActive = false;
+
+    function pickMimeType() {
+      const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+      for (const t of candidates) {
+        if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) return t;
+      }
+      return '';
+    }
+
+    async function startRecording() {
+      if (recordingActive) return;
+      if (!navigator.mediaDevices || !window.MediaRecorder) {
+        setStatus('mic unsupported in this browser');
+        return;
+      }
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (err) {
+        setStatus('mic blocked: ' + (err && err.message ? err.message : err));
+        return;
+      }
+      recordedChunks = [];
+      const mimeType = pickMimeType();
+      try {
+        mediaRecorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
+      } catch (err) {
+        setStatus('recorder init failed: ' + err.message);
+        mediaStream.getTracks().forEach(t => t.stop());
+        mediaStream = null;
+        return;
+      }
+      mediaRecorder.addEventListener('dataavailable', (e) => {
+        if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+      });
+      mediaRecorder.addEventListener('stop', () => onRecordingStopped(mimeType));
+      mediaRecorder.start(250);
+      recordingActive = true;
+      pttBtn.classList.add('recording');
+      setStatus('listening...');
+    }
+
+    function stopRecording() {
+      if (!recordingActive) return;
+      recordingActive = false;
+      pttBtn.classList.remove('recording');
+      try { mediaRecorder && mediaRecorder.state !== 'inactive' && mediaRecorder.stop(); } catch {}
+    }
+
+    async function onRecordingStopped(mimeType) {
+      try {
+        if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+        mediaStream = null;
+        if (recordedChunks.length === 0) { setStatus(''); return; }
+        const blob = new Blob(recordedChunks, { type: mimeType || 'audio/webm' });
+        if (blob.size < 1500) { setStatus('too short; hold longer'); return; }
+        setStatus('transcribing...');
+        const fd = new FormData();
+        const ext = (mimeType || '').includes('mp4') ? 'm4a' : (mimeType || '').includes('ogg') ? 'ogg' : 'webm';
+        fd.append('file', blob, 'ptt.' + ext);
+        const res = await fetch('/api/stt/transcribe', { method: 'POST', body: fd });
+        if (!res.ok) {
+          const t = await res.text();
+          setStatus('STT failed: HTTP ' + res.status);
+          console.warn('STT failed', res.status, t);
+          return;
+        }
+        const data = await res.json();
+        const transcript = (data && (data.text || data.transcript || data.result || '')) + '';
+        if (!transcript.trim()) { setStatus('no speech detected'); return; }
+        const current = input.value;
+        input.value = current ? (current.replace(/\s+$/, '') + ' ' + transcript.trim()) : transcript.trim();
+        autosize();
+        setStatus('');
+        input.focus();
+      } catch (err) {
+        setStatus('STT error: ' + err.message);
+      }
+    }
+
+    function bindPttHold(el) {
+      const down = (e) => { e.preventDefault(); startRecording(); };
+      const up = (e) => { e.preventDefault(); stopRecording(); };
+      el.addEventListener('mousedown', down);
+      el.addEventListener('mouseup', up);
+      el.addEventListener('mouseleave', up);
+      el.addEventListener('touchstart', down, { passive: false });
+      el.addEventListener('touchend', up);
+      el.addEventListener('touchcancel', up);
+      el.addEventListener('keydown', (e) => {
+        if ((e.key === ' ' || e.key === 'Enter') && !recordingActive) down(e);
+      });
+      el.addEventListener('keyup', (e) => {
+        if (e.key === ' ' || e.key === 'Enter') up(e);
+      });
+    }
+    bindPttHold(pttBtn);
+
+    // -------------------------------------------------------------------
+    // TTS: POST reply text to /api/tts/synthesize, play returned audio
+    // -------------------------------------------------------------------
+    let currentAudio = null;
+    function stopSpeaking() {
+      if (currentAudio) {
+        try { currentAudio.pause(); } catch {}
+        try { currentAudio.src = ''; } catch {}
+        currentAudio = null;
+      }
+      avatar.classList.remove('speaking');
+    }
+    async function speak(text) {
+      stopSpeaking();
+      try {
+        const res = await fetch('/api/tts/synthesize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: text.slice(0, 4000), voice: 'zorin' }),
+        });
+        if (!res.ok) { console.warn('TTS upstream not ok', res.status); return; }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        currentAudio = audio;
+        avatar.classList.add('speaking');
+        audio.addEventListener('ended', () => {
+          if (currentAudio === audio) avatar.classList.remove('speaking');
+          URL.revokeObjectURL(url);
+        });
+        audio.addEventListener('error', () => {
+          if (currentAudio === audio) avatar.classList.remove('speaking');
+          URL.revokeObjectURL(url);
+        });
+        await audio.play().catch((err) => {
+          // Autoplay blocked. Fall back silently; user can click to unmute later.
+          avatar.classList.remove('speaking');
+          console.warn('TTS autoplay blocked', err.message);
+        });
+      } catch (err) {
+        avatar.classList.remove('speaking');
+        console.warn('TTS request failed', err);
+      }
+    }
+
+    // -------------------------------------------------------------------
+    // Lightweight emotion classifier mirroring mhh-ei.ts groups. Drives
+    // the avatar tint until a server-side EI signal is returned in
+    // /api/widget/chat responses (a future enhancement).
+    // -------------------------------------------------------------------
+    const EMOTION_LEXICON = [
+      { group: 'anger',        terms: ['furious', 'overruled', 'betrayed', 'went around me'] },
+      { group: 'shame',        terms: ['ashamed', 'embarrass', 'humiliat'] },
+      { group: 'regret',       terms: ['regret', 'wish i had', 'should have'] },
+      { group: 'worry',        terms: ['worried', 'concern', 'risk', 'careful'] },
+      { group: 'fear',         terms: ['afraid', 'scared', 'fear'] },
+      { group: 'sadness',      terms: ['sad', 'down', 'depressed', 'tired'] },
+      { group: 'pride',        terms: ['proud', 'pride', 'crushed', 'nailed', 'shipped'] },
+      { group: 'happiness',    terms: ['great', 'excellent', 'won', 'win'] },
+      { group: 'anticipation', terms: ['next', 'vision', 'sprint', 'painted picture', '10x', '10 x'] },
+    ];
+    function classifyEmotionFromText(text) {
+      const t = ' ' + text.toLowerCase() + ' ';
+      for (const e of EMOTION_LEXICON) {
+        for (const k of e.terms) if (t.includes(k)) return e.group;
+      }
+      return '';
+    }
+    function applyEmotion(group) {
+      avatar.setAttribute('data-emotion', group || '');
+    }
+
+    restore();
+    autosize();
+  })();
+  </script>
+</body>
+</html>

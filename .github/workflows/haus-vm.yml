@@ -1,0 +1,59 @@
+name: haus-vm
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "infra/haus-vm/**"
+      - ".github/workflows/haus-vm.yml"
+  push:
+    branches:
+      - main
+      - dev
+      - develop
+    paths:
+      - "infra/haus-vm/**"
+      - ".github/workflows/haus-vm.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  widget-bridge:
+    name: widget-bridge (typecheck, test)
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: infra/haus-vm/widget-bridge
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install (frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bunx tsc --noEmit
+
+      - name: Test
+        run: bun test
+
+  secret-scan:
+    name: Gitleaks
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: ""
+        with:
+          args: "detect --source=infra/haus-vm --redact --no-banner"

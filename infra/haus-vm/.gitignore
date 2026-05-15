@@ -1,0 +1,8 @@
+node_modules/
+dist/
+result
+result-*
+.pulumi/
+*.log
+.env
+.env.local

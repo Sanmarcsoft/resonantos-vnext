@@ -1,0 +1,117 @@
+.zorin-workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--surface-base, #0f0f10);
+  color: var(--text-primary, #eaeaee);
+}
+
+.zorin-workspace__header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--border-subtle, #2e2e34);
+  background: var(--surface-elevated, #131316);
+}
+
+.zorin-workspace__title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.zorin-workspace__avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #c0392b;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 16px;
+  flex: none;
+}
+
+.zorin-workspace__title-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.zorin-workspace__title-text h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.zorin-workspace__title-text p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-muted, #888892);
+}
+
+.zorin-workspace__actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+.zorin-workspace__action {
+  background: transparent;
+  border: 1px solid var(--border-subtle, #2e2e34);
+  color: var(--text-secondary, #c2c2c8);
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.zorin-workspace__action:hover {
+  background: var(--surface-overlay, #1c1c20);
+  border-color: var(--border-strong, #25252a);
+  color: var(--text-primary, #eaeaee);
+}
+
+.zorin-workspace__endpoint {
+  padding: 10px 22px;
+  background: var(--surface-elevated, #131316);
+  border-bottom: 1px solid var(--border-subtle, #2e2e34);
+  font-size: 12px;
+}
+
+.zorin-workspace__endpoint code {
+  background: var(--surface-overlay, #1c1c20);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.zorin-workspace__endpoint .muted-copy {
+  margin: 6px 0 0;
+}
+
+.zorin-workspace__frame-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: var(--surface-base, #0a0a0b);
+}
+
+.zorin-workspace__frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--surface-base, #0a0a0b);
+}
