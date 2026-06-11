@@ -1,4 +1,4 @@
-{ lib, pkgs, microvm, internalWidgetPort, hausHostforwards, widgetBridgeSrc, ... }:
+{ lib, pkgs, microvm, internalWidgetPort, internalMcpPort, hausHostforwards, widgetBridgeSrc, zorinMcpSrc, ... }:
 let
   # Internal path the widget-bridge runs from inside the VM. Sourced from
   # /nix/store, so the guest filesystem holds no mutable copy.
@@ -10,6 +10,17 @@ let
   widgetBridgeLauncher = pkgs.writeShellScript "widget-bridge-launch" ''
     set -euo pipefail
     exec ${pkgs.bun}/bin/bun ${widgetBridgeRoot}/src/server.ts
+  '';
+
+  # zorin-mcp: the MCP front the claude-peers bridge talks to (guest :3103,
+  # reached via nix's zorin-port-relay at 10.0.0.112:3113). RECONSTRUCTED
+  # 2026-06-11 from the gen-103 guest closure after a repo↔snapshot drift
+  # erased it from a rebuild and silenced Zorin (claude-peers-mcp#93).
+  # This file is the ONLY source of truth now — do not let the deployed
+  # snapshot drift again.
+  zorinMcpLauncher = pkgs.writeShellScript "zorin-mcp-launch" ''
+    set -euo pipefail
+    exec ${pkgs.bun}/bin/bun ${zorinMcpSrc}/src/server.ts
   '';
 in
 {
@@ -64,7 +75,7 @@ in
 
   # Allow the widget-bridge to receive traffic inside the VM. Hostfwd
   # delivers loopback-localized traffic to this port.
-  networking.firewall.allowedTCPPorts = [ internalWidgetPort ];
+  networking.firewall.allowedTCPPorts = [ internalWidgetPort internalMcpPort ];
 
   # Non-root execution principal for the bridge process.
   users.users.haus = {
@@ -107,6 +118,40 @@ in
         "ALLOWED_HOSTS=haus.matthewstevens.org,localhost,127.0.0.1,10.0.0.112"
       ];
       ExecStart = "${widgetBridgeLauncher}";
+      ProtectSystem = "strict";
+      ProtectHome = "tmpfs";
+      PrivateTmp = true;
+      NoNewPrivileges = true;
+      RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
+      RestrictNamespaces = true;
+      RestrictRealtime = true;
+      RestrictSUIDSGID = true;
+      MemoryDenyWriteExecute = true;
+      LockPersonality = true;
+      SystemCallArchitectures = "native";
+    };
+  };
+
+  # zorin-mcp service — reconstructed verbatim from the gen-103 guest unit
+  # (see launcher note above). Same hardening profile as widget-bridge.
+  systemd.services.zorin-mcp = {
+    description = "Zorin MCP front for claude-peers bridge";
+    wantedBy = [ "multi-user.target" ];
+    wants = [ "widget-bridge.service" ];
+    after = [ "network.target" "widget-bridge.service" ];
+    serviceConfig = {
+      User = "haus";
+      Group = "haus";
+      Restart = "on-failure";
+      RestartSec = "2s";
+      EnvironmentFile = "-/etc/haus-vm/bridge.env";
+      Environment = [
+        "MCP_PORT=${toString internalMcpPort}"
+        "HOST=0.0.0.0"
+        "NODE_ENV=production"
+        "WIDGET_URL=http://127.0.0.1:${toString internalWidgetPort}"
+      ];
+      ExecStart = "${zorinMcpLauncher}";
       ProtectSystem = "strict";
       ProtectHome = "tmpfs";
       PrivateTmp = true;

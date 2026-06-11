@@ -48,17 +48,29 @@
         rm -rf $out/node_modules $out/dist
       '';
 
+      # zorin-mcp source tree, filtered the same way. The MCP front for the
+      # claude-peers bridge; proxies `respond` calls into the widget-bridge.
+      zorinMcpSrcGen = pkgs: pkgs.runCommand "zorin-mcp-src" { } ''
+        mkdir -p $out
+        cp -r ${./zorin-mcp}/. $out/
+        rm -rf $out/node_modules $out/dist
+      '';
+
       # Internal port the widget-bridge binds inside the VM. Match the
       # openclaw-vm guest port (19100) so caddy's existing
       # /api/* upstream at 127.0.0.1:19101 keeps reaching the chat
       # service across the cutover. No caddy change required.
       internalWidgetPort = 19100;
 
+      # Internal port zorin-mcp binds inside the VM. Matches the reserved
+      # hostfwd (host 3103/3203 → guest 3103) declared below.
+      internalMcpPort = 3103;
+
       # Host port → VM port mapping. This MATCHES the openclaw-vm hostfwd
       # surface byte for byte, so haus-vm is a true drop-in replacement.
-      # Ports we do not implement yet (gateway 18789/18790, MCP 3103/3203)
-      # are still forwarded into the VM and will 502 the same way they do
-      # today, until services are bound inside the VM in a follow-up.
+      # Gateway ports (18789/18790) are still unimplemented and 502 until a
+      # service binds them in a follow-up. MCP 3103/3203 is live: zorin-mcp
+      # (2026-06-06) binds guest 3103 for the claude-peers bridge.
       hausHostforwards = [
         # SSH into the VM for ops, mirrors openclaw-vm:2223.
         { proto = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 2223;  guest.address = ""; guest.port = 22;    }
@@ -69,11 +81,10 @@
         # /api/* → 127.0.0.1:19101, which lands here as VM port 19100.
         { proto = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 19101; guest.address = ""; guest.port = internalWidgetPort; }
         # Zorin MCP. claude-peers' systemd zorin-port-relay terminates at
-        # 10.0.0.112:3113 and forwards into here as VM port 3103. The MCP
-        # service inside haus-vm is a follow-up; the hostfwd is reserved
-        # now so claude-peers does not have to change at cutover.
-        { proto = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 3103;  guest.address = ""; guest.port = 3103;  }
-        { proto = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 3203;  guest.address = ""; guest.port = 3103;  }
+        # 10.0.0.112:3113 and forwards into here as VM port 3103, served by
+        # the zorin-mcp systemd service (see microvm-config.nix).
+        { proto = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 3103;  guest.address = ""; guest.port = internalMcpPort; }
+        { proto = "tcp"; from = "host"; host.address = "127.0.0.1"; host.port = 3203;  guest.address = ""; guest.port = internalMcpPort; }
       ];
     in
     # Per-build-host outputs: the OCI image (kept for sovereign-registry path)
@@ -173,8 +184,9 @@
           # Fully-declarative VM. microvm.nix does not accept both
           # `flake` and `config` here; we supply the guest config inline.
           config = (import ./microvm-config.nix) {
-            inherit lib pkgs microvm internalWidgetPort hausHostforwards;
+            inherit lib pkgs microvm internalWidgetPort internalMcpPort hausHostforwards;
             widgetBridgeSrc = widgetBridgeSrcGen pkgs;
+            zorinMcpSrc = zorinMcpSrcGen pkgs;
           };
         };
       };
@@ -189,8 +201,9 @@
           ((import ./microvm-config.nix) {
             lib = nixpkgs.lib;
             pkgs = import nixpkgs { system = targetSystem; };
-            inherit microvm internalWidgetPort hausHostforwards;
+            inherit microvm internalWidgetPort internalMcpPort hausHostforwards;
             widgetBridgeSrc = widgetBridgeSrcGen (import nixpkgs { system = targetSystem; });
+            zorinMcpSrc = zorinMcpSrcGen (import nixpkgs { system = targetSystem; });
           })
         ];
       };
