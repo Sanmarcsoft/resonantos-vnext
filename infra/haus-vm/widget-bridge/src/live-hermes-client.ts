@@ -127,6 +127,7 @@ export class LiveHermesClient implements HermesClient {
   private readonly providerKey: string;
   private readonly model: string;
   private readonly timeoutMs: number;
+  private readonly maxTokens: number;
   private readonly systemPrompt: string;
   private readonly knownProfiles: Set<string>;
   private readonly fetcher: typeof fetch;
@@ -137,6 +138,10 @@ export class LiveHermesClient implements HermesClient {
     this.providerKey = opts.providerKey ?? process.env["HERMES_PROVIDER_KEY"] ?? "";
     this.model = opts.model ?? process.env["HERMES_MODEL"] ?? "gpt-4o-mini";
     this.timeoutMs = opts.timeoutMs ?? Number(process.env["HERMES_TIMEOUT_MS"] ?? 25000);
+    // Uncapped generations on a single-worker MLX queue are the difference
+    // between a 17s reply and a 60s timeout under persona-cascade contention
+    // (2026-06-11). Voice replies are 2-3 sentences; 400 tokens is generous.
+    this.maxTokens = Number(process.env["HERMES_MAX_TOKENS"] ?? 400);
     this.systemPrompt = opts.systemPrompt ?? ZORIN_SYSTEM_PROMPT;
     this.knownProfiles = new Set(opts.knownProfiles ?? ["zorin"]);
     this.fetcher = opts.fetcher ?? fetch;
@@ -231,7 +236,7 @@ export class LiveHermesClient implements HermesClient {
           "content-type": "application/json",
           authorization: `Bearer ${this.providerKey}`,
         },
-        body: JSON.stringify({ model: this.model, messages, stream: false }),
+        body: JSON.stringify({ model: this.model, messages, stream: false, max_tokens: this.maxTokens }),
         signal: ac.signal,
       });
     } catch (err) {
