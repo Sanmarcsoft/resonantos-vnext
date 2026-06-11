@@ -134,7 +134,16 @@ in
       PermitRootLogin = "no";
     };
   };
-  # The ops principal inside the VM, key-only.
+  # The ops principal inside the VM, key-only. Provisioned 2026-06-11
+  # (claude-peers-mcp#93): the previously-empty key list meant nobody could
+  # shell in to diagnose the Zorin provider timeouts — every probe bounced
+  # off the hull while the widget 504'd.
+  users.users.ops = {
+    isNormalUser = true;
+    openssh.authorizedKeys.keys = [
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHEmZURnPm1n6rW26/YRgm36xapFb9Xrtk/5JZQqXFlI code-server@newmini"
+    ];
+  };
   users.users.haus.openssh.authorizedKeys.keys = [ ];
 
   # Inert system: no x11, no docs, no man pages.
